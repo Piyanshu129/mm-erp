@@ -1,5 +1,14 @@
 # Deploying MM ERP for free
 
+**Live URLs:**
+- App (share this one): https://mm-erp-nine.vercel.app
+- Backend tunnel: https://les-unhesitative-blandishingly.ngrok-free.dev
+- Admin login: `admin@mm.com` / `admin123`
+
+Vercel also generates a git-branch URL (`mm-erp-git-master-...vercel.app`) and a unique URL per
+deployment (`mm-erp-<hash>-...vercel.app`) — the per-deployment ones are protected by a Vercel login
+wall by default and are not meant to be shared; always use the production URL above.
+
 **Chosen architecture:** PostgreSQL and the backend stay fully local on this machine — nothing about
 the database moved anywhere. Only the frontend is hosted on the web (Vercel, free), reaching the
 local backend through a free ngrok tunnel.
@@ -45,16 +54,19 @@ fetch with the bypass header, so end users never see that page.
 3. **Root Directory**: `frontend` (Vercel auto-detects Next.js).
 4. Environment variable: `NEXT_PUBLIC_API_URL` =
    `https://les-unhesitative-blandishingly.ngrok-free.dev/api`
-5. Deploy. Copy the URL Vercel gives you (looks like `https://mm-erp.vercel.app`).
+5. Deploy. The production URL is https://mm-erp-nine.vercel.app.
 
 ## 3. Close the loop: update CORS
 
-Edit `backend/.env` and set:
+`backend/.env`'s `CORS_ORIGIN` is comma-separated and already includes the production URL:
 ```
-CORS_ORIGIN="https://<your-actual-vercel-url>"
+CORS_ORIGIN="http://localhost:3000,https://mm-erp-git-master-piyanshu-sainis-projects.vercel.app,https://mm-erp-nine.vercel.app"
 ```
-(no trailing slash). Then restart the backend window (or re-run `scripts/start-app.ps1`) for it to
-take effect.
+If Vercel ever gives you a different production domain, add it to this list (comma-separated, no
+spaces needed) and restart the backend window for it to take effect. Restarting matters: an
+already-running `node dist/server.js` process has last-loaded `.env` values baked into its memory —
+editing `.env` alone does nothing until that process actually restarts (this bit us once already;
+always confirm the *actual* PID bound to port 4000 was killed, not just a window closed).
 
 ## 4. Verify
 
