@@ -1,0 +1,662 @@
+<title>Motors Mitra Manual</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+
+  :root {
+    --bg: #EDEEEA;
+    --surface: #FFFFFF;
+    --surface-2: #F5F5F2;
+    --ink: #1C2422;
+    --ink-soft: #4B5450;
+    --ink-faint: #7C847F;
+    --line: #DADCD5;
+    --line-soft: #E6E7E1;
+    --accent: #C9531B;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #FBE8DC;
+    --steel: #2B4C63;
+    --steel-soft: #E3EBEF;
+    --good: #3E7D52;
+    --good-soft: #E3EFE5;
+    --warn: #B4791B;
+    --warn-soft: #F5E9D4;
+    --bad: #B23A34;
+    --bad-soft: #F6E1DF;
+    --shadow: 0 1px 2px rgba(28,36,34,0.06), 0 8px 24px -12px rgba(28,36,34,0.18);
+    --display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --body: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171A18;
+      --surface: #1F2321;
+      --surface-2: #262A27;
+      --ink: #ECEEEA;
+      --ink-soft: #B7BEB8;
+      --ink-faint: #7E8781;
+      --line: #343A36;
+      --line-soft: #2B302D;
+      --accent: #E37036;
+      --accent-ink: #17110C;
+      --accent-soft: #3A2A1E;
+      --steel: #7FA6C0;
+      --steel-soft: #202B32;
+      --good: #6FB884;
+      --good-soft: #1E2E22;
+      --warn: #D9A44E;
+      --warn-soft: #332A18;
+      --bad: #E0736C;
+      --bad-soft: #362221;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171A18;
+    --surface: #1F2321;
+    --surface-2: #262A27;
+    --ink: #ECEEEA;
+    --ink-soft: #B7BEB8;
+    --ink-faint: #7E8781;
+    --line: #343A36;
+    --line-soft: #2B302D;
+    --accent: #E37036;
+    --accent-ink: #17110C;
+    --accent-soft: #3A2A1E;
+    --steel: #7FA6C0;
+    --steel-soft: #202B32;
+    --good: #6FB884;
+    --good-soft: #1E2E22;
+    --warn: #D9A44E;
+    --warn-soft: #332A18;
+    --bad: #E0736C;
+    --bad-soft: #362221;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    padding-inline: 0;
+    min-height: 100vh;
+  }
+  h1, h2, h3, .display {
+    font-family: var(--display);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  code, .mono { font-family: var(--mono); }
+  a { color: var(--steel); }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 260px minmax(0,1fr);
+    max-width: 1180px;
+    margin-inline: auto;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Sidebar ---- */
+  .toc {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: 28px 20px 40px;
+    border-right: 1px solid var(--line);
+  }
+  @media (max-width: 860px) {
+    .toc { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--line); padding: 18px 20px; }
+  }
+  .toc-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .toc-brand .mark {
+    width: 34px; height: 34px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .toc-brand .name { font-family: var(--display); font-size: 1.15rem; font-weight: 800; letter-spacing: 0.01em; line-height: 1; }
+  .toc-brand .sub { font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+
+  .toc nav { display: none; }
+  .toc[open] nav, .toc-static nav { display: block; }
+  .toc summary { cursor: pointer; font-family: var(--display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.95rem; padding: 4px 0; }
+  @media (min-width: 861px) {
+    .toc summary { display: none; }
+    .toc nav { display: block !important; }
+  }
+
+  .toc-group { margin-top: 18px; }
+  .toc-group-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .toc a.tlink {
+    display: block;
+    font-size: 0.87rem;
+    color: var(--ink-soft);
+    text-decoration: none;
+    padding: 5px 8px;
+    border-radius: 5px;
+    margin-inline: -8px;
+  }
+  .toc a.tlink:hover { background: var(--surface-2); color: var(--ink); }
+
+  /* ---- Main content ---- */
+  main { padding: 40px clamp(20px, 4vw, 56px) 100px; min-width: 0; }
+
+  .cover {
+    padding-block: 8px 36px;
+    border-bottom: 3px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .cover .kicker {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .cover h1 { font-size: clamp(2.1rem, 5vw, 3.2rem); line-height: 0.98; margin: 0 0 14px; }
+  .cover p.lede { max-width: 62ch; color: var(--ink-soft); font-size: 1.05rem; line-height: 1.6; margin: 0; }
+  .cover .meta {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    margin-top: 20px; font-size: 0.82rem; color: var(--ink-faint);
+  }
+  .cover .meta b { color: var(--ink-soft); font-weight: 600; }
+
+  section.chapter { margin-bottom: 56px; scroll-margin-top: 20px; }
+  .chapter-head {
+    display: flex; align-items: baseline; gap: 14px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+  }
+  .chapter-num { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); font-weight: 600; flex-shrink: 0; }
+  .chapter-head h2 { font-size: 1.5rem; margin: 0; }
+  .chapter-icon { width: 26px; height: 26px; color: var(--accent); flex-shrink: 0; }
+  .chapter-role {
+    margin-left: auto;
+    font-family: var(--body);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--steel);
+    background: var(--steel-soft);
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .chapter-intro { color: var(--ink-soft); max-width: 68ch; line-height: 1.65; margin: 14px 0 22px; font-size: 0.98rem; }
+  .chapter-intro b { color: var(--ink); }
+
+  h3.feature { font-size: 1.02rem; text-transform: none; letter-spacing: 0; font-weight: 700; margin: 26px 0 8px; display: flex; align-items: center; gap: 8px; }
+  h3.feature::before { content: ""; width: 4px; height: 16px; background: var(--accent); border-radius: 2px; display: inline-block; }
+
+  p, li { line-height: 1.65; color: var(--ink-soft); font-size: 0.96rem; max-width: 68ch; }
+  strong { color: var(--ink); }
+
+  ol.steps { list-style: none; padding: 0; margin: 12px 0; counter-reset: step; max-width: 68ch; }
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 38px;
+    margin-bottom: 12px;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 26px; height: 26px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: var(--mono); font-weight: 600; font-size: 0.8rem;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+  }
+
+  ul.plain { list-style: none; padding: 0; margin: 10px 0; }
+  ul.plain li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  ul.plain li::before { content: "—"; position: absolute; left: 0; color: var(--ink-faint); }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 16px 0;
+    max-width: 68ch;
+    box-shadow: var(--shadow);
+  }
+  .callout.good { border-left-color: var(--good); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout p { margin: 0; font-size: 0.9rem; }
+  .callout .label { font-family: var(--display); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 5px; display: block; }
+  .callout.good .label { color: var(--good); }
+  .callout.warn .label { color: var(--warn); }
+
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+  .mini-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .mini-card .t { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+  .mini-card .d { font-size: 0.84rem; color: var(--ink-soft); line-height: 1.5; }
+
+  table.spec { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.88rem; }
+  table.spec th, table.spec td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  table.spec th { font-family: var(--display); font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.72rem; color: var(--ink-faint); border-bottom: 2px solid var(--ink); }
+  table.spec td.code { font-family: var(--mono); font-size: 0.82rem; color: var(--steel); white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 0.76rem; font-weight: 600; }
+  .pill.gray { background: var(--surface-2); color: var(--ink-soft); }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.steel { background: var(--steel-soft); color: var(--steel); }
+  .pill.accent { background: var(--accent-soft); color: var(--accent); }
+
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 18px 0; padding: 16px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .flow .node {
+    font-family: var(--mono); font-size: 0.78rem; font-weight: 600;
+    background: var(--surface-2); border: 1px solid var(--line);
+    padding: 6px 11px; border-radius: 6px; white-space: nowrap;
+  }
+  .flow .arrow { color: var(--ink-faint); font-size: 0.9rem; }
+
+  footer.end {
+    margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 0.8rem; color: var(--ink-faint);
+  }
+
+  ::selection { background: var(--accent-soft); }
+
+  @media print {
+    .toc { display: none; }
+    .shell { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="shell">
+  <aside class="toc" id="tocBox">
+    <div class="toc-brand">
+      <div class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      </div>
+      <div>
+        <div class="name">MOTORS MITRA</div>
+        <div class="sub">System Manual</div>
+      </div>
+    </div>
+    <details class="toc-mobile" open id="tocDetails">
+      <summary>Contents</summary>
+      <nav>
+        <div class="toc-group">
+          <div class="toc-group-label">Start Here</div>
+          <a class="tlink" href="#signing-in">Signing In</a>
+          <a class="tlink" href="#dashboard">The Dashboard</a>
+        </div>
+        <div class="toc-group">
+          <div class="toc-group-label">Daily Work</div>
+          <a class="tlink" href="#customers-vehicles">Customers &amp; Vehicles</a>
+          <a class="tlink" href="#job-cards">Job Cards</a>
+          <a class="tlink" href="#invoices">Invoices</a>
+          <a class="tlink" href="#service-history">Service History</a>
+        </div>
+        <div class="toc-group">
+          <div class="toc-group-label">Store &amp; Purchasing</div>
+          <a class="tlink" href="#items">Items &amp; Suppliers</a>
+          <a class="tlink" href="#purchases">Purchases</a>
+        </div>
+        <div class="toc-group">
+          <div class="toc-group-label">Management</div>
+          <a class="tlink" href="#reports">Reports</a>
+          <a class="tlink" href="#users">Users &amp; Roles</a>
+          <a class="tlink" href="#settings">Backup &amp; Export</a>
+        </div>
+        <div class="toc-group">
+          <div class="toc-group-label">Reference</div>
+          <a class="tlink" href="#glossary">Glossary</a>
+        </div>
+      </nav>
+    </details>
+  </aside>
+
+  <main>
+    <div class="cover">
+      <div class="kicker">Owner &amp; Staff Handbook</div>
+      <h1>Running the workshop<br>on the system</h1>
+      <p class="lede">A plain-language walkthrough of every screen in the Motors Mitra system — what it's for, and how to use it. No computer background needed.</p>
+      <div class="meta">
+        <span><b>Multibrand Car Workshop</b></span>
+        <span>For Owners, Admins &amp; Store Staff</span>
+        <span>v1.0</span>
+      </div>
+    </div>
+
+    <!-- SIGNING IN -->
+    <section class="chapter" id="signing-in">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span class="chapter-num">01</span>
+        <h2>Signing In</h2>
+      </div>
+      <p class="chapter-intro">Everyone who uses the system has their own login. This keeps a record of who did what — useful if a mistake ever needs to be traced and fixed.</p>
+
+      <ol class="steps">
+        <li>Open the system's web address in any browser — on a computer, tablet, or phone.</li>
+        <li>Enter your <strong>email</strong> and <strong>password</strong>. Tap the eye icon in the password box if you want to check what you typed before submitting.</li>
+        <li>Press <strong>Sign in</strong>. You'll land on the Dashboard.</li>
+      </ol>
+
+      <div class="callout warn">
+        <span class="label">If sign-in fails</span>
+        <p>A wrong email or password shows "Invalid email or password." A message about not reaching the server means the internet connection or the system itself is down — try again in a minute, or contact your admin.</p>
+      </div>
+
+      <p>You don't need to remember to log out — closing the browser is fine. On a shared computer, though, it's good practice to sign out using the icon at the bottom of the sidebar menu.</p>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section class="chapter" id="dashboard">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span class="chapter-num">02</span>
+        <h2>The Dashboard</h2>
+      </div>
+      <p class="chapter-intro">The first screen after signing in. It answers "what's happening right now" without opening anything else.</p>
+
+      <div class="grid-cards">
+        <div class="mini-card"><div class="t">Today's Vehicles</div><div class="d">How many different vehicles had a job card opened today.</div></div>
+        <div class="mini-card"><div class="t">Open Job Cards</div><div class="d">Every job in the workshop that isn't finished, billed, or cancelled.</div></div>
+        <div class="mini-card"><div class="t">Awaiting Invoice</div><div class="d">Work marked Completed but not yet billed — nothing should sit here for long.</div></div>
+        <div class="mini-card"><div class="t">Waiting for Parts</div><div class="d">Jobs stuck because a part isn't available yet.</div></div>
+        <div class="mini-card"><div class="t">Today's Sales</div><div class="d">Total value of invoices raised today.</div></div>
+        <div class="mini-card"><div class="t">Today's Purchases</div><div class="d">Total value of stock bought in today.</div></div>
+        <div class="mini-card"><div class="t">Low Stock</div><div class="d">Items at or below the minimum quantity you set for them.</div></div>
+        <div class="mini-card"><div class="t">Out of Stock</div><div class="d">Items at zero — flagged in red.</div></div>
+      </div>
+      <p>Tap any card to jump straight to the relevant list, already filtered. Below the cards, the <strong>Quick Actions</strong> row gets you into a new Job Card or Purchase in one tap.</p>
+    </section>
+
+    <!-- CUSTOMERS & VEHICLES -->
+    <section class="chapter" id="customers-vehicles">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="chapter-num">03</span>
+        <h2>Customers &amp; Vehicles</h2>
+        <span class="chapter-role">Admin + Store</span>
+      </div>
+      <p class="chapter-intro">Every job starts here. A <strong>customer</strong> can own more than one vehicle — add the person once, then add each car underneath them.</p>
+
+      <h3 class="feature">Adding a new customer</h3>
+      <ol class="steps">
+        <li>Open <strong>Customers</strong> in the sidebar, then <strong>New customer</strong>.</li>
+        <li>Enter their name and mobile number (required), and address if known.</li>
+        <li>Save. The system won't let you save a second customer with the same mobile number — it'll tell you if one already exists, so you don't accidentally create a duplicate.</li>
+      </ol>
+
+      <h3 class="feature">Adding their vehicle</h3>
+      <ol class="steps">
+        <li>Open that customer's page, then <strong>Add vehicle</strong> under the Vehicles section.</li>
+        <li>Enter the registration number, make, and model. Current KM is optional but useful.</li>
+        <li>The registration number can be typed in any style — <span class="mono">hr06 ab 1234</span> or <span class="mono">HR06AB1234</span> are treated as the exact same vehicle, so there's no need to worry about spacing or capitals.</li>
+      </ol>
+
+      <div class="callout">
+        <span class="label">Finding a vehicle fast</span>
+        <p>Use the <strong>Vehicles</strong> page in the sidebar to search any vehicle on file by registration number, make, or model — you don't need to know which customer it belongs to first.</p>
+      </div>
+    </section>
+
+    <!-- JOB CARDS -->
+    <section class="chapter" id="job-cards">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z"/><rect x="5" y="6" width="14" height="15" rx="2"/><path d="M9 12h6M9 16h4"/></svg>
+        <span class="chapter-num">04</span>
+        <h2>Job Cards</h2>
+        <span class="chapter-role">Admin + Store</span>
+      </div>
+      <p class="chapter-intro">The Job Card is the center of the whole system — it follows one vehicle's visit from drop-off to bill. Everything else (parts used, labour charged, the final invoice) hangs off this one record.</p>
+
+      <h3 class="feature">Opening a job card</h3>
+      <ol class="steps">
+        <li>From <strong>Job Cards</strong> → <strong>New job card</strong>, search the vehicle by registration number. (If the vehicle isn't on file yet, add it under Customers first.)</li>
+        <li>Fill in current KM, the customer's complaint, and the work required.</li>
+        <li>Save — the system gives it a permanent number like <span class="mono">JC-000014</span> automatically. You never type this yourself.</li>
+      </ol>
+
+      <h3 class="feature">Vehicle inspection photos</h3>
+      <p>On the job card, tap any of the labelled buttons — Front, Rear, Left, Right, Interior, Dashboard/KM, Engine Bay, Damage — to photograph that part of the vehicle straight from your phone's camera. There's also a button for a 360° walk-around video. These stay attached to the job card permanently, useful if a customer later disputes existing damage.</p>
+
+      <h3 class="feature">Adding parts</h3>
+      <ol class="steps">
+        <li>In the Parts section, search for the item by its code or name.</li>
+        <li>Select it, enter the quantity used, and add it. The price is filled in automatically from the item's current selling price — you don't set it by hand.</li>
+        <li>Stock is reduced immediately.</li>
+      </ol>
+      <div class="callout warn">
+        <span class="label">If there isn't enough stock</span>
+        <p>The system refuses the request and tells you exactly how many are actually available. Stock can never go negative — even if two people try to use the last one at the same moment, only one of them will succeed.</p>
+      </div>
+      <p>Added the wrong part or quantity by mistake? Remove it with the bin icon — the stock is put straight back.</p>
+
+      <h3 class="feature">Adding labour</h3>
+      <p>Enter a description (e.g. "General Service"), the technician's name if you want it on record, quantity, and rate. The amount is calculated for you.</p>
+
+      <h3 class="feature">Job status</h3>
+      <p>The dropdown at the top of the job card tracks where the vehicle stands:</p>
+      <div class="tablewrap">
+        <table class="spec">
+          <tr><th>Status</th><th>Meaning</th></tr>
+          <tr><td><span class="pill gray">Draft</span></td><td>Just created, work hasn't started.</td></tr>
+          <tr><td><span class="pill steel">Vehicle Received</span></td><td>Vehicle is physically at the workshop.</td></tr>
+          <tr><td><span class="pill steel">Work Started</span> / <span class="pill steel">In Progress</span></td><td>Being worked on.</td></tr>
+          <tr><td><span class="pill warn">Waiting for Parts</span></td><td>Paused — a part is on order.</td></tr>
+          <tr><td><span class="pill good">Completed</span></td><td>Work is done. This unlocks the invoice button.</td></tr>
+          <tr><td><span class="pill accent">Invoiced</span></td><td>Billed. Parts and labour are now locked — see below.</td></tr>
+          <tr><td><span class="pill gray">Closed</span></td><td>Fully wrapped up after invoicing.</td></tr>
+          <tr><td><span class="pill bad">Cancelled</span></td><td>Job was called off.</td></tr>
+        </table>
+      </div>
+      <div class="callout">
+        <span class="label">Why can't I edit an invoiced job card?</span>
+        <p>Once a job card is billed, its parts and labour are frozen on purpose — so the invoice a customer was handed always matches what's on record, permanently. If something genuinely needs correcting after billing, that's an admin conversation, not a quick edit.</p>
+      </div>
+    </section>
+
+    <!-- INVOICES -->
+    <section class="chapter" id="invoices">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v17H6z"/><path d="M15 2v3h3M9 13h6M9 17h6M9 9h3"/></svg>
+        <span class="chapter-num">05</span>
+        <h2>Invoices</h2>
+      </div>
+      <p class="chapter-intro">The bill the customer takes home — generated straight from a finished job card, never typed up separately.</p>
+
+      <div class="flow">
+        <span class="node">Job card: Completed</span><span class="arrow">→</span>
+        <span class="node">Open the job card</span><span class="arrow">→</span>
+        <span class="node">Enter discount (optional)</span><span class="arrow">→</span>
+        <span class="node">Generate invoice</span>
+      </div>
+
+      <p>The invoice pulls in the parts, labour, and totals directly — there's nothing to re-type, so it can never disagree with the job card it came from. Once generated, open it any time from the <strong>Invoices</strong> page and use <strong>Print / Save as PDF</strong>, which uses your browser's own print dialog to hand the customer a paper copy or a PDF.</p>
+    </section>
+
+    <!-- SERVICE HISTORY -->
+    <section class="chapter" id="service-history">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13a9 9 0 1 0 2.13-6.36L3 8"/><path d="M12 7v5l4 2"/></svg>
+        <span class="chapter-num">06</span>
+        <h2>Service History</h2>
+      </div>
+      <p class="chapter-intro">Answers "what has this vehicle had done before?" — useful when a repeat customer calls or walks in.</p>
+      <p>Search by <strong>registration number</strong>, <strong>customer mobile</strong>, or <strong>customer name</strong> — whichever you have on hand. Every past job card for that vehicle appears with its date, KM, complaint, and final amount, linking straight through to the full job card or invoice.</p>
+    </section>
+
+    <!-- ITEMS -->
+    <section class="chapter" id="items">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+        <span class="chapter-num">07</span>
+        <h2>Items &amp; Suppliers</h2>
+        <span class="chapter-role">Admin + Store</span>
+      </div>
+      <p class="chapter-intro">Every spare part or consumable the workshop stocks lives here, along with the vendors you buy them from.</p>
+
+      <h3 class="feature">Adding an item</h3>
+      <ol class="steps">
+        <li>From <strong>Items</strong> → <strong>New item</strong>, fill in name, category, unit of measure (PCS, LTR, SET…), pricing, and minimum stock level.</li>
+        <li>A photo is optional but recommended — it helps staff confirm they've picked the right part.</li>
+        <li>Save. An <strong>Item Code</strong> like <span class="mono">ITM-000042</span> is assigned automatically — this never changes and is never typed by hand.</li>
+      </ol>
+      <p>Each item's page shows a full <strong>stock history</strong>: every purchase that brought stock in and every job card that took stock out, in order.</p>
+
+      <h3 class="feature">Suppliers</h3>
+      <p>A simple list of who you buy from — name, contact, mobile. Add one before recording your first purchase from them.</p>
+    </section>
+
+    <!-- PURCHASES -->
+    <section class="chapter" id="purchases">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 2-1.58l1.65-7.42H5.12"/></svg>
+        <span class="chapter-num">08</span>
+        <h2>Purchases</h2>
+        <span class="chapter-role">Admin + Store</span>
+      </div>
+      <p class="chapter-intro">Recording stock coming into the workshop — from a brand-new part to restocking one you already carry.</p>
+
+      <ol class="steps">
+        <li>From <strong>Purchases</strong> → <strong>New purchase</strong>, pick the supplier.</li>
+        <li>Choose <strong>Existing item</strong> and search for it, or <strong>New item</strong> to register something you've never stocked before — right there in the same form.</li>
+        <li>Enter quantity and cost. Save — stock goes up immediately, and every purchase is given a running <strong>Serial No.</strong> (1, 2, 3…) that's permanent and never re-used.</li>
+      </ol>
+
+      <div class="callout good">
+        <span class="label">Worked example</span>
+        <p>Buy 5 oil filters → Serial No. 1, stock becomes 5. Buy 10 more later → Serial No. 2, stock becomes 15. One serial number per purchase, no matter the quantity.</p>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section class="chapter" id="reports">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+        <span class="chapter-num">09</span>
+        <h2>Reports</h2>
+        <span class="chapter-role">Admin + Store</span>
+      </div>
+      <p class="chapter-intro">Five tabs, each answering a different business question over a date range you choose.</p>
+      <div class="grid-cards">
+        <div class="mini-card"><div class="t">Sales</div><div class="d">Invoice totals by day.</div></div>
+        <div class="mini-card"><div class="t">Purchases</div><div class="d">Spending by day, and by supplier.</div></div>
+        <div class="mini-card"><div class="t">Inventory</div><div class="d">Every item's stock and its total value right now.</div></div>
+        <div class="mini-card"><div class="t">Workshop</div><div class="d">How many job cards fall into each status.</div></div>
+        <div class="mini-card"><div class="t">Customers</div><div class="d">New customers in range, and how many are repeat visitors.</div></div>
+      </div>
+      <p>Any table can be pulled out with <strong>Export CSV</strong>, which opens straight in Excel.</p>
+    </section>
+
+    <!-- USERS -->
+    <section class="chapter" id="users">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+        <span class="chapter-num">10</span>
+        <h2>Users &amp; Roles</h2>
+        <span class="chapter-role">Admin only</span>
+      </div>
+      <p class="chapter-intro">Two kinds of login exist today:</p>
+      <div class="tablewrap">
+        <table class="spec">
+          <tr><th>Role</th><th>Can do</th></tr>
+          <tr><td><span class="pill accent">Admin</span></td><td>Everything — including creating staff logins, and Settings.</td></tr>
+          <tr><td><span class="pill steel">Store User</span></td><td>Customers, vehicles, job cards, items, purchases, invoices, reports — day-to-day work.</td></tr>
+        </table>
+      </div>
+      <p>From the <strong>Users</strong> page, an admin creates a login for each staff member (their own email and password) and can disable one instantly if someone leaves — no need to delete their history, just switch them off.</p>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="chapter" id="settings">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+        <span class="chapter-num">11</span>
+        <h2>Backup &amp; Export</h2>
+        <span class="chapter-role">Admin only</span>
+      </div>
+      <p class="chapter-intro">Two different safety nets, both under <strong>Settings</strong>.</p>
+
+      <h3 class="feature">Data Backup</h3>
+      <p>One click downloads a complete copy of every business record on file — customers, vehicles, items, purchases, job cards, invoices, everything. Keep a downloaded copy somewhere other than the workshop computer, updated every so often.</p>
+
+      <h3 class="feature">Excel Export</h3>
+      <p>A second, parallel copy of the data that updates itself roughly every minute, organised into tabs — one per Customers, Vehicles, Items, Purchases, Job Cards, Invoices, and more — so anyone comfortable with Excel can browse or analyse it without touching the live system.</p>
+    </section>
+
+    <!-- GLOSSARY -->
+    <section class="chapter" id="glossary">
+      <div class="chapter-head">
+        <svg class="chapter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+        <span class="chapter-num">12</span>
+        <h2>Glossary</h2>
+      </div>
+      <div class="tablewrap">
+        <table class="spec">
+          <tr><th>Term</th><th>What it means</th></tr>
+          <tr><td class="code">JC-000014</td><td><strong>Job Card Number.</strong> Assigned automatically the moment a job card is created. Never typed, never repeated.</td></tr>
+          <tr><td class="code">ITM-000042</td><td><strong>Item Code.</strong> Assigned automatically the first time a part is added to inventory.</td></tr>
+          <tr><td class="code">Serial No. 7</td><td>Identifies one <strong>purchase</strong> transaction — not one physical unit. Buying 20 filters at once is still a single serial number.</td></tr>
+          <tr><td class="code">INV-000009</td><td><strong>Invoice Number.</strong> Assigned automatically when an invoice is generated from a completed job card.</td></tr>
+          <tr><td>UOM</td><td>Unit of Measure — how an item is counted: PCS (pieces), LTR (litres), SET, etc.</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <footer class="end">
+      Motors Mitra — Multibrand Car Workshop. This manual reflects the system as configured for daily workshop use.
+    </footer>
+  </main>
+</div>
+
+<script>
+  // Desktop keeps the sidebar open permanently; only the mobile <details> needs the toggle to persist per view.
+  (function () {
+    var mq = window.matchMedia('(min-width: 861px)');
+    var details = document.getElementById('tocDetails');
+    function sync() { if (mq.matches) details.open = true; }
+    sync();
+    mq.addEventListener('change', sync);
+  })();
+</script>
