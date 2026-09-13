@@ -1,87 +1,80 @@
 # Deploying MM ERP for free
 
-Stack: **Vercel** (frontend) + **Render** (backend) + **Neon** (Postgres) + **Cloudflare R2** (file storage).
-All four have real free tiers (no trial expiry) and deploy by connecting this GitHub repo.
+**Chosen architecture:** PostgreSQL and the backend stay fully local on this machine — nothing about
+the database moved anywhere. Only the frontend is hosted on the web (Vercel, free), reaching the
+local backend through a free ngrok tunnel.
 
-One tradeoff: Render's free web service sleeps after ~15 minutes idle. The first request after
-that takes ~30-50 seconds to wake up; everything after is normal speed.
+**The tradeoff this implies:** the site is only reachable while this PC is on, Postgres is running,
+and the backend + tunnel processes (started via `scripts/start-app.ps1`) are running. If this
+machine sleeps or shuts down, the site goes down for everyone using the link, including whoever
+you've sent it to.
 
 Repo: https://github.com/Piyanshu129/mm-erp
 
-## 1. Database — Neon
+## What's already set up
 
-1. Sign up at https://neon.tech (free, no card required).
-2. Create a project (any name/region).
-3. Copy the connection string it gives you (starts `postgresql://...`) — this is `DATABASE_URL`.
+- **ngrok**: installed, authenticated, and a free static domain reserved:
+  `https://les-unhesitative-blandishingly.ngrok-free.dev`. This URL is permanent — it doesn't change
+  when the tunnel restarts.
+- **`scripts/start-app.ps1`**: run this to go live. It builds the backend, starts it in production
+  mode (needed so the cross-site refresh cookie works — Vercel and ngrok are different domains from
+  the browser's perspective), and starts the ngrok tunnel — backend and tunnel each open in their
+  own PowerShell window so you can see their logs / stop them individually.
+- **AuthedImage/AuthedVideo**: item photos and job card inspection media fetch through the tunnel
+  with the header ngrok requires to skip its free-tier warning page (plain `<img>`/`<video>` tags
+  can't send custom headers, so this was a real blocker that's now handled).
 
-## 2. File storage — Cloudflare R2
-
-1. Sign up at https://dash.cloudflare.com (free).
-2. Go to **R2 Object Storage** → **Create bucket**. Name it e.g. `mm-erp-uploads`.
-3. In the bucket's **Settings** tab, enable **Public Access** (use the `r2.dev` subdomain it gives
-   you — that's `R2_PUBLIC_URL`, looks like `https://pub-xxxxxxxx.r2.dev`).
-4. Go to **R2 → Manage API Tokens → Create API Token**. Give it read+write access to this bucket.
-   It gives you an **Access Key ID** and **Secret Access Key** — save both.
-5. Your **Account ID** is shown on the main Cloudflare dashboard sidebar (R2 → Overview).
-
-You now have: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`.
-
-## 3. Apply migrations + seed the admin user (run once, from your own machine)
+## 1. Go live locally
 
 ```
-cd backend
-DATABASE_URL="<neon-connection-string>" npx prisma migrate deploy
-DATABASE_URL="<neon-connection-string>" ADMIN_EMAIL="admin@motorsmitra.local" ADMIN_PASSWORD="<a-real-password>" npx ts-node prisma/seed.ts
+powershell -ExecutionPolicy Bypass -File scripts\start-app.ps1
 ```
 
-(On PowerShell, set each var with `$env:DATABASE_URL="..."` on its own line first instead of prefixing the command.)
+This starts Postgres (if not already running), builds and starts the backend in production mode,
+and starts the ngrok tunnel. Leave both opened windows running.
 
-## 4. Backend — Render
+Verify: open https://les-unhesitative-blandishingly.ngrok-free.dev/api/health in a browser — you'll
+see ngrok's warning page once (click "Visit Site"), then `{"status":"ok"}`. That one-time click only
+affects direct visits to the raw backend URL — the actual app (once on Vercel) talks to it via
+fetch with the bypass header, so end users never see that page.
 
-1. Sign up at https://render.com (free, GitHub sign-in works).
-2. **New → Web Service** → connect the `mm-erp` GitHub repo.
-3. Settings:
-   - **Root Directory**: `backend`
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
-   - **Instance Type**: Free
-4. Add environment variables (Render's dashboard, one per row):
-   - `DATABASE_URL` — the Neon connection string
-   - `NODE_ENV` — `production`
-   - `CORS_ORIGIN` — leave as `http://localhost:3000` for now; you'll update this after step 5
-   - (Don't set `PORT` — Render injects its own automatically and the app already reads `process.env.PORT`)
-   - `JWT_ACCESS_SECRET` — a long random string (not the dev one in `.env`)
-   - `JWT_ACCESS_EXPIRES_IN` — `15m`
-   - `REFRESH_TOKEN_EXPIRES_IN_DAYS` — `7`
-   - `REFRESH_COOKIE_NAME` — `mm_erp_refresh`
-   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` — from step 2
-5. Deploy. Once live, copy the URL Render gives you (looks like `https://mm-erp-backend.onrender.com`).
-
-## 5. Frontend — Vercel
+## 2. Frontend — Vercel
 
 1. Sign up at https://vercel.com (free, GitHub sign-in works).
 2. **Add New → Project** → import the `mm-erp` GitHub repo.
-3. **Root Directory**: `frontend` (Vercel auto-detects Next.js — no other config needed).
-4. Environment variable: `NEXT_PUBLIC_API_URL` = `https://<your-render-url>/api`
+3. **Root Directory**: `frontend` (Vercel auto-detects Next.js).
+4. Environment variable: `NEXT_PUBLIC_API_URL` =
+   `https://les-unhesitative-blandishingly.ngrok-free.dev/api`
 5. Deploy. Copy the URL Vercel gives you (looks like `https://mm-erp.vercel.app`).
 
-## 6. Close the loop: update CORS
+## 3. Close the loop: update CORS
 
-Go back to Render → your backend service → Environment → set `CORS_ORIGIN` to your actual Vercel
-URL (e.g. `https://mm-erp.vercel.app`, no trailing slash) → save (triggers a redeploy).
+Edit `backend/.env` and set:
+```
+CORS_ORIGIN="https://<your-actual-vercel-url>"
+```
+(no trailing slash). Then restart the backend window (or re-run `scripts/start-app.ps1`) for it to
+take effect.
 
-## 7. Verify
+## 4. Verify
 
-Open the Vercel URL, sign in with the admin account from step 3. Try creating a customer, uploading
-an item photo (should land in the R2 bucket), and creating a job card.
+Open the Vercel URL, sign in with your admin account, create a customer, upload an item photo (it
+should display correctly — that's the AuthedImage fetch working), and create a job card.
 
 ## Updating after this
 
-Every `git push` to `master` auto-redeploys both Render and Vercel. No manual redeploy steps needed
-for future changes.
+- **Frontend changes**: `git push` auto-redeploys Vercel.
+- **Backend changes**: pull the latest code, then re-run `scripts/start-app.ps1` (or manually
+  `npm run build` + restart the production window) — there's no auto-redeploy since it's not hosted
+  on a platform that watches the repo.
 
-## Local development is unaffected
+## Restarting after a reboot
 
-Nothing about local dev changes — `backend/.env` still points at the local Postgres install and
-leaves the `R2_*` variables unset, so uploads keep going to `backend/uploads/` on disk exactly as
-before.
+Postgres does not auto-start (see `scripts/db-status.ps1`), and neither does the backend or tunnel.
+After restarting this PC, re-run `scripts/start-app.ps1` to bring the site back online.
+
+## If you ever want to move off this machine
+
+The codebase already supports a fully-cloud deployment (Neon for Postgres, Render for the backend,
+Cloudflare R2 for file storage) with no further code changes — only reconfiguring environment
+variables and one-time data migration. Ask if you want to switch to that path later.
