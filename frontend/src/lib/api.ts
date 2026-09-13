@@ -9,6 +9,21 @@ export function assetUrl(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${ASSET_ORIGIN}${url}`;
 }
 
+// Plain <img>/<video src> can't carry custom headers, but a free ngrok
+// tunnel (used when the backend stays on a local machine — see
+// AuthedImage/AuthedVideo) shows its browser-warning interstitial to any
+// request missing "ngrok-skip-browser-warning", images/videos included.
+// Fetching the bytes ourselves and handing back an object URL sidesteps
+// that entirely — harmless against a normal host (Render, R2, etc.) too.
+export async function fetchAssetBlob(url: string): Promise<string> {
+  const res = await fetch(assetUrl(url), {
+    headers: { "ngrok-skip-browser-warning": "true" },
+  });
+  if (!res.ok) throw new Error("Failed to load media");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export interface CurrentUser {
   id: number;
   name: string;
@@ -48,6 +63,9 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
   if (accessToken) {
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
+  // Harmless against any other host; required so a free ngrok tunnel
+  // forwards the request instead of returning its browser-warning page.
+  headers.set("ngrok-skip-browser-warning", "true");
 
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -74,6 +92,7 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
 export async function apiDownloadFile(path: string, filename: string): Promise<void> {
   const headers = new Headers();
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  headers.set("ngrok-skip-browser-warning", "true");
 
   let res = await fetch(`${API_URL}${path}`, { headers, credentials: "include" });
   if (res.status === 401 && (await tryRefresh())) {

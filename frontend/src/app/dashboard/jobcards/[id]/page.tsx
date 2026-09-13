@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { AuthedImage, AuthedVideo } from "@/components/AuthedMedia";
+import { apiFetch, ApiError } from "@/lib/api";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Draft",
@@ -397,14 +398,13 @@ export default function JobCardDetailPage() {
             {jobCard.media.map((m) => (
               <div key={m.id} className="relative">
                 {m.mediaType === "PHOTO" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={assetUrl(m.url)}
+                  <AuthedImage
+                    src={m.url}
                     alt={m.angle ?? "photo"}
                     className="h-20 w-20 rounded object-cover"
                   />
                 ) : (
-                  <video src={assetUrl(m.url)} className="h-20 w-32 rounded" controls />
+                  <AuthedVideo src={m.url} className="h-20 w-32 rounded" />
                 )}
                 <button
                   onClick={() => handleRemoveMedia(m.id)}

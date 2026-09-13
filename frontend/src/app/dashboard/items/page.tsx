@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
-import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedMedia";
+import { apiFetch, ApiError } from "@/lib/api";
 
 interface ItemRow {
   id: number;
@@ -225,12 +225,9 @@ export default function ItemsPage() {
                   <tr key={item.id} className="border-t border-gray-200">
                     <td className="px-3 py-2">
                       {item.photoUrl ? (
-                        <Image
-                          src={assetUrl(item.photoUrl)}
+                        <AuthedImage
+                          src={item.photoUrl}
                           alt={item.name}
-                          width={40}
-                          height={40}
-                          unoptimized
                           className="h-10 w-10 rounded object-cover"
                         />
                       ) : (
