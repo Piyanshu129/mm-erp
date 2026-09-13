@@ -18,7 +18,23 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 
 export const app = express();
 
-app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
+// Vercel gives a project several valid frontend origins at once (the
+// production alias, the git-branch URL, per-deployment URLs) — CORS_ORIGIN
+// is comma-separated so more than one can be allowed without code changes.
+const allowedOrigins = env.CORS_ORIGIN.split(",").map((o) => o.trim());
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      }
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
