@@ -69,6 +69,31 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
   return body;
 }
 
+// For endpoints that return a raw file (e.g. the Excel export) rather than
+// JSON — triggers a browser download with the given filename.
+export async function apiDownloadFile(path: string, filename: string): Promise<void> {
+  const headers = new Headers();
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+
+  let res = await fetch(`${API_URL}${path}`, { headers, credentials: "include" });
+  if (res.status === 401 && (await tryRefresh())) {
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    res = await fetch(`${API_URL}${path}`, { headers, credentials: "include" });
+  }
+  if (!res.ok) {
+    const body = await parseJson(res).catch(() => null);
+    throw new ApiError(res.status, body?.error ?? "Download failed");
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function tryRefresh(): Promise<boolean> {
   try {
     const body = await apiFetch("/auth/refresh", { method: "POST" }, true);

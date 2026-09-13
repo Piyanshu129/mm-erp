@@ -28,3 +28,6 @@ backend/uploads/*
 
 # backup dumps (contain real business data, never committed)
 backend/backups/
+
+# auto-regenerated Excel export (contains real business data, never committed)
+backend/exports/
