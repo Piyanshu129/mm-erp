@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { apiFetch, ApiError, ASSET_ORIGIN } from "@/lib/api";
+import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Draft",
@@ -399,12 +399,12 @@ export default function JobCardDetailPage() {
                 {m.mediaType === "PHOTO" ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={`${ASSET_ORIGIN}${m.url}`}
+                    src={assetUrl(m.url)}
                     alt={m.angle ?? "photo"}
                     className="h-20 w-20 rounded object-cover"
                   />
                 ) : (
-                  <video src={`${ASSET_ORIGIN}${m.url}`} className="h-20 w-32 rounded" controls />
+                  <video src={assetUrl(m.url)} className="h-20 w-32 rounded" controls />
                 )}
                 <button
                   onClick={() => handleRemoveMedia(m.id)}

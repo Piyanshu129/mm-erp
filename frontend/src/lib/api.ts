@@ -1,6 +1,13 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 // Uploaded files (item photos, etc.) are served from the API's origin, not under /api.
-export const ASSET_ORIGIN = API_URL.replace(/\/api\/?$/, "");
+const ASSET_ORIGIN = API_URL.replace(/\/api\/?$/, "");
+
+// The backend returns a relative "/uploads/..." path in local dev, or an
+// already-absolute R2 URL in production (see backend/src/middleware/upload.ts) —
+// this is the one place that needs to know the difference.
+export function assetUrl(url: string): string {
+  return /^https?:\/\//.test(url) ? url : `${ASSET_ORIGIN}${url}`;
+}
 
 export interface CurrentUser {
   id: number;

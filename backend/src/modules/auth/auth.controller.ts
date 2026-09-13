@@ -9,19 +9,26 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  path: "/api/auth",
-  maxAge: env.REFRESH_TOKEN_EXPIRES_IN_DAYS * 24 * 60 * 60 * 1000,
-};
+// In production the frontend (Vercel) and backend (Render) are on different
+// domains, so this cookie is sent on cross-site fetches — that requires
+// SameSite=None (which in turn requires Secure). Local dev keeps Lax since
+// localhost:3000 → localhost:4000 is same-site, and Lax needs no HTTPS.
+function refreshCookieOptions() {
+  const isProd = env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: (isProd ? "none" : "lax") as "none" | "lax",
+    path: "/api/auth",
+    maxAge: env.REFRESH_TOKEN_EXPIRES_IN_DAYS * 24 * 60 * 60 * 1000,
+  };
+}
 
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body as z.infer<typeof loginSchema>;
   const { accessToken, refreshToken, user } = await authService.login(email, password);
 
-  res.cookie(env.REFRESH_COOKIE_NAME, refreshToken, REFRESH_COOKIE_OPTIONS);
+  res.cookie(env.REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions());
   res.json({ accessToken, user });
 }
 
@@ -33,7 +40,7 @@ export async function refresh(req: Request, res: Response) {
 
   const { accessToken, refreshToken, user } = await authService.refresh(presentedToken);
 
-  res.cookie(env.REFRESH_COOKIE_NAME, refreshToken, REFRESH_COOKIE_OPTIONS);
+  res.cookie(env.REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions());
   res.json({ accessToken, user });
 }
 

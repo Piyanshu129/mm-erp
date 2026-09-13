@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { apiFetch, ASSET_ORIGIN } from "@/lib/api";
+import { apiFetch, assetUrl } from "@/lib/api";
 
 interface ItemDetail {
   id: number;
@@ -71,7 +71,7 @@ export default function ItemDetailPage() {
       <div className="flex flex-col gap-4 sm:flex-row">
         {item.photoUrl ? (
           <Image
-            src={`${ASSET_ORIGIN}${item.photoUrl}`}
+            src={assetUrl(item.photoUrl)}
             alt={item.name}
             width={120}
             height={120}

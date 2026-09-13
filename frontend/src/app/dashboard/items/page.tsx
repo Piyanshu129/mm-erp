@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { apiFetch, ApiError, ASSET_ORIGIN } from "@/lib/api";
+import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 
 interface ItemRow {
   id: number;
@@ -226,7 +226,7 @@ export default function ItemsPage() {
                     <td className="px-3 py-2">
                       {item.photoUrl ? (
                         <Image
-                          src={`${ASSET_ORIGIN}${item.photoUrl}`}
+                          src={assetUrl(item.photoUrl)}
                           alt={item.name}
                           width={40}
                           height={40}
