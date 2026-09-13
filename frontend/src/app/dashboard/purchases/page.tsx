@@ -1,7 +1,15 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Plus, Search, ShoppingCart } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface Supplier {
   id: number;
@@ -144,220 +152,179 @@ export default function PurchasesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Purchases</h1>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "+ New purchase"}
-        </button>
-      </div>
+      <PageHeader
+        title="Purchases"
+        description="Every purchase gets an automatic, permanent serial number."
+        action={
+          <Button onClick={() => setShowForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> New purchase
+          </Button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="max-w-2xl space-y-4 rounded-md border border-gray-200 p-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Supplier</label>
-            <select
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="">Select supplier...</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            {suppliers.length === 0 && (
-              <p className="mt-1 text-xs text-gray-500">
-                No suppliers yet — add one on the Suppliers page first.
-              </p>
-            )}
-          </div>
-
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                checked={itemMode === "existing"}
-                onChange={() => setItemMode("existing")}
-              />
-              Existing item
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="radio" checked={itemMode === "new"} onChange={() => setItemMode("new")} />
-              New item
-            </label>
-          </div>
-
-          {itemMode === "existing" ? (
-            <div>
-              <div className="flex gap-2">
-                <input
-                  placeholder="Search item code, name or part number"
-                  value={itemQuery}
-                  onChange={(e) => setItemQuery(e.target.value)}
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={searchItems}
-                  className="rounded-md border border-gray-300 px-4 py-2 text-sm"
-                >
-                  Search
-                </button>
+        <Card className="max-w-2xl">
+          <CardBody>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label>Supplier</Label>
+                <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                  <option value="">Select supplier...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+                {suppliers.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-500">No suppliers yet — add one on the Suppliers page first.</p>
+                )}
               </div>
-              {selectedItem ? (
-                <p className="mt-2 text-sm">
-                  Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} (current
-                  stock: {selectedItem.currentStock} {selectedItem.uom})
-                </p>
+
+              <div className="flex gap-4 text-sm text-gray-700">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={itemMode === "existing"} onChange={() => setItemMode("existing")} />
+                  Existing item
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={itemMode === "new"} onChange={() => setItemMode("new")} />
+                  New item
+                </label>
+              </div>
+
+              {itemMode === "existing" ? (
+                <div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Search item code, name or part number"
+                      value={itemQuery}
+                      onChange={(e) => setItemQuery(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="secondary" onClick={searchItems}>
+                      <Search className="h-4 w-4" /> Search
+                    </Button>
+                  </div>
+                  {selectedItem ? (
+                    <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} (stock:{" "}
+                      {selectedItem.currentStock} {selectedItem.uom})
+                    </p>
+                  ) : (
+                    itemResults.length > 0 && (
+                      <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
+                        {itemResults.map((it) => (
+                          <li key={it.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedItem(it);
+                                setItemResults([]);
+                              }}
+                              className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                            >
+                              {it.itemCode} — {it.name} (stock: {it.currentStock})
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                  )}
+                </div>
               ) : (
-                itemResults.length > 0 && (
-                  <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                    {itemResults.map((it) => (
-                      <li key={it.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedItem(it);
-                            setItemResults([]);
-                          }}
-                          className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                        >
-                          {it.itemCode} — {it.name} (stock: {it.currentStock})
-                        </button>
-                      </li>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    placeholder="Item name"
+                    required
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    className="sm:col-span-2"
+                  />
+                  <Select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)}>
+                    {CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
                     ))}
-                  </ul>
-                )
+                  </Select>
+                  <Input placeholder="UOM (e.g. PCS)" required value={newItemUom} onChange={(e) => setNewItemUom(e.target.value)} />
+                  <Input
+                    type="number"
+                    placeholder="Minimum stock (optional)"
+                    value={newItemMinStock}
+                    onChange={(e) => setNewItemMinStock(e.target.value)}
+                  />
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => setNewItemPhoto(e.target.files?.[0] ?? null)}
+                    className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+                  />
+                </div>
               )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <input
-                placeholder="Item name"
-                required
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm sm:col-span-2"
-              />
-              <select
-                value={newItemCategory}
-                onChange={(e) => setNewItemCategory(e.target.value)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <input
-                placeholder="UOM (e.g. PCS)"
-                required
-                value={newItemUom}
-                onChange={(e) => setNewItemUom(e.target.value)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <input
-                type="number"
-                placeholder="Minimum stock (optional)"
-                value={newItemMinStock}
-                onChange={(e) => setNewItemMinStock(e.target.value)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => setNewItemPhoto(e.target.files?.[0] ?? null)}
-                className="text-sm"
-              />
-            </div>
-          )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <input
-              type="number"
-              placeholder="Quantity"
-              required
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Purchase cost (per unit)"
-              required
-              value={purchaseCost}
-              onChange={(e) => setPurchaseCost(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Selling price (optional)"
-              value={sellingPrice}
-              onChange={(e) => setSellingPrice(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <input
-            placeholder="Remarks (optional)"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input type="number" placeholder="Quantity" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="Purchase cost (per unit)"
+                  required
+                  value={purchaseCost}
+                  onChange={(e) => setPurchaseCost(e.target.value)}
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="Selling price (optional)"
+                  value={sellingPrice}
+                  onChange={(e) => setSellingPrice(e.target.value)}
+                />
+              </div>
+              <Input placeholder="Remarks (optional)" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
 
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "Saving..." : "Save purchase"}
-          </button>
-        </form>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Save purchase"}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton cols={6} />
       ) : purchases.length === 0 ? (
-        <p className="text-sm text-gray-500">No purchases recorded yet.</p>
+        <EmptyState icon={ShoppingCart} title="No purchases recorded yet" />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[650px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Serial No.</th>
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Item</th>
-                <th className="px-3 py-2">Supplier</th>
-                <th className="px-3 py-2">Qty</th>
-                <th className="px-3 py-2">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {purchases.map((p) => (
-                <tr key={p.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2 font-mono">#{p.id}</td>
-                  <td className="px-3 py-2">{new Date(p.purchaseDate).toLocaleDateString()}</td>
-                  <td className="px-3 py-2">
-                    {p.item.itemCode} — {p.item.name}
-                  </td>
-                  <td className="px-3 py-2">{p.supplier.name}</td>
-                  <td className="px-3 py-2">
-                    {p.quantity} {p.item.uom}
-                  </td>
-                  <td className="px-3 py-2">₹{p.purchaseCost}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={650}>
+          <thead>
+            <tr>
+              <Th>Serial No.</Th>
+              <Th>Date</Th>
+              <Th>Item</Th>
+              <Th>Supplier</Th>
+              <Th>Qty</Th>
+              <Th>Cost</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {purchases.map((p) => (
+              <Tr key={p.id}>
+                <Td className="font-mono">#{p.id}</Td>
+                <Td>{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                <Td>
+                  {p.item.itemCode} — {p.item.name}
+                </Td>
+                <Td>{p.supplier.name}</Td>
+                <Td>
+                  {p.quantity} {p.item.uom}
+                </Td>
+                <Td>₹{p.purchaseCost}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

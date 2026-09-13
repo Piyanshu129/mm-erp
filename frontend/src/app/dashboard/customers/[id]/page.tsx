@@ -3,7 +3,15 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft, Plus, Car, ClipboardPlus } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { ActiveBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 interface Vehicle {
   id: number;
@@ -79,117 +87,112 @@ export default function CustomerDetailPage() {
   }
 
   if (loading || !customer) {
-    return <p className="text-sm text-gray-500">Loading...</p>;
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-24 w-full max-w-md" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
       <div>
-        <Link href="/dashboard/customers" className="text-sm text-gray-500 underline">
-          ← All customers
+        <Link href="/dashboard/customers" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-4 w-4" /> All customers
         </Link>
-        <h1 className="mt-2 text-lg font-semibold">{customer.name}</h1>
-        <dl className="mt-2 grid max-w-md grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
-          <dt>Mobile</dt>
-          <dd>{customer.mobile}</dd>
-          <dt>Email</dt>
-          <dd>{customer.email ?? "-"}</dd>
-          <dt>Address</dt>
-          <dd>{customer.address ?? "-"}</dd>
-          <dt>Status</dt>
-          <dd>{customer.isActive ? "Active" : "Disabled"}</dd>
-        </dl>
+        <div className="mt-3 flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-gray-900">{customer.name}</h1>
+          <ActiveBadge isActive={customer.isActive} />
+        </div>
+        <Card className="mt-3 max-w-md">
+          <CardBody>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <dt className="text-gray-500">Mobile</dt>
+              <dd className="text-gray-900">{customer.mobile}</dd>
+              <dt className="text-gray-500">Email</dt>
+              <dd className="text-gray-900">{customer.email ?? "-"}</dd>
+              <dt className="text-gray-500">Address</dt>
+              <dd className="text-gray-900">{customer.address ?? "-"}</dd>
+            </dl>
+          </CardBody>
+        </Card>
       </div>
 
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Vehicles</h2>
-          <button
-            onClick={() => setShowVehicleForm((s) => !s)}
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white"
-          >
-            {showVehicleForm ? "Cancel" : "+ Add vehicle"}
-          </button>
+          <h2 className="text-base font-semibold text-gray-900">Vehicles</h2>
+          <Button size="sm" onClick={() => setShowVehicleForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> Add vehicle
+          </Button>
         </div>
 
         {showVehicleForm && (
-          <form
-            onSubmit={handleAddVehicle}
-            className="mb-4 max-w-md space-y-3 rounded-md border border-gray-200 p-4"
-          >
-            <input
-              placeholder="Registration number (e.g. HR06AB1234)"
-              required
-              value={regNumber}
-              onChange={(e) => setRegNumber(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Make (e.g. Maruti)"
-              required
-              value={make}
-              onChange={(e) => setMake(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Model (e.g. Swift)"
-              required
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              placeholder="Current KM (optional)"
-              value={currentKm}
-              onChange={(e) => setCurrentKm(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            {formError && <p className="text-sm text-red-600">{formError}</p>}
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : "Save vehicle"}
-            </button>
-          </form>
+          <Card className="mb-4 max-w-md">
+            <CardBody>
+              <form onSubmit={handleAddVehicle} className="space-y-3">
+                <div>
+                  <Label>Registration number</Label>
+                  <Input
+                    placeholder="e.g. HR06AB1234"
+                    required
+                    value={regNumber}
+                    onChange={(e) => setRegNumber(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>Make</Label>
+                  <Input placeholder="e.g. Maruti" required value={make} onChange={(e) => setMake(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Model</Label>
+                  <Input placeholder="e.g. Swift" required value={model} onChange={(e) => setModel(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Current KM (optional)</Label>
+                  <Input type="number" value={currentKm} onChange={(e) => setCurrentKm(e.target.value)} />
+                </div>
+                {formError && <p className="text-sm text-red-600">{formError}</p>}
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Saving..." : "Save vehicle"}
+                </Button>
+              </form>
+            </CardBody>
+          </Card>
         )}
 
         {customer.vehicles.length === 0 ? (
-          <p className="text-sm text-gray-500">No vehicles on file for this customer.</p>
+          <EmptyState icon={Car} title="No vehicles on file" description="Add this customer's first vehicle above." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[450px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-              <thead className="bg-gray-100 text-left">
-                <tr>
-                  <th className="px-3 py-2">Registration</th>
-                  <th className="px-3 py-2">Make / Model</th>
-                  <th className="px-3 py-2">KM</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {customer.vehicles.map((v) => (
-                  <tr key={v.id} className="border-t border-gray-200">
-                    <td className="px-3 py-2 font-medium">{v.registrationNumber}</td>
-                    <td className="px-3 py-2">
-                      {v.make} {v.model}
-                    </td>
-                    <td className="px-3 py-2">{v.currentKm ?? "-"}</td>
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`/dashboard/jobcards?vehicleId=${v.id}`}
-                        className="text-gray-600 underline hover:no-underline"
-                      >
-                        New job card
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table minWidth={450}>
+            <thead>
+              <tr>
+                <Th>Registration</Th>
+                <Th>Make / Model</Th>
+                <Th>KM</Th>
+                <Th></Th>
+              </tr>
+            </thead>
+            <tbody>
+              {customer.vehicles.map((v) => (
+                <Tr key={v.id}>
+                  <Td className="font-medium text-gray-900">{v.registrationNumber}</Td>
+                  <Td>
+                    {v.make} {v.model}
+                  </Td>
+                  <Td>{v.currentKm ?? "-"}</Td>
+                  <Td>
+                    <Link
+                      href={`/dashboard/jobcards?vehicleId=${v.id}`}
+                      className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                    >
+                      <ClipboardPlus className="h-3.5 w-3.5" /> New job card
+                    </Link>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
         )}
       </div>
     </div>

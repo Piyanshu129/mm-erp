@@ -3,8 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft, ArrowDownCircle, ArrowUpCircle, History } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch } from "@/lib/api";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { StockStatusBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 interface ItemDetail {
   id: number;
@@ -59,86 +65,103 @@ export default function ItemDetailPage() {
   }, [id]);
 
   if (loading || !item) {
-    return <p className="text-sm text-gray-500">Loading...</p>;
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-28 w-full max-w-md" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
-      <Link href="/dashboard/items" className="text-sm text-gray-500 underline">
-        ← All items
+      <Link href="/dashboard/items" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+        <ArrowLeft className="h-4 w-4" /> All items
       </Link>
 
-      <div className="flex flex-col gap-4 sm:flex-row">
-        {item.photoUrl ? (
-          <AuthedImage src={item.photoUrl} alt={item.name} className="h-28 w-28 rounded object-cover" />
-        ) : (
-          <div className="h-28 w-28 rounded bg-gray-100" />
-        )}
-        <div>
-          <h1 className="text-lg font-semibold">{item.name}</h1>
-          <p className="font-mono text-sm text-gray-500">{item.itemCode}</p>
-          <dl className="mt-2 grid max-w-md grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
-            <dt>Category</dt>
-            <dd>{item.category}</dd>
-            <dt>UOM</dt>
-            <dd>{item.uom}</dd>
-            <dt>Part Number</dt>
-            <dd>{item.partNumber ?? "-"}</dd>
-            <dt>Brand</dt>
-            <dd>{item.brand ?? "-"}</dd>
-            <dt>Purchase Cost</dt>
-            <dd>₹{item.purchaseCost}</dd>
-            <dt>Selling Price</dt>
-            <dd>₹{item.sellingPrice}</dd>
-            <dt>Current Stock</dt>
-            <dd className="font-semibold">
-              {item.currentStock} {item.uom}
-            </dd>
-            <dt>Minimum Stock</dt>
-            <dd>{item.minStock}</dd>
-          </dl>
-        </div>
-      </div>
+      <Card>
+        <CardBody className="flex flex-col gap-4 sm:flex-row">
+          {item.photoUrl ? (
+            <AuthedImage src={item.photoUrl} alt={item.name} className="h-28 w-28 flex-shrink-0 rounded-lg object-cover" />
+          ) : (
+            <div className="h-28 w-28 flex-shrink-0 rounded-lg bg-gray-100" />
+          )}
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-semibold text-gray-900">{item.name}</h1>
+              <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
+            </div>
+            <p className="font-mono text-sm text-gray-500">{item.itemCode}</p>
+            <dl className="mt-3 grid max-w-md grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+              <dt className="text-gray-500">Category</dt>
+              <dd className="text-gray-900">{item.category}</dd>
+              <dt className="text-gray-500">UOM</dt>
+              <dd className="text-gray-900">{item.uom}</dd>
+              <dt className="text-gray-500">Part Number</dt>
+              <dd className="text-gray-900">{item.partNumber ?? "-"}</dd>
+              <dt className="text-gray-500">Brand</dt>
+              <dd className="text-gray-900">{item.brand ?? "-"}</dd>
+              <dt className="text-gray-500">Purchase Cost</dt>
+              <dd className="text-gray-900">₹{item.purchaseCost}</dd>
+              <dt className="text-gray-500">Selling Price</dt>
+              <dd className="text-gray-900">₹{item.sellingPrice}</dd>
+              <dt className="text-gray-500">Current Stock</dt>
+              <dd className="font-semibold text-gray-900">
+                {item.currentStock} {item.uom}
+              </dd>
+              <dt className="text-gray-500">Minimum Stock</dt>
+              <dd className="text-gray-900">{item.minStock}</dd>
+            </dl>
+          </div>
+        </CardBody>
+      </Card>
 
       <div>
-        <h2 className="mb-3 text-base font-semibold">Stock history</h2>
+        <h2 className="mb-3 text-base font-semibold text-gray-900">Stock history</h2>
         {history.length === 0 ? (
-          <p className="text-sm text-gray-500">No stock movements yet.</p>
+          <EmptyState icon={History} title="No stock movements yet" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-              <thead className="bg-gray-100 text-left">
-                <tr>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Type</th>
-                  <th className="px-3 py-2">Qty</th>
-                  <th className="px-3 py-2">Balance After</th>
-                  <th className="px-3 py-2">Reference</th>
-                  <th className="px-3 py-2">By</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h) => (
-                  <tr key={h.id} className="border-t border-gray-200">
-                    <td className="px-3 py-2">{new Date(h.createdAt).toLocaleString()}</td>
-                    <td className={`px-3 py-2 ${h.direction === "IN" ? "text-green-700" : "text-red-600"}`}>
+          <Table minWidth={650}>
+            <thead>
+              <tr>
+                <Th>Date</Th>
+                <Th>Type</Th>
+                <Th>Qty</Th>
+                <Th>Balance After</Th>
+                <Th>Reference</Th>
+                <Th>By</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h) => (
+                <Tr key={h.id}>
+                  <Td>{new Date(h.createdAt).toLocaleString()}</Td>
+                  <Td>
+                    <span
+                      className={`inline-flex items-center gap-1 font-medium ${h.direction === "IN" ? "text-green-700" : "text-red-600"}`}
+                    >
+                      {h.direction === "IN" ? (
+                        <ArrowDownCircle className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowUpCircle className="h-3.5 w-3.5" />
+                      )}
                       {h.direction}
-                    </td>
-                    <td className="px-3 py-2">{h.quantity}</td>
-                    <td className="px-3 py-2">{h.balanceAfter}</td>
-                    <td className="px-3 py-2">
-                      {h.purchase
-                        ? `Purchase Serial #${h.purchase.id} · ${h.purchase.supplier.name}`
-                        : h.jobCardPart
-                          ? `${h.jobCardPart.jobCard.jobCardNumber} · ${h.jobCardPart.jobCard.vehicle.registrationNumber}`
-                          : h.referenceType}
-                    </td>
-                    <td className="px-3 py-2">{h.createdBy.name}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </span>
+                  </Td>
+                  <Td>{h.quantity}</Td>
+                  <Td>{h.balanceAfter}</Td>
+                  <Td>
+                    {h.purchase
+                      ? `Purchase Serial #${h.purchase.id} · ${h.purchase.supplier.name}`
+                      : h.jobCardPart
+                        ? `${h.jobCardPart.jobCard.jobCardNumber} · ${h.jobCardPart.jobCard.vehicle.registrationNumber}`
+                        : h.referenceType}
+                  </Td>
+                  <Td>{h.createdBy.name}</Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
         )}
       </div>
     </div>

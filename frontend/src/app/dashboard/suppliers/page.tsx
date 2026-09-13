@@ -1,7 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Plus, Truck } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { ActiveBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface SupplierRow {
   id: number;
@@ -55,75 +64,68 @@ export default function SuppliersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Suppliers</h1>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "+ New supplier"}
-        </button>
-      </div>
+      <PageHeader
+        title="Suppliers"
+        description="Vendors you buy parts from."
+        action={
+          <Button onClick={() => setShowForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> New supplier
+          </Button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={handleCreate} className="max-w-md space-y-3 rounded-md border border-gray-200 p-4">
-          <input
-            placeholder="Supplier name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            placeholder="Mobile (optional)"
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            placeholder="Address (optional)"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "Saving..." : "Save supplier"}
-          </button>
-        </form>
+        <Card className="max-w-md">
+          <CardBody>
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div>
+                <Label>Supplier name</Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <Label>Mobile (optional)</Label>
+                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} />
+              </div>
+              <div>
+                <Label>Address (optional)</Label>
+                <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Save supplier"}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton />
       ) : suppliers.length === 0 ? (
-        <p className="text-sm text-gray-500">No suppliers yet.</p>
+        <EmptyState icon={Truck} title="No suppliers yet" description="Add your first supplier above." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[450px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Mobile</th>
-                <th className="px-3 py-2">Address</th>
-                <th className="px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((s) => (
-                <tr key={s.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2">{s.name}</td>
-                  <td className="px-3 py-2">{s.mobile ?? "-"}</td>
-                  <td className="px-3 py-2">{s.address ?? "-"}</td>
-                  <td className="px-3 py-2">{s.isActive ? "Active" : "Disabled"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={450}>
+          <thead>
+            <tr>
+              <Th>Name</Th>
+              <Th>Mobile</Th>
+              <Th>Address</Th>
+              <Th>Status</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {suppliers.map((s) => (
+              <Tr key={s.id}>
+                <Td className="font-medium text-gray-900">{s.name}</Td>
+                <Td>{s.mobile ?? "-"}</Td>
+                <Td>{s.address ?? "-"}</Td>
+                <Td>
+                  <ActiveBadge isActive={s.isActive} />
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

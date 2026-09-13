@@ -2,7 +2,16 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { Plus, Search, Users } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { ActiveBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface CustomerRow {
   id: number;
@@ -63,95 +72,79 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Customers</h1>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "+ New customer"}
-        </button>
-      </div>
+      <PageHeader
+        title="Customers"
+        description="Everyone who has brought a vehicle in for service."
+        action={
+          <Button onClick={() => setShowForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> New customer
+          </Button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={handleCreate} className="max-w-md space-y-3 rounded-md border border-gray-200 p-4">
-          <input
-            placeholder="Name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            placeholder="Mobile number"
-            required
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            placeholder="Address (optional)"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "Saving..." : "Save customer"}
-          </button>
-        </form>
+        <Card className="max-w-md">
+          <CardBody>
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div>
+                <Label>Name</Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <Label>Mobile number</Label>
+                <Input required value={mobile} onChange={(e) => setMobile(e.target.value)} />
+              </div>
+              <div>
+                <Label>Address (optional)</Label>
+                <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Save customer"}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       <form onSubmit={handleSearch} className="flex max-w-md gap-2">
-        <input
-          placeholder="Search by name or mobile"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button type="submit" className="rounded-md border border-gray-300 px-4 py-2 text-sm">
-          Search
-        </button>
+        <Input placeholder="Search by name or mobile" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Button type="submit" variant="secondary">
+          <Search className="h-4 w-4" /> Search
+        </Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton />
       ) : customers.length === 0 ? (
-        <p className="text-sm text-gray-500">No customers found.</p>
+        <EmptyState icon={Users} title="No customers found" description="Try a different search, or add a new customer." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[500px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Mobile</th>
-                <th className="px-3 py-2">Address</th>
-                <th className="px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((c) => (
-                <tr key={c.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/dashboard/customers/${c.id}`}
-                      className="text-gray-900 underline hover:no-underline"
-                    >
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">{c.mobile}</td>
-                  <td className="px-3 py-2">{c.address ?? "-"}</td>
-                  <td className="px-3 py-2">{c.isActive ? "Active" : "Disabled"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={500}>
+          <thead>
+            <tr>
+              <Th>Name</Th>
+              <Th>Mobile</Th>
+              <Th>Address</Th>
+              <Th>Status</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {customers.map((c) => (
+              <Tr key={c.id}>
+                <Td className="font-medium text-gray-900">
+                  <Link href={`/dashboard/customers/${c.id}`} className="hover:text-blue-600 hover:underline">
+                    {c.name}
+                  </Link>
+                </Td>
+                <Td>{c.mobile}</Td>
+                <Td>{c.address ?? "-"}</Td>
+                <Td>
+                  <ActiveBadge isActive={c.isActive} />
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

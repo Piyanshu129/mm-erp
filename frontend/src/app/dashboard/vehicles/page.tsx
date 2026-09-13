@@ -2,7 +2,14 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { Search, Car, ClipboardPlus } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface VehicleRow {
   id: number;
@@ -37,71 +44,58 @@ export default function VehiclesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">Vehicles</h1>
-        <p className="text-sm text-gray-500">
-          Search by registration number, make or model. To add a vehicle, open the owner&apos;s
-          customer page.
-        </p>
-      </div>
+      <PageHeader
+        title="Vehicles"
+        description="Search by registration number, make or model. To add a vehicle, open the owner's customer page."
+      />
 
       <form onSubmit={handleSearch} className="flex max-w-md gap-2">
-        <input
-          placeholder="e.g. HR06AB1234 or Swift"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button type="submit" className="rounded-md border border-gray-300 px-4 py-2 text-sm">
-          Search
-        </button>
+        <Input placeholder="e.g. HR06AB1234 or Swift" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Button type="submit" variant="secondary">
+          <Search className="h-4 w-4" /> Search
+        </Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton cols={5} />
       ) : vehicles.length === 0 ? (
-        <p className="text-sm text-gray-500">No vehicles found.</p>
+        <EmptyState icon={Car} title="No vehicles found" description="Try a different search term." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[550px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Registration</th>
-                <th className="px-3 py-2">Make / Model</th>
-                <th className="px-3 py-2">KM</th>
-                <th className="px-3 py-2">Owner</th>
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2 font-medium">{v.registrationNumber}</td>
-                  <td className="px-3 py-2">
-                    {v.make} {v.model}
-                  </td>
-                  <td className="px-3 py-2">{v.currentKm ?? "-"}</td>
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/dashboard/customers/${v.customer.id}`}
-                      className="text-gray-900 underline hover:no-underline"
-                    >
-                      {v.customer.name}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/dashboard/jobcards?vehicleId=${v.id}`}
-                      className="text-gray-600 underline hover:no-underline"
-                    >
-                      New job card
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={600}>
+          <thead>
+            <tr>
+              <Th>Registration</Th>
+              <Th>Make / Model</Th>
+              <Th>KM</Th>
+              <Th>Owner</Th>
+              <Th></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {vehicles.map((v) => (
+              <Tr key={v.id}>
+                <Td className="font-medium text-gray-900">{v.registrationNumber}</Td>
+                <Td>
+                  {v.make} {v.model}
+                </Td>
+                <Td>{v.currentKm ?? "-"}</Td>
+                <Td>
+                  <Link href={`/dashboard/customers/${v.customer.id}`} className="text-gray-900 hover:text-blue-600 hover:underline">
+                    {v.customer.name}
+                  </Link>
+                </Td>
+                <Td>
+                  <Link
+                    href={`/dashboard/jobcards?vehicleId=${v.id}`}
+                    className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                  >
+                    <ClipboardPlus className="h-3.5 w-3.5" /> New job card
+                  </Link>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

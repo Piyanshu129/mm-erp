@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft, Printer } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 interface InvoiceDetail {
   id: number;
@@ -49,7 +52,12 @@ export default function InvoiceDetailPage() {
   }, [id]);
 
   if (loading || !invoice) {
-    return <p className="text-sm text-gray-500">Loading...</p>;
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
   }
 
   const { jobCard } = invoice;
@@ -57,15 +65,12 @@ export default function InvoiceDetailPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between print:hidden">
-        <Link href="/dashboard/invoices" className="text-sm text-gray-500 underline">
-          ← All invoices
+        <Link href="/dashboard/invoices" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-4 w-4" /> All invoices
         </Link>
-        <button
-          onClick={() => window.print()}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          Print / Save as PDF
-        </button>
+        <Button onClick={() => window.print()}>
+          <Printer className="h-4 w-4" /> Print / Save as PDF
+        </Button>
       </div>
 
       <div className="rounded-md border border-gray-200 bg-white p-6 print:border-0 print:p-0">

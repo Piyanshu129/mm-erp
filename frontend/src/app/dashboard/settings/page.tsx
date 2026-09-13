@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { DatabaseBackup, FileSpreadsheet, Download, CheckCircle2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { apiFetch, apiDownloadFile, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Card, CardBody } from "@/components/ui/Card";
 
 function SettingsContent() {
   const [downloading, setDownloading] = useState(false);
@@ -45,56 +49,55 @@ function SettingsContent() {
   }
 
   return (
-    <div className="space-y-8">
-      <h1 className="text-lg font-semibold">Settings</h1>
+    <div className="space-y-6">
+      <PageHeader title="Settings" description="Backups and data export." />
 
-      <div className="max-w-xl rounded-md border border-gray-200 p-4">
-        <h2 className="mb-1 text-base font-semibold">Data Backup</h2>
-        <p className="mb-3 text-sm text-gray-500">
-          Downloads a complete snapshot of every business record — customers, vehicles, items,
-          suppliers, purchases, stock ledger, job cards, parts, labour, and invoices — as one JSON
-          file. Keep downloaded backups somewhere other than this machine.
-        </p>
-        <button
-          onClick={handleDownloadBackup}
-          disabled={downloading}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {downloading ? "Generating..." : "Download backup now"}
-        </button>
-        {lastBackupAt && (
-          <p className="mt-2 text-sm text-green-700">
-            Downloaded backup generated at {new Date(lastBackupAt).toLocaleString()}.
+      <Card className="max-w-xl">
+        <CardBody>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900">
+            <DatabaseBackup className="h-4 w-4 text-gray-400" /> Data Backup
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">
+            Downloads a complete snapshot of every business record — customers, vehicles, items, suppliers, purchases,
+            stock ledger, job cards, parts, labour, and invoices — as one JSON file. Keep downloaded backups somewhere
+            other than this machine.
           </p>
-        )}
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          <Button onClick={handleDownloadBackup} disabled={downloading}>
+            <Download className="h-4 w-4" /> {downloading ? "Generating..." : "Download backup now"}
+          </Button>
+          {lastBackupAt && (
+            <p className="mt-3 flex items-center gap-1.5 text-sm text-green-700">
+              <CheckCircle2 className="h-4 w-4" /> Downloaded backup generated at {new Date(lastBackupAt).toLocaleString()}.
+            </p>
+          )}
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-        <p className="mt-4 text-xs text-gray-400">
-          Restoring a backup is a whole-database operation and only runs from the server via{" "}
-          <code>npm run backup:restore -- &lt;file&gt; --yes</code> (it refuses to run against a
-          database that already has data, to avoid overwriting anything by accident) — not exposed
-          here as a one-click action.
-        </p>
-      </div>
+          <p className="mt-4 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            Restoring a backup is a whole-database operation and only runs from the server via{" "}
+            <code className="rounded bg-gray-200 px-1 py-0.5">npm run backup:restore -- &lt;file&gt; --yes</code> (it
+            refuses to run against a database that already has data, to avoid overwriting anything by accident) — not
+            exposed here as a one-click action.
+          </p>
+        </CardBody>
+      </Card>
 
-      <div className="max-w-xl rounded-md border border-gray-200 p-4">
-        <h2 className="mb-1 text-base font-semibold">Excel Export</h2>
-        <p className="mb-3 text-sm text-gray-500">
-          A live, human-readable mirror of the database — one tab per table (Customers, Vehicles,
-          Suppliers, Items, Purchases, Stock Ledger, Job Cards, Job Card Parts, Job Card Labour,
-          Invoices). This runs automatically alongside the database, refreshing about once a minute
-          — it does not replace the database, it's a parallel copy for anyone who wants to browse
-          the data in Excel.
-        </p>
-        <button
-          onClick={handleDownloadExcel}
-          disabled={downloadingExcel}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {downloadingExcel ? "Downloading..." : "Download Excel export"}
-        </button>
-        {excelError && <p className="mt-2 text-sm text-red-600">{excelError}</p>}
-      </div>
+      <Card className="max-w-xl">
+        <CardBody>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900">
+            <FileSpreadsheet className="h-4 w-4 text-gray-400" /> Excel Export
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">
+            A live, human-readable mirror of the database — one tab per table (Customers, Vehicles, Suppliers, Items,
+            Purchases, Stock Ledger, Job Cards, Job Card Parts, Job Card Labour, Invoices). This runs automatically
+            alongside the database, refreshing about once a minute — it does not replace the database, it&apos;s a
+            parallel copy for anyone who wants to browse the data in Excel.
+          </p>
+          <Button onClick={handleDownloadExcel} disabled={downloadingExcel}>
+            <Download className="h-4 w-4" /> {downloadingExcel ? "Downloading..." : "Download Excel export"}
+          </Button>
+          {excelError && <p className="mt-3 text-sm text-red-600">{excelError}</p>}
+        </CardBody>
+      </Card>
     </div>
   );
 }

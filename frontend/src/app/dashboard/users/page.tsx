@@ -1,8 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Eye, EyeOff, Shield } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { ActiveBadge, Badge } from "@/components/ui/Badge";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface UserRow {
   id: number;
@@ -21,6 +29,7 @@ function UsersPageContent() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState("STORE_USER");
 
   async function loadUsers() {
@@ -65,87 +74,94 @@ function UsersPageContent() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="mb-4 text-lg font-semibold">Users</h1>
-        {loading ? (
-          <p className="text-sm text-gray-500">Loading...</p>
-        ) : (
-          <table className="w-full border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Role</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2">{u.name}</td>
-                  <td className="px-3 py-2">{u.email}</td>
-                  <td className="px-3 py-2">{u.role}</td>
-                  <td className="px-3 py-2">{u.isActive ? "Active" : "Disabled"}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={() => toggleActive(u)}
-                      className="text-gray-600 underline hover:text-gray-900"
-                    >
-                      {u.isActive ? "Disable" : "Enable"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <PageHeader title="Users" description="Admin and Store User accounts that can sign in." />
+
+      {loading ? (
+        <TableSkeleton />
+      ) : (
+        <Table minWidth={550}>
+          <thead>
+            <tr>
+              <Th>Name</Th>
+              <Th>Email</Th>
+              <Th>Role</Th>
+              <Th>Status</Th>
+              <Th></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <Tr key={u.id}>
+                <Td className="font-medium text-gray-900">{u.name}</Td>
+                <Td>{u.email}</Td>
+                <Td>
+                  <Badge tone={u.role === "ADMIN" ? "purple" : "blue"}>{u.role}</Badge>
+                </Td>
+                <Td>
+                  <ActiveBadge isActive={u.isActive} />
+                </Td>
+                <Td>
+                  <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
+                    {u.isActive ? "Disable" : "Enable"}
+                  </Button>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
 
       <div>
-        <h2 className="mb-3 text-base font-semibold">Add user</h2>
-        <form onSubmit={handleCreate} className="max-w-sm space-y-3">
-          <input
-            placeholder="Name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="password"
-            placeholder="Password (min 8 characters)"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          >
-            <option value="STORE_USER">Store User</option>
-            <option value="ADMIN">Admin</option>
-          </select>
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "Creating..." : "Create user"}
-          </button>
-        </form>
+        <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-gray-900">
+          <Shield className="h-4 w-4 text-gray-400" /> Add user
+        </h2>
+        <Card className="max-w-sm">
+          <CardBody>
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div>
+                <Label>Name</Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <div>
+                <Label>Password (min 8 characters)</Label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <Label>Role</Label>
+                <Select value={role} onChange={(e) => setRole(e.target.value)}>
+                  <option value="STORE_USER">Store User</option>
+                  <option value="ADMIN">Admin</option>
+                </Select>
+              </div>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Creating..." : "Create user"}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       </div>
     </div>
   );

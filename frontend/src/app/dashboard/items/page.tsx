@@ -2,8 +2,17 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { Plus, Search, Package } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { StockStatusBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface ItemRow {
   id: number;
@@ -20,12 +29,6 @@ interface ItemRow {
 }
 
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
-
-function stockStatus(item: ItemRow): { label: string; className: string } {
-  if (item.currentStock <= 0) return { label: "Out of stock", className: "text-red-600" };
-  if (item.currentStock <= item.minStock) return { label: "Low stock", className: "text-amber-600" };
-  return { label: "In stock", className: "text-green-700" };
-}
 
 export default function ItemsPage() {
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -96,165 +99,136 @@ export default function ItemsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Items</h1>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "+ New item"}
-        </button>
-      </div>
+      <PageHeader
+        title="Items"
+        description="Spare parts and consumables tracked in inventory."
+        action={
+          <Button onClick={() => setShowForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> New item
+          </Button>
+        }
+      />
 
       {showForm && (
-        <form
-          onSubmit={handleCreate}
-          className="grid max-w-2xl grid-cols-1 gap-3 rounded-md border border-gray-200 p-4 sm:grid-cols-2"
-        >
-          <input
-            placeholder="Item name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm sm:col-span-2"
-          />
-          <select
-            value={formCategory}
-            onChange={(e) => setFormCategory(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="UOM (e.g. PCS, LTR, SET)"
-            required
-            value={uom}
-            onChange={(e) => setUom(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="number"
-            step="0.01"
-            placeholder="Purchase cost"
-            value={purchaseCost}
-            onChange={(e) => setPurchaseCost(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="number"
-            step="0.01"
-            placeholder="Selling price"
-            value={sellingPrice}
-            onChange={(e) => setSellingPrice(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="number"
-            placeholder="Minimum stock"
-            value={minStock}
-            onChange={(e) => setMinStock(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-            className="text-sm sm:col-span-2"
-          />
-          {formError && <p className="text-sm text-red-600 sm:col-span-2">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 sm:col-span-2"
-          >
-            {submitting ? "Saving..." : "Save item"}
-          </button>
-        </form>
+        <Card className="max-w-2xl">
+          <CardBody>
+            <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Label>Item name</Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <Label>Category</Label>
+                <Select value={formCategory} onChange={(e) => setFormCategory(e.target.value)}>
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>UOM</Label>
+                <Input placeholder="e.g. PCS, LTR, SET" required value={uom} onChange={(e) => setUom(e.target.value)} />
+              </div>
+              <div>
+                <Label>Purchase cost</Label>
+                <Input type="number" step="0.01" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
+              </div>
+              <div>
+                <Label>Selling price</Label>
+                <Input type="number" step="0.01" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} />
+              </div>
+              <div>
+                <Label>Minimum stock</Label>
+                <Input type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+              </div>
+              <div>
+                <Label>Photo (optional)</Label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+                />
+              </div>
+              {formError && <p className="text-sm text-red-600 sm:col-span-2">{formError}</p>}
+              <div className="sm:col-span-2">
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Saving..." : "Save item"}
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       <form onSubmit={handleSearch} className="flex max-w-lg flex-wrap gap-2">
-        <input
+        <Input
           placeholder="Search by item code, name or part number"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className="min-w-[200px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
+          className="min-w-[200px] flex-1"
         />
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        >
+        <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-auto">
           <option value="">All categories</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
           ))}
-        </select>
-        <button type="submit" className="rounded-md border border-gray-300 px-4 py-2 text-sm">
-          Search
-        </button>
+        </Select>
+        <Button type="submit" variant="secondary">
+          <Search className="h-4 w-4" /> Search
+        </Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton cols={6} />
       ) : items.length === 0 ? (
-        <p className="text-sm text-gray-500">No items found.</p>
+        <EmptyState icon={Package} title="No items found" description="Try a different search, or add a new item." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Photo</th>
-                <th className="px-3 py-2">Item Code</th>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">UOM</th>
-                <th className="px-3 py-2">Selling Price</th>
-                <th className="px-3 py-2">Stock</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const status = stockStatus(item);
-                return (
-                  <tr key={item.id} className="border-t border-gray-200">
-                    <td className="px-3 py-2">
-                      {item.photoUrl ? (
-                        <AuthedImage
-                          src={item.photoUrl}
-                          alt={item.name}
-                          className="h-10 w-10 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="h-10 w-10 rounded bg-gray-100" />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <Link
-                        href={`/dashboard/items/${item.id}`}
-                        className="text-gray-900 underline hover:no-underline"
-                      >
-                        {item.itemCode}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{item.name}</td>
-                    <td className="px-3 py-2">{item.category}</td>
-                    <td className="px-3 py-2">{item.uom}</td>
-                    <td className="px-3 py-2">₹{item.sellingPrice}</td>
-                    <td className={`px-3 py-2 ${status.className}`}>
-                      {item.currentStock} · {status.label}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={750}>
+          <thead>
+            <tr>
+              <Th></Th>
+              <Th>Item Code</Th>
+              <Th>Name</Th>
+              <Th>Category</Th>
+              <Th>UOM</Th>
+              <Th>Selling Price</Th>
+              <Th>Stock</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <Tr key={item.id}>
+                <Td className="w-14">
+                  {item.photoUrl ? (
+                    <AuthedImage src={item.photoUrl} alt={item.name} className="h-10 w-10 rounded object-cover" />
+                  ) : (
+                    <div className="h-10 w-10 rounded bg-gray-100" />
+                  )}
+                </Td>
+                <Td className="font-mono text-xs">
+                  <Link href={`/dashboard/items/${item.id}`} className="text-gray-900 hover:text-blue-600 hover:underline">
+                    {item.itemCode}
+                  </Link>
+                </Td>
+                <Td className="font-medium text-gray-900">{item.name}</Td>
+                <Td>{item.category}</Td>
+                <Td>{item.uom}</Td>
+                <Td>₹{item.sellingPrice}</Td>
+                <Td>
+                  <div className="flex items-center gap-2">
+                    <span>{item.currentStock}</span>
+                    <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

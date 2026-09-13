@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
 type Tab = "sales" | "purchases" | "inventory" | "workshop" | "customers";
 
@@ -21,6 +27,14 @@ function daysAgoStr(n: number) {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+function ExportButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" onClick={onClick}>
+      <Download className="h-3.5 w-3.5" /> Export CSV
+    </Button>
+  );
+}
+
 function DateRangeControls({
   from,
   to,
@@ -37,26 +51,16 @@ function DateRangeControls({
   return (
     <div className="mb-4 flex flex-wrap items-end gap-2">
       <div>
-        <label className="block text-xs text-gray-500">From</label>
-        <input
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        />
+        <Label>From</Label>
+        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
       </div>
       <div>
-        <label className="block text-xs text-gray-500">To</label>
-        <input
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        />
+        <Label>To</Label>
+        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
       </div>
-      <button onClick={onApply} className="rounded-md border border-gray-300 px-4 py-2 text-sm">
+      <Button variant="secondary" onClick={onApply}>
         Apply
-      </button>
+      </Button>
     </div>
   );
 }
@@ -81,21 +85,12 @@ function SalesTab() {
       {data && (
         <>
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm">
-              Grand total: <span className="font-semibold">₹{data.grandTotal.toFixed(2)}</span>
+            <p className="text-sm text-gray-600">
+              Grand total: <span className="font-semibold text-gray-900">₹{data.grandTotal.toFixed(2)}</span>
             </p>
-            <button
-              onClick={() => downloadCsv("sales-report.csv", data.byDay)}
-              className="text-sm text-gray-600 underline"
-            >
-              Export CSV
-            </button>
+            <ExportButton onClick={() => downloadCsv("sales-report.csv", data.byDay)} />
           </div>
-          <ReportTable
-            columns={["date", "count", "total"]}
-            rows={data.byDay}
-            empty="No sales in this range."
-          />
+          <ReportTable columns={["date", "count", "total"]} rows={data.byDay} empty="No sales in this range." />
         </>
       )}
     </div>
@@ -125,36 +120,22 @@ function PurchasesTab() {
       <DateRangeControls from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={load} />
       {data && (
         <>
-          <p className="mb-3 text-sm">
-            Grand total: <span className="font-semibold">₹{data.grandTotal.toFixed(2)}</span>
+          <p className="mb-3 text-sm text-gray-600">
+            Grand total: <span className="font-semibold text-gray-900">₹{data.grandTotal.toFixed(2)}</span>
           </p>
           <div className="mb-6">
             <div className="mb-1 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">By day</h3>
-              <button
-                onClick={() => downloadCsv("purchases-by-day.csv", data.byDay)}
-                className="text-sm text-gray-600 underline"
-              >
-                Export CSV
-              </button>
+              <h3 className="text-sm font-semibold text-gray-900">By day</h3>
+              <ExportButton onClick={() => downloadCsv("purchases-by-day.csv", data.byDay)} />
             </div>
             <ReportTable columns={["date", "count", "total"]} rows={data.byDay} empty="No purchases in this range." />
           </div>
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">By supplier</h3>
-              <button
-                onClick={() => downloadCsv("purchases-by-supplier.csv", data.bySupplier)}
-                className="text-sm text-gray-600 underline"
-              >
-                Export CSV
-              </button>
+              <h3 className="text-sm font-semibold text-gray-900">By supplier</h3>
+              <ExportButton onClick={() => downloadCsv("purchases-by-supplier.csv", data.bySupplier)} />
             </div>
-            <ReportTable
-              columns={["supplier", "count", "total"]}
-              rows={data.bySupplier}
-              empty="No purchases in this range."
-            />
+            <ReportTable columns={["supplier", "count", "total"]} rows={data.bySupplier} empty="No purchases in this range." />
           </div>
         </>
       )}
@@ -179,17 +160,12 @@ function InventoryTab() {
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm">
-          Total stock value: <span className="font-semibold">₹{data.totalStockValue.toFixed(2)}</span>{" "}
-          · Low stock: <span className="font-semibold text-amber-600">{data.lowStockCount}</span> · Out
-          of stock: <span className="font-semibold text-red-600">{data.outOfStockCount}</span>
+        <p className="text-sm text-gray-600">
+          Total stock value: <span className="font-semibold text-gray-900">₹{data.totalStockValue.toFixed(2)}</span> · Low
+          stock: <span className="font-semibold text-amber-600">{data.lowStockCount}</span> · Out of stock:{" "}
+          <span className="font-semibold text-red-600">{data.outOfStockCount}</span>
         </p>
-        <button
-          onClick={() => downloadCsv("inventory-report.csv", data.rows)}
-          className="text-sm text-gray-600 underline"
-        >
-          Export CSV
-        </button>
+        <ExportButton onClick={() => downloadCsv("inventory-report.csv", data.rows)} />
       </div>
       <ReportTable
         columns={["itemCode", "name", "category", "uom", "currentStock", "minStock", "stockValue", "status"]}
@@ -220,13 +196,8 @@ function WorkshopTab() {
       {data && (
         <>
           <div className="mb-1 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Job cards by status</h3>
-            <button
-              onClick={() => downloadCsv("workshop-report.csv", data.byStatus)}
-              className="text-sm text-gray-600 underline"
-            >
-              Export CSV
-            </button>
+            <h3 className="text-sm font-semibold text-gray-900">Job cards by status</h3>
+            <ExportButton onClick={() => downloadCsv("workshop-report.csv", data.byStatus)} />
           </div>
           <ReportTable columns={["status", "count"]} rows={data.byStatus} empty="No job cards in this range." />
         </>
@@ -253,60 +224,54 @@ function CustomersTab() {
     <div>
       <DateRangeControls from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={load} />
       {data && (
-        <div className="grid grid-cols-3 gap-3 text-sm">
-          <div className="rounded-md border border-gray-200 p-3">
-            <p className="text-xs text-gray-500">New customers (in range)</p>
-            <p className="text-xl font-semibold">{data.newCustomers}</p>
-          </div>
-          <div className="rounded-md border border-gray-200 p-3">
-            <p className="text-xs text-gray-500">Repeat customers</p>
-            <p className="text-xl font-semibold">{data.repeatCustomers}</p>
-          </div>
-          <div className="rounded-md border border-gray-200 p-3">
-            <p className="text-xs text-gray-500">Total customers</p>
-            <p className="text-xl font-semibold">{data.totalCustomers}</p>
-          </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Card>
+            <CardBody>
+              <p className="text-xs text-gray-500">New customers (in range)</p>
+              <p className="text-xl font-semibold text-gray-900">{data.newCustomers}</p>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <p className="text-xs text-gray-500">Repeat customers</p>
+              <p className="text-xl font-semibold text-gray-900">{data.repeatCustomers}</p>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <p className="text-xs text-gray-500">Total customers</p>
+              <p className="text-xl font-semibold text-gray-900">{data.totalCustomers}</p>
+            </CardBody>
+          </Card>
         </div>
       )}
     </div>
   );
 }
 
-function ReportTable({
-  columns,
-  rows,
-  empty,
-}: {
-  columns: string[];
-  rows: Record<string, unknown>[];
-  empty: string;
-}) {
+function ReportTable({ columns, rows, empty }: { columns: string[]; rows: Record<string, unknown>[]; empty: string }) {
   if (rows.length === 0) return <p className="text-sm text-gray-500">{empty}</p>;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[500px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-        <thead className="bg-gray-100 text-left">
-          <tr>
-            {columns.map((c) => (
-              <th key={c} className="px-3 py-2 capitalize">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-t border-gray-200">
-              {columns.map((c) => (
-                <td key={c} className="px-3 py-2">
-                  {String(row[c] ?? "-")}
-                </td>
-              ))}
-            </tr>
+    <Table minWidth={500}>
+      <thead>
+        <tr>
+          {columns.map((c) => (
+            <Th key={c} className="capitalize">
+              {c}
+            </Th>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <Tr key={i}>
+            {columns.map((c) => (
+              <Td key={c}>{String(row[c] ?? "-")}</Td>
+            ))}
+          </Tr>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
@@ -315,15 +280,15 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold">Reports</h1>
+      <PageHeader title="Reports" description="Sales, purchases, inventory, workshop and customer insights." />
 
-      <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-2">
+      <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-2">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-sm ${
-              tab === t.key ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              tab === t.key ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"
             }`}
           >
             {t.label}

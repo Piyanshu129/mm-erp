@@ -3,7 +3,16 @@
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Plus, Search, ClipboardList } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Textarea } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { JobCardStatusBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface VehicleOption {
   id: number;
@@ -110,156 +119,127 @@ function JobCardsPageContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Job Cards</h1>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "+ New job card"}
-        </button>
-      </div>
+      <PageHeader
+        title="Job Cards"
+        description="Track every vehicle from drop-off to invoice."
+        action={
+          <Button onClick={() => setShowForm((s) => !s)}>
+            <Plus className="h-4 w-4" /> New job card
+          </Button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={handleCreate} className="max-w-lg space-y-3 rounded-md border border-gray-200 p-4">
-          <div>
-            <div className="flex gap-2">
-              <input
-                placeholder="Search vehicle by registration number"
-                value={vehicleQuery}
-                onChange={(e) => setVehicleQuery(e.target.value)}
-                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="button"
-                onClick={searchVehicles}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm"
-              >
-                Search
-              </button>
-            </div>
-            {selectedVehicle ? (
-              <p className="mt-2 text-sm">
-                Selected: <strong>{selectedVehicle.registrationNumber}</strong> —{" "}
-                {selectedVehicle.make} {selectedVehicle.model} ({selectedVehicle.customer.name})
-              </p>
-            ) : (
-              vehicleResults.length > 0 && (
-                <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                  {vehicleResults.map((v) => (
-                    <li key={v.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedVehicle(v);
-                          setVehicleResults([]);
-                        }}
-                        className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                      >
-                        {v.registrationNumber} — {v.make} {v.model} ({v.customer.name})
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )
-            )}
-          </div>
+        <Card className="max-w-lg">
+          <CardBody>
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Search vehicle by registration number"
+                    value={vehicleQuery}
+                    onChange={(e) => setVehicleQuery(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button type="button" variant="secondary" onClick={searchVehicles}>
+                    <Search className="h-4 w-4" /> Search
+                  </Button>
+                </div>
+                {selectedVehicle ? (
+                  <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                    Selected: <strong>{selectedVehicle.registrationNumber}</strong> — {selectedVehicle.make}{" "}
+                    {selectedVehicle.model} ({selectedVehicle.customer.name})
+                  </p>
+                ) : (
+                  vehicleResults.length > 0 && (
+                    <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
+                      {vehicleResults.map((v) => (
+                        <li key={v.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedVehicle(v);
+                              setVehicleResults([]);
+                            }}
+                            className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                          >
+                            {v.registrationNumber} — {v.make} {v.model} ({v.customer.name})
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                )}
+              </div>
 
-          <input
-            type="number"
-            placeholder="Current KM"
-            value={km}
-            onChange={(e) => setKm(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <textarea
-            placeholder="Customer complaint"
-            value={complaint}
-            onChange={(e) => setComplaint(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            rows={2}
-          />
-          <textarea
-            placeholder="Required work"
-            value={requiredWork}
-            onChange={(e) => setRequiredWork(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            rows={2}
-          />
+              <Input type="number" placeholder="Current KM" value={km} onChange={(e) => setKm(e.target.value)} />
+              <Textarea placeholder="Customer complaint" value={complaint} onChange={(e) => setComplaint(e.target.value)} rows={2} />
+              <Textarea placeholder="Required work" value={requiredWork} onChange={(e) => setRequiredWork(e.target.value)} rows={2} />
 
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "Creating..." : "Create job card"}
-          </button>
-        </form>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Creating..." : "Create job card"}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       <form onSubmit={handleFilter} className="flex flex-wrap gap-2">
-        <input
+        <Input
           placeholder="Search by job card # or vehicle number"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className="min-w-[220px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
+          className="min-w-[220px] flex-1"
         />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        >
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-auto">
           <option value="">All statuses</option>
           {Object.entries(STATUS_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
-        </select>
-        <button type="submit" className="rounded-md border border-gray-300 px-4 py-2 text-sm">
-          Filter
-        </button>
+        </Select>
+        <Button type="submit" variant="secondary">
+          <Search className="h-4 w-4" /> Filter
+        </Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
+        <TableSkeleton cols={5} />
       ) : jobCards.length === 0 ? (
-        <p className="text-sm text-gray-500">No job cards found.</p>
+        <EmptyState icon={ClipboardList} title="No job cards found" description="Try a different filter, or create a new job card." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[650px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Job Card #</th>
-                <th className="px-3 py-2">Vehicle</th>
-                <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobCards.map((jc) => (
-                <tr key={jc.id} className="border-t border-gray-200">
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/dashboard/jobcards/${jc.id}`}
-                      className="font-mono text-gray-900 underline hover:no-underline"
-                    >
-                      {jc.jobCardNumber}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    {jc.vehicle.registrationNumber} ({jc.vehicle.make} {jc.vehicle.model})
-                  </td>
-                  <td className="px-3 py-2">{jc.vehicle.customer.name}</td>
-                  <td className="px-3 py-2">{STATUS_LABELS[jc.status] ?? jc.status}</td>
-                  <td className="px-3 py-2">{new Date(jc.createdAt).toLocaleDateString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table minWidth={650}>
+          <thead>
+            <tr>
+              <Th>Job Card #</Th>
+              <Th>Vehicle</Th>
+              <Th>Customer</Th>
+              <Th>Status</Th>
+              <Th>Date</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobCards.map((jc) => (
+              <Tr key={jc.id}>
+                <Td className="font-mono">
+                  <Link href={`/dashboard/jobcards/${jc.id}`} className="font-medium text-gray-900 hover:text-blue-600 hover:underline">
+                    {jc.jobCardNumber}
+                  </Link>
+                </Td>
+                <Td>
+                  {jc.vehicle.registrationNumber} ({jc.vehicle.make} {jc.vehicle.model})
+                </Td>
+                <Td>{jc.vehicle.customer.name}</Td>
+                <Td>
+                  <JobCardStatusBadge status={jc.status} label={STATUS_LABELS[jc.status] ?? jc.status} />
+                </Td>
+                <Td>{new Date(jc.createdAt).toLocaleDateString()}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

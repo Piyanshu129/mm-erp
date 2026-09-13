@@ -3,8 +3,26 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  ArrowLeft,
+  Camera,
+  Video,
+  X,
+  Search,
+  Trash2,
+  Pencil,
+  FileText,
+  Wrench,
+  Receipt,
+} from "lucide-react";
 import { AuthedImage, AuthedVideo } from "@/components/AuthedMedia";
 import { apiFetch, ApiError } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Textarea, Label } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { JobCardStatusBadge } from "@/components/ui/Badge";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Draft",
@@ -66,6 +84,15 @@ interface ItemOption {
   name: string;
   uom: string;
   currentStock: number;
+}
+
+function SectionHeading({ icon: Icon, children }: { icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
+  return (
+    <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-gray-900">
+      <Icon className="h-4 w-4 text-gray-400" />
+      {children}
+    </h2>
+  );
 }
 
 export default function JobCardDetailPage() {
@@ -243,32 +270,35 @@ export default function JobCardDetailPage() {
   }
 
   if (loading || !jobCard) {
-    return <p className="text-sm text-gray-500">Loading...</p>;
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
       <div>
-        <Link href="/dashboard/jobcards" className="text-sm text-gray-500 underline">
-          ← All job cards
+        <Link href="/dashboard/jobcards" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-4 w-4" /> All job cards
         </Link>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="font-mono text-lg font-semibold">{jobCard.jobCardNumber}</h1>
+            <h1 className="font-mono text-lg font-semibold text-gray-900">{jobCard.jobCardNumber}</h1>
             <p className="text-sm text-gray-600">
               {jobCard.vehicle.registrationNumber} — {jobCard.vehicle.make} {jobCard.vehicle.model} ·{" "}
-              <Link
-                href={`/dashboard/customers/${jobCard.vehicle.customer.id}`}
-                className="underline"
-              >
+              <Link href={`/dashboard/customers/${jobCard.vehicle.customer.id}`} className="text-blue-600 hover:underline">
                 {jobCard.vehicle.customer.name}
               </Link>
             </p>
           </div>
-          <select
+          <Select
             value={jobCard.status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="w-auto"
           >
             {Object.entries(STATUS_LABELS)
               // Once invoiced, the backend refuses anything but Invoiced/Closed —
@@ -280,92 +310,73 @@ export default function JobCardDetailPage() {
                   {label}
                 </option>
               ))}
-          </select>
+          </Select>
         </div>
-        {locked && (
-          <p className="mt-2 text-sm text-amber-700">
-            This job card is {STATUS_LABELS[jobCard.status].toLowerCase()} — parts and labour can no
-            longer be changed.
-          </p>
-        )}
+        <div className="mt-2 flex items-center gap-2">
+          <JobCardStatusBadge status={jobCard.status} label={STATUS_LABELS[jobCard.status]} />
+          {locked && <span className="text-sm text-amber-700">Parts and labour can no longer be changed.</span>}
+        </div>
       </div>
 
-      {actionError && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>
-      )}
+      {actionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
       {/* Details */}
       <div>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Details</h2>
-          <button
-            onClick={() => setEditingDetails((v) => !v)}
-            className="text-sm text-gray-600 underline"
-          >
-            {editingDetails ? "Cancel" : "Edit"}
-          </button>
+        <div className="mb-3 flex items-center justify-between">
+          <SectionHeading icon={FileText}>Details</SectionHeading>
+          <Button size="sm" variant="ghost" onClick={() => setEditingDetails((v) => !v)}>
+            <Pencil className="h-3.5 w-3.5" /> {editingDetails ? "Cancel" : "Edit"}
+          </Button>
         </div>
-        {editingDetails ? (
-          <form onSubmit={handleSaveDetails} className="max-w-lg space-y-3">
-            <input
-              type="number"
-              placeholder="Current KM"
-              value={km}
-              onChange={(e) => setKm(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <textarea
-              placeholder="Customer complaint"
-              value={complaint}
-              onChange={(e) => setComplaint(e.target.value)}
-              rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <textarea
-              placeholder="Required work"
-              value={requiredWork}
-              onChange={(e) => setRequiredWork(e.target.value)}
-              rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <textarea
-              placeholder="Notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-            >
-              Save
-            </button>
-          </form>
-        ) : (
-          <dl className="grid max-w-lg grid-cols-3 gap-x-4 gap-y-1 text-sm text-gray-600">
-            <dt>KM</dt>
-            <dd className="col-span-2">{jobCard.kmAtService ?? "-"}</dd>
-            <dt>Complaint</dt>
-            <dd className="col-span-2">{jobCard.complaint ?? "-"}</dd>
-            <dt>Required work</dt>
-            <dd className="col-span-2">{jobCard.requiredWork ?? "-"}</dd>
-            <dt>Notes</dt>
-            <dd className="col-span-2">{jobCard.notes ?? "-"}</dd>
-          </dl>
-        )}
+        <Card className="max-w-lg">
+          <CardBody>
+            {editingDetails ? (
+              <form onSubmit={handleSaveDetails} className="space-y-3">
+                <div>
+                  <Label>Current KM</Label>
+                  <Input type="number" value={km} onChange={(e) => setKm(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Customer complaint</Label>
+                  <Textarea value={complaint} onChange={(e) => setComplaint(e.target.value)} rows={2} />
+                </div>
+                <div>
+                  <Label>Required work</Label>
+                  <Textarea value={requiredWork} onChange={(e) => setRequiredWork(e.target.value)} rows={2} />
+                </div>
+                <div>
+                  <Label>Notes</Label>
+                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+                </div>
+                <Button type="submit">Save</Button>
+              </form>
+            ) : (
+              <dl className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                <dt className="text-gray-500">KM</dt>
+                <dd className="col-span-2 text-gray-900">{jobCard.kmAtService ?? "-"}</dd>
+                <dt className="text-gray-500">Complaint</dt>
+                <dd className="col-span-2 text-gray-900">{jobCard.complaint ?? "-"}</dd>
+                <dt className="text-gray-500">Required work</dt>
+                <dd className="col-span-2 text-gray-900">{jobCard.requiredWork ?? "-"}</dd>
+                <dt className="text-gray-500">Notes</dt>
+                <dd className="col-span-2 text-gray-900">{jobCard.notes ?? "-"}</dd>
+              </dl>
+            )}
+          </CardBody>
+        </Card>
       </div>
 
       {/* Inspection media */}
       <div>
-        <h2 className="mb-2 text-base font-semibold">Vehicle inspection</h2>
+        <SectionHeading icon={Camera}>Vehicle inspection</SectionHeading>
         <div className="flex flex-wrap gap-2">
           {MEDIA_ANGLES.map((a) => (
             <label
               key={a.value}
-              className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
-              {uploadingAngle === a.value ? "Uploading..." : `📷 ${a.label}`}
+              <Camera className="h-3.5 w-3.5" />
+              {uploadingAngle === a.value ? "Uploading..." : a.label}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -378,8 +389,9 @@ export default function JobCardDetailPage() {
               />
             </label>
           ))}
-          <label className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50">
-            {uploadingAngle === "WALKAROUND" ? "Uploading..." : "🎥 360° Walk-around video"}
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+            <Video className="h-3.5 w-3.5" />
+            {uploadingAngle === "WALKAROUND" ? "Uploading..." : "360° Walk-around video"}
             <input
               type="file"
               accept="video/mp4,video/quicktime,video/webm"
@@ -398,20 +410,16 @@ export default function JobCardDetailPage() {
             {jobCard.media.map((m) => (
               <div key={m.id} className="relative">
                 {m.mediaType === "PHOTO" ? (
-                  <AuthedImage
-                    src={m.url}
-                    alt={m.angle ?? "photo"}
-                    className="h-20 w-20 rounded object-cover"
-                  />
+                  <AuthedImage src={m.url} alt={m.angle ?? "photo"} className="h-20 w-20 rounded-lg object-cover" />
                 ) : (
-                  <AuthedVideo src={m.url} className="h-20 w-32 rounded" />
+                  <AuthedVideo src={m.url} className="h-20 w-32 rounded-lg" />
                 )}
                 <button
                   onClick={() => handleRemoveMedia(m.id)}
-                  className="absolute -right-1 -top-1 rounded-full bg-white px-1 text-xs text-red-600 shadow"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-red-600 shadow ring-1 ring-gray-200 hover:bg-red-50"
                   title="Remove"
                 >
-                  ✕
+                  <X className="h-3 w-3" />
                 </button>
               </div>
             ))}
@@ -421,245 +429,200 @@ export default function JobCardDetailPage() {
 
       {/* Parts */}
       <div>
-        <h2 className="mb-2 text-base font-semibold">Parts</h2>
+        <SectionHeading icon={Wrench}>Parts</SectionHeading>
         {!locked && (
-          <form onSubmit={handleAddPart} className="mb-3 max-w-lg space-y-2">
-            <div className="flex gap-2">
-              <input
-                placeholder="Search item code, name or part number"
-                value={itemQuery}
-                onChange={(e) => setItemQuery(e.target.value)}
-                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="button"
-                onClick={searchItems}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm"
-              >
-                Search
-              </button>
-            </div>
-            {selectedItem ? (
-              <p className="text-sm">
-                Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} (stock:{" "}
-                {selectedItem.currentStock} {selectedItem.uom})
-              </p>
-            ) : (
-              itemResults.length > 0 && (
-                <ul className="max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                  {itemResults.map((it) => (
-                    <li key={it.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedItem(it);
-                          setItemResults([]);
-                        }}
-                        className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                      >
-                        {it.itemCode} — {it.name} (stock: {it.currentStock})
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )
-            )}
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min={1}
-                placeholder="Qty"
-                value={partQty}
-                onChange={(e) => setPartQty(e.target.value)}
-                className="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="submit"
-                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-              >
-                Add part
-              </button>
-            </div>
-          </form>
+          <Card className="mb-3 max-w-lg">
+            <CardBody>
+              <form onSubmit={handleAddPart} className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Search item code, name or part number"
+                    value={itemQuery}
+                    onChange={(e) => setItemQuery(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button type="button" variant="secondary" onClick={searchItems}>
+                    <Search className="h-4 w-4" /> Search
+                  </Button>
+                </div>
+                {selectedItem ? (
+                  <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                    Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} (stock:{" "}
+                    {selectedItem.currentStock} {selectedItem.uom})
+                  </p>
+                ) : (
+                  itemResults.length > 0 && (
+                    <ul className="max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
+                      {itemResults.map((it) => (
+                        <li key={it.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedItem(it);
+                              setItemResults([]);
+                            }}
+                            className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                          >
+                            {it.itemCode} — {it.name} (stock: {it.currentStock})
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                )}
+                <div className="flex gap-2">
+                  <Input type="number" min={1} placeholder="Qty" value={partQty} onChange={(e) => setPartQty(e.target.value)} className="w-24" />
+                  <Button type="submit">Add part</Button>
+                </div>
+              </form>
+            </CardBody>
+          </Card>
         )}
 
         {jobCard.parts.length === 0 ? (
           <p className="text-sm text-gray-500">No parts added yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[500px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-              <thead className="bg-gray-100 text-left">
-                <tr>
-                  <th className="px-3 py-2">Item</th>
-                  <th className="px-3 py-2">Qty</th>
-                  <th className="px-3 py-2">Unit Price</th>
-                  <th className="px-3 py-2">Amount</th>
-                  {!locked && <th className="px-3 py-2"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {jobCard.parts.map((p) => (
-                  <tr key={p.id} className="border-t border-gray-200">
-                    <td className="px-3 py-2">
-                      {p.item.itemCode} — {p.item.name}
-                    </td>
-                    <td className="px-3 py-2">
-                      {p.quantity} {p.item.uom}
-                    </td>
-                    <td className="px-3 py-2">₹{p.unitPrice}</td>
-                    <td className="px-3 py-2">₹{p.amount}</td>
-                    {!locked && (
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => handleRemovePart(p.id)}
-                          className="text-red-600 underline"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table minWidth={550}>
+            <thead>
+              <tr>
+                <Th>Item</Th>
+                <Th>Qty</Th>
+                <Th>Unit Price</Th>
+                <Th>Amount</Th>
+                {!locked && <Th></Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {jobCard.parts.map((p) => (
+                <Tr key={p.id}>
+                  <Td>
+                    {p.item.itemCode} — {p.item.name}
+                  </Td>
+                  <Td>
+                    {p.quantity} {p.item.uom}
+                  </Td>
+                  <Td>₹{p.unitPrice}</Td>
+                  <Td>₹{p.amount}</Td>
+                  {!locked && (
+                    <Td>
+                      <button onClick={() => handleRemovePart(p.id)} className="text-red-600 hover:text-red-700" title="Remove">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </Td>
+                  )}
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
         )}
       </div>
 
       {/* Labour */}
       <div>
-        <h2 className="mb-2 text-base font-semibold">Labour / Services</h2>
+        <SectionHeading icon={Wrench}>Labour / Services</SectionHeading>
         {!locked && (
-          <form onSubmit={handleAddLabour} className="mb-3 grid max-w-2xl grid-cols-1 gap-2 sm:grid-cols-5">
-            <input
-              placeholder="Description"
-              required
-              value={labourDesc}
-              onChange={(e) => setLabourDesc(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm sm:col-span-2"
-            />
-            <input
-              placeholder="Technician (optional)"
-              value={labourTech}
-              onChange={(e) => setLabourTech(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              min={1}
-              placeholder="Qty"
-              value={labourQty}
-              onChange={(e) => setLabourQty(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Rate"
-              required
-              value={labourRate}
-              onChange={(e) => setLabourRate(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white sm:col-span-5"
-            >
-              Add labour
-            </button>
-          </form>
+          <Card className="mb-3 max-w-2xl">
+            <CardBody>
+              <form onSubmit={handleAddLabour} className="grid grid-cols-1 gap-2 sm:grid-cols-5">
+                <Input
+                  placeholder="Description"
+                  required
+                  value={labourDesc}
+                  onChange={(e) => setLabourDesc(e.target.value)}
+                  className="sm:col-span-2"
+                />
+                <Input placeholder="Technician (optional)" value={labourTech} onChange={(e) => setLabourTech(e.target.value)} />
+                <Input type="number" min={1} placeholder="Qty" value={labourQty} onChange={(e) => setLabourQty(e.target.value)} />
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="Rate"
+                  required
+                  value={labourRate}
+                  onChange={(e) => setLabourRate(e.target.value)}
+                />
+                <Button type="submit" className="sm:col-span-5">
+                  Add labour
+                </Button>
+              </form>
+            </CardBody>
+          </Card>
         )}
 
         {jobCard.labour.length === 0 ? (
           <p className="text-sm text-gray-500">No labour entries yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[500px] border-collapse overflow-hidden rounded-md border border-gray-200 text-sm">
-              <thead className="bg-gray-100 text-left">
-                <tr>
-                  <th className="px-3 py-2">Description</th>
-                  <th className="px-3 py-2">Technician</th>
-                  <th className="px-3 py-2">Qty</th>
-                  <th className="px-3 py-2">Rate</th>
-                  <th className="px-3 py-2">Amount</th>
-                  {!locked && <th className="px-3 py-2"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {jobCard.labour.map((l) => (
-                  <tr key={l.id} className="border-t border-gray-200">
-                    <td className="px-3 py-2">{l.description}</td>
-                    <td className="px-3 py-2">{l.technician ?? "-"}</td>
-                    <td className="px-3 py-2">{l.quantity}</td>
-                    <td className="px-3 py-2">₹{l.rate}</td>
-                    <td className="px-3 py-2">₹{l.amount}</td>
-                    {!locked && (
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => handleRemoveLabour(l.id)}
-                          className="text-red-600 underline"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table minWidth={550}>
+            <thead>
+              <tr>
+                <Th>Description</Th>
+                <Th>Technician</Th>
+                <Th>Qty</Th>
+                <Th>Rate</Th>
+                <Th>Amount</Th>
+                {!locked && <Th></Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {jobCard.labour.map((l) => (
+                <Tr key={l.id}>
+                  <Td>{l.description}</Td>
+                  <Td>{l.technician ?? "-"}</Td>
+                  <Td>{l.quantity}</Td>
+                  <Td>₹{l.rate}</Td>
+                  <Td>₹{l.amount}</Td>
+                  {!locked && (
+                    <Td>
+                      <button onClick={() => handleRemoveLabour(l.id)} className="text-red-600 hover:text-red-700" title="Remove">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </Td>
+                  )}
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
         )}
       </div>
 
       {/* Summary */}
-      <div className="max-w-sm rounded-md border border-gray-200 p-4 text-sm">
-        <div className="flex justify-between py-1">
-          <span>Parts total</span>
-          <span>₹{jobCard.partsTotal.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between py-1">
-          <span>Labour total</span>
-          <span>₹{jobCard.labourTotal.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between border-t border-gray-200 py-2 font-semibold">
-          <span>Grand total</span>
-          <span>₹{jobCard.grandTotal.toFixed(2)}</span>
-        </div>
+      <Card className="max-w-sm">
+        <CardBody>
+          <div className="flex justify-between py-1 text-sm">
+            <span className="text-gray-500">Parts total</span>
+            <span className="text-gray-900">₹{jobCard.partsTotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between py-1 text-sm">
+            <span className="text-gray-500">Labour total</span>
+            <span className="text-gray-900">₹{jobCard.labourTotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between border-t border-gray-200 py-2 text-base font-semibold text-gray-900">
+            <span>Grand total</span>
+            <span>₹{jobCard.grandTotal.toFixed(2)}</span>
+          </div>
 
-        <div className="mt-3 border-t border-gray-200 pt-3">
-          {jobCard.invoice ? (
-            <Link
-              href={`/dashboard/invoices/${jobCard.invoice.id}`}
-              className="text-gray-900 underline"
-            >
-              View invoice {jobCard.invoice.invoiceNumber}
-            </Link>
-          ) : jobCard.status === "COMPLETED" ? (
-            <form onSubmit={handleGenerateInvoice} className="space-y-2">
-              <label className="block text-xs text-gray-500">Discount (optional)</label>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={generatingInvoice}
-                className="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          <div className="mt-3 border-t border-gray-200 pt-3">
+            {jobCard.invoice ? (
+              <Link
+                href={`/dashboard/invoices/${jobCard.invoice.id}`}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
               >
-                {generatingInvoice ? "Generating..." : "Generate invoice"}
-              </button>
-            </form>
-          ) : (
-            <p className="text-xs text-gray-500">
-              Mark this job card as Completed to generate an invoice.
-            </p>
-          )}
-        </div>
-      </div>
+                <Receipt className="h-4 w-4" /> View invoice {jobCard.invoice.invoiceNumber}
+              </Link>
+            ) : jobCard.status === "COMPLETED" ? (
+              <form onSubmit={handleGenerateInvoice} className="space-y-2">
+                <Label>Discount (optional)</Label>
+                <Input type="number" step="0.01" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
+                <Button type="submit" disabled={generatingInvoice} className="w-full">
+                  {generatingInvoice ? "Generating..." : "Generate invoice"}
+                </Button>
+              </form>
+            ) : (
+              <p className="text-xs text-gray-500">Mark this job card as Completed to generate an invoice.</p>
+            )}
+          </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }
