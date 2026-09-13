@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+.next/
+*.log
+*.tsbuildinfo
+next-env.d.ts
+
+# env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+
+# prisma
+backend/generated/
+
+# uploaded files (local disk storage, not committed)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# backup dumps (contain real business data, never committed)
+backend/backups/
