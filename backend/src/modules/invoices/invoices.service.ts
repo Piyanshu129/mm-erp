@@ -88,3 +88,29 @@ export async function createInvoice(jobCardId: number, discount: number, created
     return tx.invoice.findUniqueOrThrow({ where: { id: created.id }, include: detailInclude });
   });
 }
+
+export function paymentStatusFor(total: number, paid: number): "PENDING" | "PARTIAL" | "PAID" {
+  if (paid <= 0) return "PENDING";
+  if (paid >= total) return "PAID";
+  return "PARTIAL";
+}
+
+export async function recordInvoicePayment(
+  invoiceId: number,
+  input: { paymentAmount: number; paymentMode?: string; paymentReference?: string; paymentReceivedBy?: string }
+) {
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+  if (!invoice) throw new NotFoundError("Invoice not found");
+
+  return prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      paymentAmount: input.paymentAmount,
+      paymentMode: input.paymentMode,
+      paymentReference: input.paymentReference,
+      paymentReceivedBy: input.paymentReceivedBy,
+      paymentDate: new Date(),
+    },
+    include: detailInclude,
+  });
+}

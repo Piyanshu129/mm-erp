@@ -1,8 +1,8 @@
 import { prisma } from "./prisma";
 
 // Dependency order matters twice over: this is the order tables are restored
-// in (each table's foreign keys must already exist), and stock_ledger has to
-// come after BOTH purchases and job_card_parts since it can reference either.
+// in (each table's foreign keys must already exist). itemUnit needs both
+// item and purchase; jobCardPart needs jobCard, itemUnit, and item.
 // refresh_tokens is deliberately excluded — sessions are meant to be
 // re-issued, not restored.
 export const BACKUP_TABLES = [
@@ -12,13 +12,16 @@ export const BACKUP_TABLES = [
   "supplier",
   "item",
   "vehicle",
+  "employee",
   "jobCard",
   "purchase",
+  "itemUnit",
   "jobCardPart",
   "jobCardLabour",
   "jobCardMedia",
-  "stockLedger",
   "invoice",
+  "attendance",
+  "salaryPayment",
 ] as const;
 
 export type BackupTable = (typeof BACKUP_TABLES)[number];
@@ -94,13 +97,16 @@ function tableNameFor(table: BackupTable): string {
     supplier: "suppliers",
     item: "items",
     vehicle: "vehicles",
+    employee: "employees",
     jobCard: "job_cards",
     purchase: "purchases",
+    itemUnit: "item_units",
     jobCardPart: "job_card_parts",
     jobCardLabour: "job_card_labour",
     jobCardMedia: "job_card_media",
-    stockLedger: "stock_ledger",
     invoice: "invoices",
+    attendance: "attendance",
+    salaryPayment: "salary_payments",
   };
   return map[table];
 }

@@ -5,13 +5,14 @@ export async function addMedia(
   jobCardId: number,
   mediaType: "PHOTO" | "VIDEO",
   angle: string | undefined,
+  phase: string,
   url: string
 ) {
   const jobCard = await prisma.jobCard.findUnique({ where: { id: jobCardId } });
   if (!jobCard) throw new NotFoundError("Job card not found");
 
   return prisma.jobCardMedia.create({
-    data: { jobCardId, mediaType, angle, url },
+    data: { jobCardId, mediaType, angle, phase, url },
   });
 }
 

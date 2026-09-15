@@ -1,13 +1,27 @@
 import { prisma } from "../../lib/prisma";
-import { NotFoundError } from "../../lib/errors";
+import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
+
+// SPARE_PART/PAINT/TOOL are inventory types — they need an Item and generate
+// one ItemUnit (a physically-serialed part) per unit of quantity. The rest
+// are plain business expenses with no stock implications at all.
+export const INVENTORY_ITEM_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
+export const EXPENSE_ITEM_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
+export const PURCHASE_ITEM_TYPES = [...INVENTORY_ITEM_TYPES, ...EXPENSE_ITEM_TYPES] as const;
 
 export interface PurchaseInput {
   supplierId: number;
-  itemId: number;
+  itemType: (typeof PURCHASE_ITEM_TYPES)[number];
+  itemId?: number;
+  description?: string;
   quantity: number;
   purchaseCost: number;
   sellingPrice?: number;
+  billUrl?: string;
+  paymentAmount?: number;
+  paymentMode?: string;
+  paymentReference?: string;
+  paymentBy?: string;
   purchaseDate?: string;
   remarks?: string;
   createdById: number;
@@ -17,7 +31,18 @@ const purchaseInclude = {
   supplier: true,
   item: true,
   createdBy: { select: { id: true, name: true } },
+  units: { select: { id: true } },
 } as const;
+
+function isInventoryType(itemType: string): boolean {
+  return (INVENTORY_ITEM_TYPES as readonly string[]).includes(itemType);
+}
+
+export function paymentStatusFor(total: number, paid: number): "PENDING" | "PARTIAL" | "PAID" {
+  if (paid <= 0) return "PENDING";
+  if (paid >= total) return "PAID";
+  return "PARTIAL";
+}
 
 export async function listPurchases(page: PageParams, itemId?: number) {
   const where = itemId ? { itemId } : {};
@@ -33,17 +58,34 @@ export async function listPurchases(page: PageParams, itemId?: number) {
   return { total, purchases };
 }
 
-// The single most business-critical operation in the system: one purchase
-// atomically (a) records the transaction with its serial number (the row's
-// own id), (b) increments the item's stock via a DB-level atomic increment
-// (not read-then-write, so two simultaneous purchases of the same item can
-// never lose an update), and (c) appends a ledger entry for traceability.
-// If any step fails, all of it rolls back — stock and the ledger can never
-// drift out of sync with the purchases that supposedly caused them.
+// The single most business-critical operation in the system. For an
+// inventory purchase this atomically: (a) records the purchase, (b) creates
+// one ItemUnit per unit of quantity — each gets its own permanent serial
+// number (its own row id), written on a sticker and placed on the physical
+// part — and (c) bumps the item's cached stock count by exactly the number
+// of units just created. An expense purchase (Travel/Petrol/Food/Others)
+// just records the cost — no item, no units, no stock change.
 export async function createPurchase(input: PurchaseInput) {
+  if (!PURCHASE_ITEM_TYPES.includes(input.itemType)) {
+    throw new ConflictError(`Invalid item type: ${input.itemType}`);
+  }
+  const inventoryType = isInventoryType(input.itemType);
+  if (inventoryType && !input.itemId) {
+    throw new ConflictError(`${input.itemType} purchases must reference an item`);
+  }
+  if (!inventoryType && !input.description) {
+    throw new ConflictError(`${input.itemType} purchases must have a description`);
+  }
+  if (inventoryType && input.sellingPrice != null && input.sellingPrice < input.purchaseCost) {
+    throw new ConflictError("Selling price cannot be lower than purchase cost");
+  }
+
   return prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { id: input.itemId } });
-    if (!item) throw new NotFoundError("Item not found");
+    let item = null;
+    if (inventoryType) {
+      item = await tx.item.findUnique({ where: { id: input.itemId! } });
+      if (!item) throw new NotFoundError("Item not found");
+    }
 
     const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw new NotFoundError("Supplier not found");
@@ -51,38 +93,62 @@ export async function createPurchase(input: PurchaseInput) {
     const purchase = await tx.purchase.create({
       data: {
         supplierId: input.supplierId,
-        itemId: input.itemId,
+        itemType: input.itemType,
+        itemId: inventoryType ? input.itemId : undefined,
+        description: input.description,
         quantity: input.quantity,
         purchaseCost: input.purchaseCost,
         sellingPrice: input.sellingPrice,
+        billUrl: input.billUrl,
+        paymentAmount: input.paymentAmount ?? 0,
+        paymentMode: input.paymentMode,
+        paymentReference: input.paymentReference,
+        paymentBy: input.paymentBy,
+        paymentDate: (input.paymentAmount ?? 0) > 0 ? new Date() : undefined,
         remarks: input.remarks,
         purchaseDate: input.purchaseDate ? new Date(input.purchaseDate) : new Date(),
         createdById: input.createdById,
       },
-      include: purchaseInclude,
     });
 
-    const updatedItem = await tx.item.update({
-      where: { id: item.id },
-      data: {
-        currentStock: { increment: input.quantity },
-        purchaseCost: input.purchaseCost,
-        ...(input.sellingPrice != null ? { sellingPrice: input.sellingPrice } : {}),
-      },
-    });
+    if (inventoryType && item) {
+      await tx.itemUnit.createMany({
+        data: Array.from({ length: input.quantity }, () => ({
+          itemId: item!.id,
+          purchaseId: purchase.id,
+        })),
+      });
 
-    await tx.stockLedger.create({
-      data: {
-        itemId: item.id,
-        direction: "IN",
-        quantity: input.quantity,
-        balanceAfter: updatedItem.currentStock,
-        referenceType: "PURCHASE",
-        purchaseId: purchase.id,
-        createdById: input.createdById,
-      },
-    });
+      await tx.item.update({
+        where: { id: item.id },
+        data: {
+          currentStock: { increment: input.quantity },
+          purchaseCost: input.purchaseCost,
+          ...(input.sellingPrice != null ? { sellingPrice: input.sellingPrice } : {}),
+        },
+      });
+    }
 
-    return purchase;
+    return tx.purchase.findUniqueOrThrow({ where: { id: purchase.id }, include: purchaseInclude });
+  });
+}
+
+export async function recordPurchasePayment(
+  purchaseId: number,
+  input: { paymentAmount: number; paymentMode?: string; paymentReference?: string; paymentBy?: string }
+) {
+  const purchase = await prisma.purchase.findUnique({ where: { id: purchaseId } });
+  if (!purchase) throw new NotFoundError("Purchase not found");
+
+  return prisma.purchase.update({
+    where: { id: purchaseId },
+    data: {
+      paymentAmount: input.paymentAmount,
+      paymentMode: input.paymentMode,
+      paymentReference: input.paymentReference,
+      paymentBy: input.paymentBy,
+      paymentDate: new Date(),
+    },
+    include: purchaseInclude,
   });
 }

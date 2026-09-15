@@ -38,8 +38,18 @@ const STATUS_LABELS: Record<string, string> = {
   WORK_IN_PROGRESS: "Work in Progress",
   COMPLETED: "Completed",
   INVOICED: "Invoiced",
+  READY_FOR_DELIVERY: "Ready for Delivery",
+  DELIVERED: "Delivered",
   CLOSED: "Closed",
   CANCELLED: "Cancelled",
+};
+
+const JOB_TYPE_LABELS: Record<string, string> = {
+  GENERAL_SERVICE: "General Service",
+  ACCIDENTAL_CLAIM: "Accidental Claim",
+  AC: "AC",
+  DENT_PAINT: "Dent & Paint",
+  MECHANICAL: "Mechanical",
 };
 
 function JobCardsPageContent() {
@@ -57,9 +67,11 @@ function JobCardsPageContent() {
   const [vehicleQuery, setVehicleQuery] = useState("");
   const [vehicleResults, setVehicleResults] = useState<VehicleOption[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleOption | null>(null);
+  const [jobType, setJobType] = useState("");
   const [km, setKm] = useState("");
   const [complaint, setComplaint] = useState("");
   const [requiredWork, setRequiredWork] = useState("");
+  const [expectedDelivery, setExpectedDelivery] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -105,9 +117,11 @@ function JobCardsPageContent() {
         method: "POST",
         body: JSON.stringify({
           vehicleId: selectedVehicle.id,
+          jobType: jobType || undefined,
           kmAtService: km || undefined,
           complaint: complaint || undefined,
           requiredWork: requiredWork || undefined,
+          expectedDelivery: expectedDelivery || undefined,
         }),
       });
       router.push(`/dashboard/jobcards/${body.jobCard.id}`);
@@ -172,9 +186,21 @@ function JobCardsPageContent() {
                 )}
               </div>
 
+              <Select value={jobType} onChange={(e) => setJobType(e.target.value)}>
+                <option value="">Job type (optional)...</option>
+                {Object.entries(JOB_TYPE_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </Select>
               <Input type="number" placeholder="Current KM" value={km} onChange={(e) => setKm(e.target.value)} />
               <Textarea placeholder="Customer complaint" value={complaint} onChange={(e) => setComplaint(e.target.value)} rows={2} />
               <Textarea placeholder="Required work" value={requiredWork} onChange={(e) => setRequiredWork(e.target.value)} rows={2} />
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Expected delivery (optional)</label>
+                <Input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} />
+              </div>
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting}>

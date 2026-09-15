@@ -9,17 +9,21 @@ export const MEDIA_ANGLES = [
   "REAR",
   "LEFT",
   "RIGHT",
+  "ROOF",
   "INTERIOR",
   "DASHBOARD",
-  "ENGINE_BAY",
-  "DAMAGE",
+  "GLOVE_BOX",
+  "BOOT",
   "WALKAROUND",
   "OTHER",
 ] as const;
 
+export const MEDIA_PHASES = ["BEFORE", "AFTER"] as const;
+
 export const mediaFieldsSchema = z.object({
   mediaType: z.enum(["PHOTO", "VIDEO"]),
   angle: z.enum(MEDIA_ANGLES).optional(),
+  phase: z.enum(MEDIA_PHASES).default("BEFORE"),
 });
 
 export async function addMedia(req: Request, res: Response) {
@@ -30,6 +34,7 @@ export async function addMedia(req: Request, res: Response) {
     Number(req.params.jobCardId),
     input.mediaType,
     input.angle,
+    input.phase,
     url
   );
   res.status(201).json({ media });

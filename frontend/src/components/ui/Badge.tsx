@@ -27,6 +27,8 @@ const JOB_CARD_STATUS_TONE: Record<string, BadgeTone> = {
   WORK_IN_PROGRESS: "blue",
   COMPLETED: "green",
   INVOICED: "purple",
+  READY_FOR_DELIVERY: "purple",
+  DELIVERED: "green",
   CLOSED: "gray",
   CANCELLED: "red",
 };
@@ -49,4 +51,22 @@ export function StockStatusBadge({
 
 export function ActiveBadge({ isActive }: { isActive: boolean }) {
   return isActive ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Disabled</Badge>;
+}
+
+const PAYMENT_STATUS_TONE: Record<string, BadgeTone> = {
+  PENDING: "red",
+  PARTIAL: "amber",
+  PAID: "green",
+};
+
+export function paymentStatusFor(total: number, paid: number): "PENDING" | "PARTIAL" | "PAID" {
+  if (paid <= 0) return "PENDING";
+  if (paid >= total) return "PAID";
+  return "PARTIAL";
+}
+
+export function PaymentStatusBadge({ total, paid }: { total: number; paid: number }) {
+  const status = paymentStatusFor(total, paid);
+  const label = status === "PENDING" ? "Pending" : status === "PARTIAL" ? "Partial" : "Paid";
+  return <Badge tone={PAYMENT_STATUS_TONE[status]}>{label}</Badge>;
 }

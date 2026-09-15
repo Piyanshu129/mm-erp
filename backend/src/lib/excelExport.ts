@@ -115,11 +115,18 @@ async function purchasesSheet(): Promise<SheetSpec> {
       { header: "Serial No.", key: "id", width: 10 },
       { header: "Date", key: "purchaseDate", width: 18 },
       { header: "Supplier", key: "supplierName", width: 20 },
+      { header: "Item Type", key: "itemType", width: 14 },
       { header: "Item Code", key: "itemCode", width: 14 },
-      { header: "Item Name", key: "itemName", width: 22 },
+      { header: "Item/Expense", key: "itemName", width: 22 },
       { header: "Qty", key: "quantity", width: 8 },
       { header: "Purchase Cost", key: "purchaseCost", width: 14 },
       { header: "Selling Price", key: "sellingPrice", width: 14 },
+      { header: "Bill", key: "billUrl", width: 22 },
+      { header: "Paid", key: "paymentAmount", width: 12 },
+      { header: "Payment Mode", key: "paymentMode", width: 14 },
+      { header: "Payment Ref.", key: "paymentReference", width: 16 },
+      { header: "Paid By", key: "paymentBy", width: 16 },
+      { header: "Payment Date", key: "paymentDate", width: 18 },
       { header: "Remarks", key: "remarks", width: 20 },
       { header: "Entered By", key: "createdByName", width: 16 },
     ],
@@ -127,84 +134,107 @@ async function purchasesSheet(): Promise<SheetSpec> {
       id: p.id,
       purchaseDate: p.purchaseDate,
       supplierName: p.supplier.name,
-      itemCode: p.item.itemCode,
-      itemName: p.item.name,
+      itemType: p.itemType,
+      itemCode: p.item?.itemCode ?? "",
+      itemName: p.item?.name ?? p.description ?? "",
       quantity: p.quantity,
       purchaseCost: n(p.purchaseCost),
       sellingPrice: n(p.sellingPrice),
+      billUrl: p.billUrl,
+      paymentAmount: n(p.paymentAmount),
+      paymentMode: p.paymentMode,
+      paymentReference: p.paymentReference,
+      paymentBy: p.paymentBy,
+      paymentDate: p.paymentDate,
       remarks: p.remarks,
       createdByName: p.createdBy.name,
     })),
   };
 }
 
-async function stockLedgerSheet(): Promise<SheetSpec> {
-  const entries = await prisma.stockLedger.findMany({
+// Every physical unit's full trail: which purchase it came from, its
+// current status, and (once issued) which job card/vehicle it went to.
+// This is the direct replacement for the old aggregate Stock Ledger sheet.
+async function itemUnitsSheet(): Promise<SheetSpec> {
+  const units = await prisma.itemUnit.findMany({
     include: {
       item: true,
-      purchase: true,
-      jobCardPart: { include: { jobCard: true } },
-      createdBy: true,
+      purchase: { include: { supplier: true } },
+      jobCardPart: { include: { jobCard: { include: { vehicle: true } } } },
     },
     orderBy: { id: "asc" },
   });
   return {
-    name: "Stock Ledger",
+    name: "Item Units",
     columns: [
-      { header: "ID", key: "id", width: 8 },
+      { header: "Serial No.", key: "id", width: 12 },
       { header: "Item Code", key: "itemCode", width: 14 },
       { header: "Item Name", key: "itemName", width: 22 },
-      { header: "Direction", key: "direction", width: 10 },
-      { header: "Qty", key: "quantity", width: 8 },
-      { header: "Balance After", key: "balanceAfter", width: 14 },
-      { header: "Reference", key: "reference", width: 22 },
-      { header: "By", key: "createdByName", width: 16 },
-      { header: "Date", key: "createdAt", width: 20 },
+      { header: "Status", key: "status", width: 10 },
+      { header: "Purchase Serial No.", key: "purchaseId", width: 16 },
+      { header: "Supplier", key: "supplierName", width: 20 },
+      { header: "Issued To Job Card", key: "jobCardNumber", width: 16 },
+      { header: "Vehicle", key: "vehicleRegistration", width: 16 },
+      { header: "Purchased On", key: "createdAt", width: 20 },
     ],
-    rows: entries.map((e) => ({
-      id: e.id,
-      itemCode: e.item.itemCode,
-      itemName: e.item.name,
-      direction: e.direction,
-      quantity: e.quantity,
-      balanceAfter: e.balanceAfter,
-      reference: e.purchase
-        ? `Purchase #${e.purchase.id}`
-        : e.jobCardPart
-          ? e.jobCardPart.jobCard.jobCardNumber
-          : e.referenceType,
-      createdByName: e.createdBy.name,
-      createdAt: e.createdAt,
+    rows: units.map((u) => ({
+      id: u.id,
+      itemCode: u.item.itemCode,
+      itemName: u.item.name,
+      status: u.status,
+      purchaseId: u.purchaseId,
+      supplierName: u.purchase.supplier.name,
+      jobCardNumber: u.jobCardPart?.jobCard.jobCardNumber ?? "",
+      vehicleRegistration: u.jobCardPart?.jobCard.vehicle.registrationNumber ?? "",
+      createdAt: u.createdAt,
     })),
   };
 }
 
 async function jobCardsSheet(): Promise<SheetSpec> {
   const jobCards = await prisma.jobCard.findMany({
-    include: { vehicle: { include: { customer: true } }, createdBy: true },
+    include: { vehicle: { include: { customer: true } }, createdBy: true, assignedEmployee: true },
     orderBy: { id: "asc" },
   });
   return {
     name: "Job Cards",
     columns: [
       { header: "Job Card No.", key: "jobCardNumber", width: 14 },
+      { header: "Job Type", key: "jobType", width: 16 },
       { header: "Vehicle", key: "vehicleRegistration", width: 16 },
       { header: "Customer", key: "customerName", width: 20 },
       { header: "KM", key: "kmAtService", width: 10 },
       { header: "Complaint", key: "complaint", width: 26 },
       { header: "Required Work", key: "requiredWork", width: 26 },
+      { header: "Expected Delivery", key: "expectedDelivery", width: 18 },
+      { header: "Inspection Findings", key: "inspectionFindings", width: 26 },
+      { header: "Estimate Amount", key: "estimateAmount", width: 14 },
+      { header: "Estimate Approved", key: "estimateApproved", width: 14 },
+      { header: "Assigned To", key: "assignedEmployeeName", width: 18 },
+      { header: "Final Inspection", key: "finalInspectionStatus", width: 14 },
+      { header: "Final Inspection By", key: "finalInspectionBy", width: 16 },
       { header: "Status", key: "status", width: 16 },
+      { header: "Delivered At", key: "deliveredAt", width: 18 },
       { header: "Created By", key: "createdByName", width: 16 },
       { header: "Date", key: "createdAt", width: 20 },
     ],
     rows: jobCards.map((jc) => ({
       jobCardNumber: jc.jobCardNumber,
+      jobType: jc.jobType,
       vehicleRegistration: jc.vehicle.registrationNumber,
       customerName: jc.vehicle.customer.name,
       kmAtService: jc.kmAtService,
       complaint: jc.complaint,
       requiredWork: jc.requiredWork,
+      expectedDelivery: jc.expectedDelivery,
+      inspectionFindings: jc.inspectionFindings,
+      estimateAmount: n(jc.estimateAmount),
+      estimateApproved: jc.estimateApproved == null ? "" : jc.estimateApproved ? "Yes" : "No",
+      assignedEmployeeName: jc.assignedEmployee?.name ?? "",
+      finalInspectionStatus: jc.finalInspectionStatus,
+      finalInspectionBy: jc.finalInspectionBy,
       status: jc.status,
+      deliveredAt: jc.deliveredAt,
       createdByName: jc.createdBy.name,
       createdAt: jc.createdAt,
     })),
@@ -213,7 +243,7 @@ async function jobCardsSheet(): Promise<SheetSpec> {
 
 async function jobCardPartsSheet(): Promise<SheetSpec> {
   const parts = await prisma.jobCardPart.findMany({
-    include: { jobCard: true, item: true, createdBy: true },
+    include: { jobCard: true, item: true, itemUnit: true, createdBy: true },
     orderBy: { id: "asc" },
   });
   return {
@@ -222,8 +252,7 @@ async function jobCardPartsSheet(): Promise<SheetSpec> {
       { header: "Job Card No.", key: "jobCardNumber", width: 14 },
       { header: "Item Code", key: "itemCode", width: 14 },
       { header: "Item Name", key: "itemName", width: 22 },
-      { header: "Qty", key: "quantity", width: 8 },
-      { header: "Unit Price", key: "unitPrice", width: 12 },
+      { header: "Serial No.", key: "itemUnitId", width: 12 },
       { header: "Amount", key: "amount", width: 12 },
       { header: "Issued By", key: "createdByName", width: 16 },
       { header: "Date", key: "createdAt", width: 20 },
@@ -232,8 +261,7 @@ async function jobCardPartsSheet(): Promise<SheetSpec> {
       jobCardNumber: p.jobCard.jobCardNumber,
       itemCode: p.item.itemCode,
       itemName: p.item.name,
-      quantity: p.quantity,
-      unitPrice: n(p.unitPrice),
+      itemUnitId: p.itemUnitId,
       amount: n(p.amount),
       createdByName: p.createdBy.name,
       createdAt: p.createdAt,
@@ -286,6 +314,11 @@ async function invoicesSheet(): Promise<SheetSpec> {
       { header: "Labour Total", key: "labourTotal", width: 12 },
       { header: "Discount", key: "discount", width: 10 },
       { header: "Total", key: "totalAmount", width: 12 },
+      { header: "Paid", key: "paymentAmount", width: 12 },
+      { header: "Payment Mode", key: "paymentMode", width: 14 },
+      { header: "Payment Ref.", key: "paymentReference", width: 16 },
+      { header: "Received By", key: "paymentReceivedBy", width: 16 },
+      { header: "Payment Date", key: "paymentDate", width: 18 },
       { header: "Created By", key: "createdByName", width: 16 },
     ],
     rows: invoices.map((inv) => ({
@@ -298,7 +331,92 @@ async function invoicesSheet(): Promise<SheetSpec> {
       labourTotal: n(inv.labourTotal),
       discount: n(inv.discount),
       totalAmount: n(inv.totalAmount),
+      paymentAmount: n(inv.paymentAmount),
+      paymentMode: inv.paymentMode,
+      paymentReference: inv.paymentReference,
+      paymentReceivedBy: inv.paymentReceivedBy,
+      paymentDate: inv.paymentDate,
       createdByName: inv.createdBy.name,
+    })),
+  };
+}
+
+async function employeesSheet(): Promise<SheetSpec> {
+  const employees = await prisma.employee.findMany({ orderBy: { id: "asc" } });
+  return {
+    name: "Employees",
+    columns: [
+      { header: "ID", key: "id", width: 8 },
+      { header: "Name", key: "name", width: 22 },
+      { header: "Role", key: "role", width: 16 },
+      { header: "Joining Date", key: "joiningDate", width: 16 },
+      { header: "Monthly Salary", key: "monthlySalary", width: 14 },
+      { header: "Monthly Leave Allowance", key: "monthlyLeaveAllowance", width: 18 },
+      { header: "Active", key: "isActive", width: 10 },
+    ],
+    rows: employees.map((e) => ({
+      ...e,
+      monthlySalary: n(e.monthlySalary),
+    })),
+  };
+}
+
+async function attendanceSheet(): Promise<SheetSpec> {
+  const rows = await prisma.attendance.findMany({
+    include: { employee: true, correctedBy: true },
+    orderBy: [{ date: "asc" }, { employeeId: "asc" }],
+  });
+  return {
+    name: "Attendance",
+    columns: [
+      { header: "Date", key: "date", width: 14 },
+      { header: "Employee", key: "employeeName", width: 22 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Corrected By", key: "correctedByName", width: 16 },
+    ],
+    rows: rows.map((a) => ({
+      date: a.date,
+      employeeName: a.employee.name,
+      status: a.status,
+      correctedByName: a.correctedBy?.name ?? "",
+    })),
+  };
+}
+
+async function salaryPaymentsSheet(): Promise<SheetSpec> {
+  const payments = await prisma.salaryPayment.findMany({
+    include: { employee: true },
+    orderBy: [{ periodYear: "asc" }, { periodMonth: "asc" }, { employeeId: "asc" }],
+  });
+  return {
+    name: "Salary Payments",
+    columns: [
+      { header: "Employee", key: "employeeName", width: 22 },
+      { header: "Month", key: "periodMonth", width: 8 },
+      { header: "Year", key: "periodYear", width: 8 },
+      { header: "Present Days", key: "presentDays", width: 12 },
+      { header: "Absent Days", key: "absentDays", width: 12 },
+      { header: "Leave Days", key: "leaveDays", width: 12 },
+      { header: "Gross Salary", key: "grossSalary", width: 14 },
+      { header: "Net Salary", key: "netSalary", width: 14 },
+      { header: "Paid", key: "paymentAmount", width: 12 },
+      { header: "Payment Date", key: "paymentDate", width: 18 },
+      { header: "Payment Mode", key: "paymentMode", width: 14 },
+      { header: "Paid By", key: "paymentBy", width: 16 },
+    ],
+    rows: payments.map((s) => ({
+      employeeName: s.employee.name,
+      periodMonth: s.periodMonth,
+      periodYear: s.periodYear,
+      presentDays: s.presentDays,
+      absentDays: s.absentDays,
+      leaveDays: s.leaveDays,
+      grossSalary: n(s.grossSalary),
+      netSalary: n(s.netSalary),
+      paymentAmount: n(s.paymentAmount),
+      paymentDate: s.paymentDate,
+      paymentMode: s.paymentMode,
+      paymentBy: s.paymentBy,
     })),
   };
 }
@@ -317,11 +435,14 @@ export async function regenerateExcelExport(): Promise<void> {
     suppliersSheet(),
     itemsSheet(),
     purchasesSheet(),
-    stockLedgerSheet(),
+    itemUnitsSheet(),
     jobCardsSheet(),
     jobCardPartsSheet(),
     jobCardLabourSheet(),
     invoicesSheet(),
+    employeesSheet(),
+    attendanceSheet(),
+    salaryPaymentsSheet(),
   ]);
 
   for (const sheet of sheets) {

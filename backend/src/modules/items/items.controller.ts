@@ -63,6 +63,11 @@ export async function setActive(req: Request, res: Response) {
 }
 
 export async function stockHistory(req: Request, res: Response) {
-  const entries = await itemsService.getItemStockHistory(Number(req.params.id));
-  res.json({ entries });
+  const units = await itemsService.getItemStockHistory(Number(req.params.id));
+  res.json({ units });
+}
+
+export async function availableUnits(req: Request, res: Response) {
+  const units = await itemsService.getAvailableUnits(Number(req.params.id));
+  res.json({ units });
 }

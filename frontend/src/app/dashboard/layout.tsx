@@ -20,6 +20,9 @@ import {
   X,
   LogOut,
   Wrench,
+  UserCog,
+  CalendarCheck,
+  Banknote,
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/context/AuthContext";
@@ -60,6 +63,14 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart },
       { href: "/dashboard/invoices", label: "Invoices", icon: Receipt },
       { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Staff",
+    items: [
+      { href: "/dashboard/employees", label: "Employees", icon: UserCog },
+      { href: "/dashboard/attendance", label: "Attendance", icon: CalendarCheck },
+      { href: "/dashboard/salary", label: "Salary", icon: Banknote },
     ],
   },
   {

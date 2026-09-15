@@ -4,8 +4,7 @@ import { isLocked } from "../../lib/jobCardStatus";
 
 export interface AddPartInput {
   jobCardId: number;
-  itemId: number;
-  quantity: number;
+  itemUnitId: number;
   createdById: number;
 }
 
@@ -29,97 +28,71 @@ async function assertJobCardEditable(tx: any, jobCardId: number) {
   return jobCard;
 }
 
-// The core "insufficient stock" guarantee: a single conditional UPDATE that
-// only succeeds if enough stock is available, evaluated atomically by
-// Postgres's row lock — immune to two staff issuing the last unit at once
-// (unlike a findUnique-then-update, where both requests could read the same
-// stale stock number before either writes).
-async function decrementStockOrThrow(tx: any, itemId: number, quantity: number) {
-  const rows = await tx.$queryRaw<{ current_stock: number }[]>`
-    UPDATE items
-    SET current_stock = current_stock - ${quantity}, updated_at = now()
-    WHERE id = ${itemId} AND current_stock >= ${quantity}
-    RETURNING current_stock
+// Parts are issued by their physical unit serial number — the number
+// written on the sticker placed on that exact part at Purchase time — not
+// by "an item, minus a quantity". This is a single conditional UPDATE that
+// only flips a unit from IN_STOCK to ISSUED if it's still IN_STOCK,
+// evaluated atomically by Postgres's row lock, so two staff scanning the
+// same physical sticker at once can't both succeed.
+async function issueUnitOrThrow(tx: any, itemUnitId: number) {
+  const rows: { id: number; item_id: number }[] = await tx.$queryRaw`
+    UPDATE item_units
+    SET status = 'ISSUED'
+    WHERE id = ${itemUnitId} AND status = 'IN_STOCK'
+    RETURNING id, item_id
   `;
 
   if (rows.length === 0) {
-    const item = await tx.item.findUnique({ where: { id: itemId } });
-    const available = item?.currentStock ?? 0;
+    const unit = await tx.itemUnit.findUnique({ where: { id: itemUnitId } });
+    if (!unit) throw new NotFoundError(`No item unit with serial number ${itemUnitId}`);
     throw new ConflictError(
-      `Insufficient stock: only ${available} available, ${quantity} requested`
+      `Serial number ${itemUnitId} is already issued — it can't be used on another job card`
     );
   }
 
-  return rows[0].current_stock;
+  return rows[0];
 }
 
 export async function addPart(input: AddPartInput) {
   return prisma.$transaction(async (tx) => {
     await assertJobCardEditable(tx, input.jobCardId);
 
-    const item = await tx.item.findUnique({ where: { id: input.itemId } });
-    if (!item) throw new NotFoundError("Item not found");
+    const unitRow = await issueUnitOrThrow(tx, input.itemUnitId);
 
-    const unitPrice = item.sellingPrice;
-    const amount = Number(unitPrice) * input.quantity;
+    const item = await tx.item.findUniqueOrThrow({ where: { id: unitRow.item_id } });
 
     const part = await tx.jobCardPart.create({
       data: {
         jobCardId: input.jobCardId,
-        itemId: input.itemId,
-        quantity: input.quantity,
-        unitPrice,
-        amount,
+        itemUnitId: input.itemUnitId,
+        itemId: item.id,
+        amount: item.sellingPrice,
         createdById: input.createdById,
       },
-      include: { item: true },
+      include: { item: true, itemUnit: true },
     });
 
-    const newStock = await decrementStockOrThrow(tx, input.itemId, input.quantity);
-
-    await tx.stockLedger.create({
-      data: {
-        itemId: input.itemId,
-        direction: "OUT",
-        quantity: input.quantity,
-        balanceAfter: newStock,
-        referenceType: "JOB_CARD",
-        jobCardPartId: part.id,
-        createdById: input.createdById,
-      },
+    await tx.item.update({
+      where: { id: item.id },
+      data: { currentStock: { decrement: 1 } },
     });
 
     return part;
   });
 }
 
-// Removing a mistakenly-added part restores the stock it took, with its own
-// ledger entry — only allowed before the job card is locked, same rule as
-// adding one, so a billed record can't be quietly altered after the fact.
-export async function removePart(jobCardId: number, partId: number, removedById: number) {
+// Removing a mistakenly-added part puts the unit back into stock under its
+// same permanent serial number (units are never deleted, only re-flagged)
+// — only allowed before the job card is locked, same rule as adding one.
+export async function removePart(jobCardId: number, partId: number) {
   return prisma.$transaction(async (tx) => {
     await assertJobCardEditable(tx, jobCardId);
 
     const part = await tx.jobCardPart.findUnique({ where: { id: partId } });
     if (!part || part.jobCardId !== jobCardId) throw new NotFoundError("Part not found on this job card");
 
-    const updatedItem = await tx.item.update({
-      where: { id: part.itemId },
-      data: { currentStock: { increment: part.quantity } },
-    });
-
-    await tx.stockLedger.create({
-      data: {
-        itemId: part.itemId,
-        direction: "IN",
-        quantity: part.quantity,
-        balanceAfter: updatedItem.currentStock,
-        referenceType: "JOB_CARD_REVERSAL",
-        note: `Removed from job card #${jobCardId}`,
-        createdById: removedById,
-      },
-    });
-
+    await tx.itemUnit.update({ where: { id: part.itemUnitId }, data: { status: "IN_STOCK" } });
+    await tx.item.update({ where: { id: part.itemId }, data: { currentStock: { increment: 1 } } });
     await tx.jobCardPart.delete({ where: { id: partId } });
   });
 }

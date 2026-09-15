@@ -58,9 +58,9 @@ function SettingsContent() {
             <DatabaseBackup className="h-4 w-4 text-gray-400" /> Data Backup
           </h2>
           <p className="mb-4 text-sm text-gray-500">
-            Downloads a complete snapshot of every business record — customers, vehicles, items, suppliers, purchases,
-            stock ledger, job cards, parts, labour, and invoices — as one JSON file. Keep downloaded backups somewhere
-            other than this machine.
+            Downloads a complete snapshot of every business record — customers, vehicles, items, item serial units,
+            suppliers, purchases, job cards, parts, labour, invoices, employees, attendance, and salary — as one JSON
+            file. Keep downloaded backups somewhere other than this machine.
           </p>
           <Button onClick={handleDownloadBackup} disabled={downloading}>
             <Download className="h-4 w-4" /> {downloading ? "Generating..." : "Download backup now"}
@@ -88,9 +88,9 @@ function SettingsContent() {
           </h2>
           <p className="mb-4 text-sm text-gray-500">
             A live, human-readable mirror of the database — one tab per table (Customers, Vehicles, Suppliers, Items,
-            Purchases, Stock Ledger, Job Cards, Job Card Parts, Job Card Labour, Invoices). This runs automatically
-            alongside the database, refreshing about once a minute — it does not replace the database, it&apos;s a
-            parallel copy for anyone who wants to browse the data in Excel.
+            Purchases, Item Units, Job Cards, Job Card Parts, Job Card Labour, Invoices, Employees, Attendance, Salary
+            Payments). This runs automatically alongside the database, refreshing about once a minute — it does not
+            replace the database, it&apos;s a parallel copy for anyone who wants to browse the data in Excel.
           </p>
           <Button onClick={handleDownloadExcel} disabled={downloadingExcel}>
             <Download className="h-4 w-4" /> {downloadingExcel ? "Downloading..." : "Download Excel export"}

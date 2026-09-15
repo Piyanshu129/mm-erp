@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowDownCircle, ArrowUpCircle, History } from "lucide-react";
+import { ArrowLeft, History } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
-import { StockStatusBadge } from "@/components/ui/Badge";
+import { StockStatusBadge, Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 
@@ -27,19 +27,15 @@ interface ItemDetail {
   brand: string | null;
 }
 
-interface LedgerEntry {
+interface UnitRow {
   id: number;
-  direction: "IN" | "OUT";
-  quantity: number;
-  balanceAfter: number;
-  referenceType: string;
+  status: "IN_STOCK" | "ISSUED";
   createdAt: string;
-  createdBy: { name: string };
   purchase: {
     id: number;
     purchaseCost: string;
     supplier: { name: string };
-  } | null;
+  };
   jobCardPart: {
     jobCard: { jobCardNumber: string; vehicle: { registrationNumber: string } };
   } | null;
@@ -48,7 +44,7 @@ interface LedgerEntry {
 export default function ItemDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<ItemDetail | null>(null);
-  const [history, setHistory] = useState<LedgerEntry[]>([]);
+  const [units, setUnits] = useState<UnitRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -59,7 +55,7 @@ export default function ItemDetailPage() {
         apiFetch(`/items/${id}/stock-history`),
       ]);
       setItem(itemBody.item);
-      setHistory(historyBody.entries);
+      setUnits(historyBody.units);
       setLoading(false);
     })();
   }, [id]);
@@ -117,47 +113,50 @@ export default function ItemDetailPage() {
       </Card>
 
       <div>
-        <h2 className="mb-3 text-base font-semibold text-gray-900">Stock history</h2>
-        {history.length === 0 ? (
-          <EmptyState icon={History} title="No stock movements yet" />
+        <h2 className="mb-3 text-base font-semibold text-gray-900">Unit-by-unit stock history</h2>
+        <p className="mb-3 text-sm text-gray-500">
+          Every physical unit of this item has its own permanent serial number — the same number written on its
+          sticker when it was received.
+        </p>
+        {units.length === 0 ? (
+          <EmptyState icon={History} title="No units purchased yet" />
         ) : (
-          <Table minWidth={650}>
+          <Table minWidth={750}>
             <thead>
               <tr>
-                <Th>Date</Th>
-                <Th>Type</Th>
-                <Th>Qty</Th>
-                <Th>Balance After</Th>
-                <Th>Reference</Th>
-                <Th>By</Th>
+                <Th>Serial No.</Th>
+                <Th>Status</Th>
+                <Th>Purchased From</Th>
+                <Th>Purchased On</Th>
+                <Th>Issued To</Th>
               </tr>
             </thead>
             <tbody>
-              {history.map((h) => (
-                <Tr key={h.id}>
-                  <Td>{new Date(h.createdAt).toLocaleString()}</Td>
+              {units.map((u) => (
+                <Tr key={u.id}>
+                  <Td className="font-mono font-medium">#{u.id}</Td>
                   <Td>
-                    <span
-                      className={`inline-flex items-center gap-1 font-medium ${h.direction === "IN" ? "text-green-700" : "text-red-600"}`}
-                    >
-                      {h.direction === "IN" ? (
-                        <ArrowDownCircle className="h-3.5 w-3.5" />
-                      ) : (
-                        <ArrowUpCircle className="h-3.5 w-3.5" />
-                      )}
-                      {h.direction}
-                    </span>
+                    {u.status === "IN_STOCK" ? (
+                      <Badge tone="green">In stock</Badge>
+                    ) : (
+                      <Badge tone="gray">Issued</Badge>
+                    )}
                   </Td>
-                  <Td>{h.quantity}</Td>
-                  <Td>{h.balanceAfter}</Td>
                   <Td>
-                    {h.purchase
-                      ? `Purchase Serial #${h.purchase.id} · ${h.purchase.supplier.name}`
-                      : h.jobCardPart
-                        ? `${h.jobCardPart.jobCard.jobCardNumber} · ${h.jobCardPart.jobCard.vehicle.registrationNumber}`
-                        : h.referenceType}
+                    {u.purchase.supplier.name}{" "}
+                    <span className="text-gray-400">(Purchase #{u.purchase.id})</span>
                   </Td>
-                  <Td>{h.createdBy.name}</Td>
+                  <Td>{new Date(u.createdAt).toLocaleDateString()}</Td>
+                  <Td>
+                    {u.jobCardPart ? (
+                      <>
+                        {u.jobCardPart.jobCard.jobCardNumber} ·{" "}
+                        {u.jobCardPart.jobCard.vehicle.registrationNumber}
+                      </>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </Td>
                 </Tr>
               ))}
             </tbody>

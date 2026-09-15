@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/Input";
+import { Card, CardBody } from "@/components/ui/Card";
+import { PaymentStatusBadge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
+
+const PAYMENT_MODES = ["CASH", "UPI", "CARD", "BANK_TRANSFER", "CHEQUE"];
 
 interface InvoiceDetail {
   id: number;
@@ -16,6 +21,11 @@ interface InvoiceDetail {
   labourTotal: string;
   discount: string;
   totalAmount: string;
+  paymentAmount: string;
+  paymentMode: string | null;
+  paymentReference: string | null;
+  paymentReceivedBy: string | null;
+  paymentDate: string | null;
   jobCard: {
     jobCardNumber: string;
     kmAtService: number | null;
@@ -28,8 +38,7 @@ interface InvoiceDetail {
     };
     parts: {
       id: number;
-      quantity: number;
-      unitPrice: string;
+      itemUnitId: number;
       amount: string;
       item: { itemCode: string; name: string; uom: string };
     }[];
@@ -42,14 +51,50 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [payAmount, setPayAmount] = useState("");
+  const [payMode, setPayMode] = useState("");
+  const [payRef, setPayRef] = useState("");
+  const [payBy, setPayBy] = useState("");
+  const [payError, setPayError] = useState<string | null>(null);
+  const [paySubmitting, setPaySubmitting] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const body = await apiFetch(`/invoices/${id}`);
+    setInvoice(body.invoice);
+    setPayAmount(body.invoice.paymentAmount);
+    setLoading(false);
+  }
+
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const body = await apiFetch(`/invoices/${id}`);
-      setInvoice(body.invoice);
-      setLoading(false);
-    })();
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function submitPayment(e: FormEvent) {
+    e.preventDefault();
+    setPayError(null);
+    setPaySubmitting(true);
+    try {
+      await apiFetch(`/invoices/${id}/payment`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          paymentAmount: Number(payAmount),
+          paymentMode: payMode || undefined,
+          paymentReference: payRef || undefined,
+          paymentReceivedBy: payBy || undefined,
+        }),
+      });
+      setPayMode("");
+      setPayRef("");
+      setPayBy("");
+      await load();
+    } catch (err) {
+      setPayError(err instanceof ApiError ? err.message : "Could not record payment");
+    } finally {
+      setPaySubmitting(false);
+    }
+  }
 
   if (loading || !invoice) {
     return (
@@ -116,8 +161,7 @@ export default function InvoiceDetailPage() {
               <thead>
                 <tr className="border-b border-gray-300 text-left">
                   <th className="py-1">Item</th>
-                  <th className="py-1">Qty</th>
-                  <th className="py-1 text-right">Unit Price</th>
+                  <th className="py-1">Serial No.</th>
                   <th className="py-1 text-right">Amount</th>
                 </tr>
               </thead>
@@ -127,10 +171,7 @@ export default function InvoiceDetailPage() {
                     <td className="py-1">
                       {p.item.itemCode} — {p.item.name}
                     </td>
-                    <td className="py-1">
-                      {p.quantity} {p.item.uom}
-                    </td>
-                    <td className="py-1 text-right">₹{p.unitPrice}</td>
+                    <td className="py-1 font-mono">#{p.itemUnitId}</td>
                     <td className="py-1 text-right">₹{p.amount}</td>
                   </tr>
                 ))}
@@ -184,10 +225,56 @@ export default function InvoiceDetailPage() {
             <span>Total</span>
             <span>₹{invoice.totalAmount}</span>
           </div>
+          {Number(invoice.paymentAmount) > 0 && (
+            <div className="flex justify-between py-1 text-green-700">
+              <span>Paid</span>
+              <span>₹{invoice.paymentAmount}</span>
+            </div>
+          )}
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">Thank you for choosing Motors Mitra.</p>
       </div>
+
+      <Card className="print:hidden">
+        <CardBody>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm font-semibold text-gray-900">Customer payment</p>
+            <PaymentStatusBadge total={Number(invoice.totalAmount)} paid={Number(invoice.paymentAmount)} />
+          </div>
+          {invoice.paymentDate && (
+            <p className="mb-3 text-xs text-gray-500">
+              Last recorded: ₹{invoice.paymentAmount} via {invoice.paymentMode ?? "-"} on{" "}
+              {new Date(invoice.paymentDate).toLocaleString()}
+              {invoice.paymentReceivedBy ? ` (received by ${invoice.paymentReceivedBy})` : ""}
+            </p>
+          )}
+          <form onSubmit={submitPayment} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Input
+              type="number"
+              step="0.01"
+              placeholder="Total amount paid so far"
+              required
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+            />
+            <Select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+              <option value="">Payment mode...</option>
+              {PAYMENT_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {m.replace("_", " ")}
+                </option>
+              ))}
+            </Select>
+            <Input placeholder="Reference / transaction ID" value={payRef} onChange={(e) => setPayRef(e.target.value)} />
+            <Input placeholder="Received by" value={payBy} onChange={(e) => setPayBy(e.target.value)} />
+            {payError && <p className="text-sm text-red-600 sm:col-span-2">{payError}</p>}
+            <Button type="submit" disabled={paySubmitting} className="sm:col-span-2">
+              {paySubmitting ? "Saving..." : "Save payment"}
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
     </div>
   );
 }
