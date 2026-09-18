@@ -484,10 +484,14 @@ function PurchasesPageContent() {
               <p className="text-sm font-medium text-gray-700">
                 Record payment — Purchase #{payingPurchase.id}
               </p>
+              <p className="text-xs text-gray-500">
+                Total cost: ₹{(payingPurchase.quantity * Number(payingPurchase.purchaseCost)).toFixed(2)} · Paid so far: ₹
+                {Number(payingPurchase.paymentAmount).toFixed(2)}
+              </p>
               <Input
                 type="number"
                 step="0.01"
-                placeholder="Total amount paid so far"
+                placeholder="Total amount paid so far (not just this installment)"
                 required
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
@@ -569,6 +573,11 @@ function PurchasesPageContent() {
                   <Td>₹{total.toFixed(2)}</Td>
                   <Td>
                     <PaymentStatusBadge total={total} paid={Number(p.paymentAmount)} />
+                    {Number(p.paymentAmount) > 0 && Number(p.paymentAmount) < total && (
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        ₹{Number(p.paymentAmount).toFixed(2)} paid — ₹{(total - Number(p.paymentAmount)).toFixed(2)} due
+                      </p>
+                    )}
                   </Td>
                   <Td>
                     <button
