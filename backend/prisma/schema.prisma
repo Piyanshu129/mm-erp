@@ -357,10 +357,17 @@ model Invoice {
 // Phase 6/Rev2: Attendance → Salary. A self-contained HR module — nothing
 // else in the schema depends on it except JobCard's optional Work
 // Assignment link.
+// email/mobile/passwordHash added for the employee self-service attendance
+// portal (separate login from the admin User table — see
+// modules/employeePortal). passwordHash stays null until an admin sets a
+// portal password for that employee; email is the portal login id.
 model Employee {
   id                    Int      @id @default(autoincrement())
   name                  String
   role                  String?
+  email                 String?  @unique
+  mobile                String?
+  passwordHash          String?  @map("password_hash")
   joiningDate           DateTime @map("joining_date")
   monthlySalary         Decimal  @db.Decimal(12, 2) @map("monthly_salary")
   monthlyLeaveAllowance Int      @default(0) @map("monthly_leave_allowance")
@@ -375,16 +382,25 @@ model Employee {
   @@map("employees")
 }
 
+// markedBy distinguishes a self-service portal punch (SELF — punchedAt/
+// latitude/longitude always set, selfieUrl set if the employee chose to
+// take one) from the admin's manual daily marking (ADMIN — the original
+// Phase 6 flow, no location data). Both write the same row.
 model Attendance {
-  id            Int      @id @default(autoincrement())
-  employeeId    Int      @map("employee_id")
-  employee      Employee @relation(fields: [employeeId], references: [id])
-  date          DateTime @db.Date
+  id            Int       @id @default(autoincrement())
+  employeeId    Int       @map("employee_id")
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  date          DateTime  @db.Date
   status        String // PRESENT | ABSENT | LEAVE
-  correctedById Int?     @map("corrected_by_id")
-  correctedBy   User?    @relation(fields: [correctedById], references: [id])
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  markedBy      String    @default("ADMIN") @map("marked_by") // ADMIN | SELF
+  punchedAt     DateTime? @map("punched_at")
+  latitude      Decimal?  @db.Decimal(9, 6)
+  longitude     Decimal?  @db.Decimal(9, 6)
+  selfieUrl     String?   @map("selfie_url")
+  correctedById Int?      @map("corrected_by_id")
+  correctedBy   User?     @relation(fields: [correctedById], references: [id])
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@unique([employeeId, date])
   @@map("attendance")

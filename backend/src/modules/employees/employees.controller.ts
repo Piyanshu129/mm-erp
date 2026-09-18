@@ -8,6 +8,9 @@ const optionalString = z.string().trim().min(1).optional();
 export const createEmployeeSchema = z.object({
   name: z.string().trim().min(1),
   role: optionalString,
+  email: z.string().trim().toLowerCase().email().optional(),
+  mobile: optionalString,
+  password: z.string().min(6).optional(),
   joiningDate: z.coerce.date(),
   monthlySalary: z.coerce.number().min(0),
   monthlyLeaveAllowance: z.coerce.number().int().min(0).optional(),

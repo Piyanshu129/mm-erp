@@ -5,8 +5,9 @@ export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LEAVE"] as const;
 
 // Attendance.date is a plain @db.Date column — normalizing to midnight UTC
 // keeps every mark for a given calendar day landing on the same row instead
-// of drifting apart by time-of-day/timezone.
-function dateOnly(input: string | Date): Date {
+// of drifting apart by time-of-day/timezone. Exported so employeePortal's
+// self-punch endpoint stays on the exact same "what day is this" logic.
+export function dateOnly(input: string | Date): Date {
   const d = typeof input === "string" ? new Date(input) : input;
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
@@ -17,7 +18,11 @@ function dateOnly(input: string | Date): Date {
 export async function getAttendanceForDate(date: string) {
   const day = dateOnly(date);
   const [employees, marked] = await Promise.all([
-    prisma.employee.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: "asc" },
+    }),
     prisma.attendance.findMany({ where: { date: day }, include: { correctedBy: { select: { id: true, name: true } } } }),
   ]);
   const byEmployee = new Map(marked.map((a) => [a.employeeId, a]));
@@ -48,18 +53,27 @@ export async function markAttendance(
   });
 
   if (!existing) {
-    return prisma.attendance.create({ data: { employeeId, date: day, status } });
+    return prisma.attendance.create({ data: { employeeId, date: day, status, markedBy: "ADMIN" } });
   }
+  // An admin correction always wins over a prior self-punch for the same
+  // day — flip markedBy back to ADMIN, but leave the punch metadata
+  // (punchedAt/location/selfie) in place as an audit trail of what the
+  // employee actually did before the override.
   return prisma.attendance.update({
     where: { id: existing.id },
-    data: { status, correctedById },
+    data: { status, correctedById, markedBy: "ADMIN" },
   });
 }
 
 // Present/Absent/Leave day counts for one employee across one calendar
-// month — exactly the input salary calculation needs.
+// month — exactly the input salary calculation needs. select excludes
+// passwordHash — this return value reaches both the admin summary endpoint
+// and the employee's own portal summary, neither of which should ever see it.
 export async function getMonthlySummary(employeeId: number, month: number, year: number) {
-  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { id: true, name: true, role: true },
+  });
   if (!employee) throw new NotFoundError("Employee not found");
 
   const start = new Date(Date.UTC(year, month - 1, 1));

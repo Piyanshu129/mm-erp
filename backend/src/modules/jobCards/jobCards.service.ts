@@ -25,7 +25,7 @@ const detailInclude = {
   media: { orderBy: { createdAt: "asc" as const } },
   parts: { include: { item: true, itemUnit: true }, orderBy: { id: "asc" as const } },
   labour: { orderBy: { id: "asc" as const } },
-  assignedEmployee: true,
+  assignedEmployee: { select: { id: true, name: true, role: true } },
   createdBy: { select: { id: true, name: true } },
   invoice: { select: { id: true, invoiceNumber: true } },
 } satisfies Prisma.JobCardInclude;
@@ -56,7 +56,7 @@ export async function listJobCards(
     prisma.jobCard.count({ where }),
     prisma.jobCard.findMany({
       where,
-      include: { vehicle: { include: { customer: true } }, assignedEmployee: true },
+      include: { vehicle: { include: { customer: true } }, assignedEmployee: { select: { id: true, name: true, role: true } } },
       orderBy: { id: "desc" },
       ...toSkipTake(page),
     }),
@@ -179,6 +179,6 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
   return prisma.jobCard.update({
     where: { id },
     data: data as Prisma.JobCardUpdateInput,
-    include: { vehicle: { include: { customer: true } }, assignedEmployee: true },
+    include: { vehicle: { include: { customer: true } }, assignedEmployee: { select: { id: true, name: true, role: true } } },
   });
 }

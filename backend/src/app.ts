@@ -16,6 +16,7 @@ import { invoicesRouter } from "./modules/invoices/invoices.routes";
 import { employeesRouter } from "./modules/employees/employees.routes";
 import { attendanceRouter } from "./modules/attendance/attendance.routes";
 import { salaryRouter } from "./modules/attendance/salary.routes";
+import { employeePortalRouter } from "./modules/employeePortal/employeePortal.routes";
 import { reportsRouter } from "./modules/reports/reports.routes";
 import { backupRouter } from "./modules/backup/backup.routes";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -58,6 +59,7 @@ app.use("/api/invoices", invoicesRouter);
 app.use("/api/employees", employeesRouter);
 app.use("/api/attendance", attendanceRouter);
 app.use("/api/salary", salaryRouter);
+app.use("/api/employee-portal", employeePortalRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/backup", backupRouter);
 

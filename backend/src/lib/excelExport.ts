@@ -349,14 +349,21 @@ async function employeesSheet(): Promise<SheetSpec> {
       { header: "ID", key: "id", width: 8 },
       { header: "Name", key: "name", width: 22 },
       { header: "Role", key: "role", width: 16 },
+      { header: "Email", key: "email", width: 24 },
+      { header: "Mobile", key: "mobile", width: 15 },
+      { header: "Portal Access", key: "hasPortalAccess", width: 14 },
       { header: "Joining Date", key: "joiningDate", width: 16 },
       { header: "Monthly Salary", key: "monthlySalary", width: 14 },
       { header: "Monthly Leave Allowance", key: "monthlyLeaveAllowance", width: 18 },
       { header: "Active", key: "isActive", width: 10 },
     ],
+    // passwordHash is deliberately left off the declared columns above —
+    // exceljs only writes keys that appear in `columns`, so spreading the
+    // full row here never leaks the hash into the sheet.
     rows: employees.map((e) => ({
       ...e,
       monthlySalary: n(e.monthlySalary),
+      hasPortalAccess: e.passwordHash != null ? "Yes" : "No",
     })),
   };
 }
@@ -372,12 +379,22 @@ async function attendanceSheet(): Promise<SheetSpec> {
       { header: "Date", key: "date", width: 14 },
       { header: "Employee", key: "employeeName", width: 22 },
       { header: "Status", key: "status", width: 12 },
+      { header: "Marked By", key: "markedBy", width: 12 },
+      { header: "Punched At", key: "punchedAt", width: 20 },
+      { header: "Latitude", key: "latitude", width: 12 },
+      { header: "Longitude", key: "longitude", width: 12 },
+      { header: "Selfie", key: "selfieUrl", width: 22 },
       { header: "Corrected By", key: "correctedByName", width: 16 },
     ],
     rows: rows.map((a) => ({
       date: a.date,
       employeeName: a.employee.name,
       status: a.status,
+      markedBy: a.markedBy,
+      punchedAt: a.punchedAt,
+      latitude: n(a.latitude),
+      longitude: n(a.longitude),
+      selfieUrl: a.selfieUrl,
       correctedByName: a.correctedBy?.name ?? "",
     })),
   };

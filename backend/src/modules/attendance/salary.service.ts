@@ -35,7 +35,7 @@ export async function listSalaryPayments(month?: number, year?: number) {
 
   return prisma.salaryPayment.findMany({
     where,
-    include: { employee: true },
+    include: { employee: { select: { id: true, name: true, role: true } } },
     orderBy: [{ periodYear: "desc" }, { periodMonth: "desc" }, { employee: { name: "asc" } }],
   });
 }
@@ -79,7 +79,7 @@ export async function calculateMonthlySalary(employeeId: number, month: number, 
       netSalary,
     },
     update: { presentDays, absentDays, leaveDays, grossSalary, netSalary },
-    include: { employee: true },
+    include: { employee: { select: { id: true, name: true, role: true } } },
   });
 }
 
@@ -101,6 +101,6 @@ export async function recordSalaryPayment(
       paymentBy: input.paymentBy,
       paymentDate: new Date(),
     },
-    include: { employee: true },
+    include: { employee: { select: { id: true, name: true, role: true } } },
   });
 }
