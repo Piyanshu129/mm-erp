@@ -3,7 +3,7 @@
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Plus, Search, ClipboardList } from "lucide-react";
+import { Search, ClipboardList, Car } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -64,9 +64,6 @@ function JobCardsPageContent() {
   const [statusFilter, setStatusFilter] = useState(prefillStatus);
   const [q, setQ] = useState("");
 
-  const [showForm, setShowForm] = useState(!!prefillVehicleId);
-  const [vehicleQuery, setVehicleQuery] = useState("");
-  const [vehicleResults, setVehicleResults] = useState<VehicleOption[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleOption | null>(null);
   const [jobType, setJobType] = useState("");
   const [km, setKm] = useState("");
@@ -99,17 +96,11 @@ function JobCardsPageContent() {
     await load(statusFilter, q);
   }
 
-  async function searchVehicles() {
-    if (!vehicleQuery.trim()) return;
-    const body = await apiFetch(`/vehicles?q=${encodeURIComponent(vehicleQuery)}`);
-    setVehicleResults(body.vehicles);
-  }
-
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
     if (!selectedVehicle) {
-      setFormError("Search and select a vehicle");
+      setFormError("No vehicle selected — go to the Vehicles page and use its \"New job card\" action.");
       return;
     }
     setSubmitting(true);
@@ -138,60 +129,22 @@ function JobCardsPageContent() {
         title="Job Cards"
         description="Track every vehicle from drop-off to invoice."
         action={
-          <Button onClick={() => setShowForm((s) => !s)}>
-            <Plus className="h-4 w-4" /> New job card
-          </Button>
+          <Link href="/dashboard/vehicles">
+            <Button>
+              <Car className="h-4 w-4" /> Find or add a vehicle to start
+            </Button>
+          </Link>
         }
       />
 
-      {showForm && (
+      {selectedVehicle && (
         <Card className="max-w-lg">
           <CardBody>
             <form onSubmit={handleCreate} className="space-y-3">
-              <div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Search vehicle by registration number"
-                    value={vehicleQuery}
-                    onChange={(e) => setVehicleQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        searchVehicles();
-                      }
-                    }}
-                    className="flex-1"
-                  />
-                  <Button type="button" variant="secondary" onClick={searchVehicles}>
-                    <Search className="h-4 w-4" /> Search
-                  </Button>
-                </div>
-                {selectedVehicle ? (
-                  <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                    Selected: <strong>{selectedVehicle.registrationNumber}</strong> — {selectedVehicle.make}{" "}
-                    {selectedVehicle.model} ({selectedVehicle.customer.name})
-                  </p>
-                ) : (
-                  vehicleResults.length > 0 && (
-                    <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                      {vehicleResults.map((v) => (
-                        <li key={v.id}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedVehicle(v);
-                              setVehicleResults([]);
-                            }}
-                            className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                          >
-                            {v.registrationNumber} — {v.make} {v.model} ({v.customer.name})
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )
-                )}
-              </div>
+              <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                New job card for <strong>{selectedVehicle.registrationNumber}</strong> — {selectedVehicle.make}{" "}
+                {selectedVehicle.model} ({selectedVehicle.customer.name})
+              </p>
 
               <Select value={jobType} onChange={(e) => setJobType(e.target.value)}>
                 <option value="">Job type (optional)...</option>

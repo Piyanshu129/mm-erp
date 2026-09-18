@@ -8,7 +8,7 @@ import Link from "next/link";
 import { ArrowLeft, Plus, Car, ClipboardPlus } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
-import { Input, Label } from "@/components/ui/Input";
+import { Input, Select } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { ActiveBadge } from "@/components/ui/Badge";
@@ -22,6 +22,9 @@ interface Vehicle {
   model: string;
   currentKm: number | null;
 }
+
+const FUEL_TYPES = ["Petrol", "Diesel", "CNG", "Electric", "Hybrid"];
+const TRANSMISSIONS = ["Manual", "Automatic"];
 
 interface CustomerDetail {
   id: number;
@@ -44,9 +47,30 @@ function CustomerDetailPageContent() {
   const [regNumber, setRegNumber] = useState("");
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
+  const [variant, setVariant] = useState("");
+  const [year, setYear] = useState("");
+  const [fuelType, setFuelType] = useState("");
+  const [transmission, setTransmission] = useState("");
   const [currentKm, setCurrentKm] = useState("");
+  const [chassisNumber, setChassisNumber] = useState("");
+  const [engineNumber, setEngineNumber] = useState("");
+  const [nextServiceDue, setNextServiceDue] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function resetVehicleForm() {
+    setRegNumber("");
+    setMake("");
+    setModel("");
+    setVariant("");
+    setYear("");
+    setFuelType("");
+    setTransmission("");
+    setCurrentKm("");
+    setChassisNumber("");
+    setEngineNumber("");
+    setNextServiceDue("");
+  }
 
   async function load() {
     setLoading(true);
@@ -71,14 +95,18 @@ function CustomerDetailPageContent() {
           registrationNumber: regNumber,
           make,
           model,
+          variant: variant || undefined,
+          year: year || undefined,
+          fuelType: fuelType || undefined,
+          transmission: transmission || undefined,
           currentKm: currentKm || undefined,
+          chassisNumber: chassisNumber || undefined,
+          engineNumber: engineNumber || undefined,
+          nextServiceDue: nextServiceDue || undefined,
           customerId: Number(id),
         }),
       });
-      setRegNumber("");
-      setMake("");
-      setModel("");
-      setCurrentKm("");
+      resetVehicleForm();
       setShowVehicleForm(false);
       await load();
     } catch (err) {
@@ -130,29 +158,56 @@ function CustomerDetailPageContent() {
         </div>
 
         {showVehicleForm && (
-          <Card className="mb-4 max-w-md">
+          <Card className="mb-4 max-w-lg">
             <CardBody>
               <form onSubmit={handleAddVehicle} className="space-y-3">
-                <div>
-                  <Label>Registration number</Label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Input
-                    placeholder="e.g. HR06AB1234"
+                    placeholder="Registration number"
                     required
                     value={regNumber}
                     onChange={(e) => setRegNumber(e.target.value)}
                   />
-                </div>
-                <div>
-                  <Label>Make</Label>
-                  <Input placeholder="e.g. Maruti" required value={make} onChange={(e) => setMake(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Model</Label>
-                  <Input placeholder="e.g. Swift" required value={model} onChange={(e) => setModel(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Current KM (optional)</Label>
-                  <Input type="number" value={currentKm} onChange={(e) => setCurrentKm(e.target.value)} />
+                  <Input placeholder="Make (e.g. Maruti)" required value={make} onChange={(e) => setMake(e.target.value)} />
+                  <Input placeholder="Model (e.g. Swift)" required value={model} onChange={(e) => setModel(e.target.value)} />
+                  <Input placeholder="Variant (optional)" value={variant} onChange={(e) => setVariant(e.target.value)} />
+                  <Input type="number" placeholder="Year (optional)" value={year} onChange={(e) => setYear(e.target.value)} />
+                  <Select value={fuelType} onChange={(e) => setFuelType(e.target.value)}>
+                    <option value="">Fuel type (optional)...</option>
+                    {FUEL_TYPES.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </Select>
+                  <Select value={transmission} onChange={(e) => setTransmission(e.target.value)}>
+                    <option value="">Transmission (optional)...</option>
+                    {TRANSMISSIONS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    type="number"
+                    placeholder="Current KM (optional)"
+                    value={currentKm}
+                    onChange={(e) => setCurrentKm(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Chassis number (optional)"
+                    value={chassisNumber}
+                    onChange={(e) => setChassisNumber(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Engine number (optional)"
+                    value={engineNumber}
+                    onChange={(e) => setEngineNumber(e.target.value)}
+                  />
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs text-gray-500">Next service due (optional)</label>
+                    <Input type="date" value={nextServiceDue} onChange={(e) => setNextServiceDue(e.target.value)} />
+                  </div>
                 </div>
                 {formError && <p className="text-sm text-red-600">{formError}</p>}
                 <Button type="submit" disabled={submitting}>
