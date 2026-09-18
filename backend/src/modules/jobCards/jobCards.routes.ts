@@ -6,6 +6,7 @@ import * as jobCardMediaController from "./jobCardMedia.controller";
 import * as invoicesController from "../invoices/invoices.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
+import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { uploadMedia } from "../../middleware/upload";
 
@@ -13,7 +14,7 @@ export const jobCardsRouter = Router();
 
 const uploadJobCardMedia = uploadMedia("job-cards").single("file");
 
-jobCardsRouter.use(authenticate);
+jobCardsRouter.use(authenticate, requirePermission("JOB_CARDS"));
 
 jobCardsRouter.get("/", asyncHandler(jobCardsController.list));
 jobCardsRouter.get("/:id", asyncHandler(jobCardsController.get));

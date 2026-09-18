@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { useEffect, useState } from "react";
 import { CalendarCheck } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -24,7 +26,7 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function AttendancePage() {
+function AttendancePageContent() {
   const [date, setDate] = useState(todayIso());
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,5 +111,13 @@ export default function AttendancePage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function AttendancePage() {
+  return (
+    <RequireAuth permission="ATTENDANCE">
+      <AttendancePageContent />
+    </RequireAuth>
   );
 }

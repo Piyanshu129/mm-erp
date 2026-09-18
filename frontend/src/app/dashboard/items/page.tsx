@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Search, Package } from "lucide-react";
@@ -30,7 +32,7 @@ interface ItemRow {
 
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
 
-export default function ItemsPage() {
+function ItemsPageContent() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -231,5 +233,13 @@ export default function ItemsPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function ItemsPage() {
+  return (
+    <RequireAuth permission="ITEMS">
+      <ItemsPageContent />
+    </RequireAuth>
   );
 }

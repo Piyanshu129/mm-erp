@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as itemsController from "./items.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
+import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { uploadImage } from "../../middleware/upload";
 
@@ -9,7 +10,7 @@ export const itemsRouter = Router();
 
 const uploadItemPhoto = uploadImage("items").single("photo");
 
-itemsRouter.use(authenticate);
+itemsRouter.use(authenticate, requirePermission("ITEMS"));
 
 itemsRouter.get("/", asyncHandler(itemsController.list));
 itemsRouter.get("/:id", asyncHandler(itemsController.get));

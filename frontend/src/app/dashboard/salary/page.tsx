@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { Banknote } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -42,7 +44,7 @@ interface SalaryPayment {
   employee: { id: number; name: string };
 }
 
-export default function SalaryPage() {
+function SalaryPageContent() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -227,5 +229,13 @@ export default function SalaryPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function SalaryPage() {
+  return (
+    <RequireAuth permission="SALARY">
+      <SalaryPageContent />
+    </RequireAuth>
   );
 }

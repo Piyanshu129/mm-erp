@@ -2,11 +2,12 @@ import { Router } from "express";
 import * as attendanceController from "./attendance.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
+import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 
 export const attendanceRouter = Router();
 
-attendanceRouter.use(authenticate);
+attendanceRouter.use(authenticate, requirePermission("ATTENDANCE"));
 
 attendanceRouter.get("/", asyncHandler(attendanceController.forDate));
 attendanceRouter.get("/summary", asyncHandler(attendanceController.summary));

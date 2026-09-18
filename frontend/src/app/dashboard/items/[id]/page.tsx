@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -41,7 +43,7 @@ interface UnitRow {
   } | null;
 }
 
-export default function ItemDetailPage() {
+function ItemDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [units, setUnits] = useState<UnitRow[]>([]);
@@ -164,5 +166,13 @@ export default function ItemDetailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ItemDetailPage() {
+  return (
+    <RequireAuth permission="ITEMS">
+      <ItemDetailPageContent />
+    </RequireAuth>
   );
 }

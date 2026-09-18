@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -133,7 +135,7 @@ function SectionHeading({ icon: Icon, children }: { icon: React.ComponentType<{ 
   );
 }
 
-export default function JobCardDetailPage() {
+function JobCardDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [jobCard, setJobCard] = useState<JobCardDetail | null>(null);
@@ -998,5 +1000,13 @@ export default function JobCardDetailPage() {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+export default function JobCardDetailPage() {
+  return (
+    <RequireAuth permission="JOB_CARDS">
+      <JobCardDetailPageContent />
+    </RequireAuth>
   );
 }

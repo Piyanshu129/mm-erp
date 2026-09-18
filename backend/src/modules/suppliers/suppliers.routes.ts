@@ -2,11 +2,12 @@ import { Router } from "express";
 import * as suppliersController from "./suppliers.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
+import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 
 export const suppliersRouter = Router();
 
-suppliersRouter.use(authenticate);
+suppliersRouter.use(authenticate, requirePermission("SUPPLIERS"));
 
 suppliersRouter.get("/", asyncHandler(suppliersController.list));
 suppliersRouter.post(

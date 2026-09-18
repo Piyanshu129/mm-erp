@@ -22,6 +22,13 @@ model Role {
   @@map("roles")
 }
 
+// permissions is only meaningful for non-ADMIN users — ADMIN is always a
+// superuser regardless of this list (see middleware/requirePermission.ts).
+// It's a plain string array (not a join table) for the same reason Role is
+// a lookup table rather than an enum: the exact set of grantable modules
+// can grow without a migration, and per-user grants don't need referential
+// integrity beyond "is this string one we currently recognize" (checked at
+// the API layer, not the DB layer).
 model User {
   id           Int       @id @default(autoincrement())
   name         String
@@ -30,6 +37,7 @@ model User {
   isActive     Boolean   @default(true) @map("is_active")
   roleId       Int       @map("role_id")
   role         Role      @relation(fields: [roleId], references: [id])
+  permissions  String[]  @default([])
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

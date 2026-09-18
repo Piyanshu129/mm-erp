@@ -4,10 +4,15 @@ import { env } from "../config/env";
 export interface AccessTokenPayload {
   userId: number;
   role: string;
+  permissions: string[];
   type: "staff";
 }
 
-export function signAccessToken(payload: { userId: number; role: string }): string {
+// permissions are embedded here rather than looked up fresh per request,
+// same trade-off the existing `role` field already makes: a permission
+// change takes effect the next time the user's access token is reissued
+// (at most ~15 minutes, via the refresh flow), not instantly.
+export function signAccessToken(payload: { userId: number; role: string; permissions: string[] }): string {
   return jwt.sign({ ...payload, type: "staff" }, env.JWT_ACCESS_SECRET, {
     expiresIn: env.JWT_ACCESS_EXPIRES_IN,
   } as jwt.SignOptions);

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, Search, ClipboardList } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { RequireAuth } from "@/components/RequireAuth";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Textarea } from "@/components/ui/Input";
@@ -273,8 +274,10 @@ function JobCardsPageContent() {
 
 export default function JobCardsPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-gray-500">Loading...</p>}>
-      <JobCardsPageContent />
-    </Suspense>
+    <RequireAuth permission="JOB_CARDS">
+      <Suspense fallback={<p className="text-sm text-gray-500">Loading...</p>}>
+        <JobCardsPageContent />
+      </Suspense>
+    </RequireAuth>
   );
 }

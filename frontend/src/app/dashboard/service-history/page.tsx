@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { Search, History } from "lucide-react";
@@ -45,7 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-export default function ServiceHistoryPage() {
+function ServiceHistoryPageContent() {
   const [q, setQ] = useState("");
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleOption | null>(null);
@@ -158,5 +160,13 @@ export default function ServiceHistoryPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ServiceHistoryPage() {
+  return (
+    <RequireAuth permission="JOB_CARDS">
+      <ServiceHistoryPageContent />
+    </RequireAuth>
   );
 }

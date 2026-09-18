@@ -1,9 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Eye, EyeOff, Shield } from "lucide-react";
+import { Eye, EyeOff, Shield, Pencil } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PERMISSIONS, PERMISSION_LABELS, Permission } from "@/lib/permissions";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
@@ -17,7 +18,43 @@ interface UserRow {
   name: string;
   email: string;
   role: string;
+  permissions: string[];
   isActive: boolean;
+}
+
+function PermissionChecklist({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const allSelected = PERMISSIONS.every((p) => selected.includes(p));
+
+  function toggle(p: Permission) {
+    onChange(selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p]);
+  }
+
+  function toggleAll() {
+    onChange(allSelected ? [] : [...PERMISSIONS]);
+  }
+
+  return (
+    <div className="rounded-md border border-gray-200 p-3">
+      <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+        <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+        All modules
+      </label>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-gray-100 pt-2">
+        {PERMISSIONS.map((p) => (
+          <label key={p} className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={selected.includes(p)} onChange={() => toggle(p)} />
+            {PERMISSION_LABELS[p]}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function UsersPageContent() {
@@ -31,6 +68,12 @@ function UsersPageContent() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState("STORE_USER");
+  const [permissions, setPermissions] = useState<string[]>([]);
+
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [editPermissions, setEditPermissions] = useState<string[]>([]);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   async function loadUsers() {
     setLoading(true);
@@ -50,12 +93,13 @@ function UsersPageContent() {
     try {
       await apiFetch("/users", {
         method: "POST",
-        body: JSON.stringify({ name, email, password, role }),
+        body: JSON.stringify({ name, email, password, role, permissions: role === "STORE_USER" ? permissions : undefined }),
       });
       setName("");
       setEmail("");
       setPassword("");
       setRole("STORE_USER");
+      setPermissions([]);
       await loadUsers();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Could not create user");
@@ -72,6 +116,31 @@ function UsersPageContent() {
     await loadUsers();
   }
 
+  function openEditPermissions(user: UserRow) {
+    setEditingUser(user);
+    setEditPermissions(user.permissions);
+    setEditError(null);
+  }
+
+  async function saveEditPermissions(e: FormEvent) {
+    e.preventDefault();
+    if (!editingUser) return;
+    setEditError(null);
+    setEditSubmitting(true);
+    try {
+      await apiFetch(`/users/${editingUser.id}/permissions`, {
+        method: "PATCH",
+        body: JSON.stringify({ permissions: editPermissions }),
+      });
+      setEditingUser(null);
+      await loadUsers();
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : "Could not save permissions");
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader title="Users" description="Admin and Store User accounts that can sign in." />
@@ -79,12 +148,13 @@ function UsersPageContent() {
       {loading ? (
         <TableSkeleton />
       ) : (
-        <Table minWidth={550}>
+        <Table minWidth={700}>
           <thead>
             <tr>
               <Th>Name</Th>
               <Th>Email</Th>
               <Th>Role</Th>
+              <Th>Permissions</Th>
               <Th>Status</Th>
               <Th></Th>
             </tr>
@@ -98,17 +168,60 @@ function UsersPageContent() {
                   <Badge tone={u.role === "ADMIN" ? "purple" : "blue"}>{u.role}</Badge>
                 </Td>
                 <Td>
+                  {u.role === "ADMIN" ? (
+                    <span className="text-xs text-gray-400">All (Admin)</span>
+                  ) : u.permissions.length === PERMISSIONS.length ? (
+                    <span className="text-xs text-gray-600">All modules</span>
+                  ) : u.permissions.length === 0 ? (
+                    <span className="text-xs text-gray-400">None yet</span>
+                  ) : (
+                    <span className="text-xs text-gray-600">
+                      {u.permissions.map((p) => PERMISSION_LABELS[p as Permission] ?? p).join(", ")}
+                    </span>
+                  )}
+                </Td>
+                <Td>
                   <ActiveBadge isActive={u.isActive} />
                 </Td>
                 <Td>
-                  <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
-                    {u.isActive ? "Disable" : "Enable"}
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    {u.role === "STORE_USER" && (
+                      <button
+                        onClick={() => openEditPermissions(u)}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <Pencil className="h-3 w-3" /> Permissions
+                      </button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
+                      {u.isActive ? "Disable" : "Enable"}
+                    </Button>
+                  </div>
                 </Td>
               </Tr>
             ))}
           </tbody>
         </Table>
+      )}
+
+      {editingUser && (
+        <Card className="max-w-sm">
+          <CardBody>
+            <form onSubmit={saveEditPermissions} className="space-y-3">
+              <p className="text-sm font-medium text-gray-900">Permissions for {editingUser.name}</p>
+              <PermissionChecklist selected={editPermissions} onChange={setEditPermissions} />
+              {editError && <p className="text-sm text-red-600">{editError}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={editSubmitting}>
+                  {editSubmitting ? "Saving..." : "Save permissions"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setEditingUser(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
       <div>
@@ -155,6 +268,12 @@ function UsersPageContent() {
                   <option value="ADMIN">Admin</option>
                 </Select>
               </div>
+              {role === "STORE_USER" && (
+                <div>
+                  <Label>Permissions — which parts of the ERP can this user access?</Label>
+                  <PermissionChecklist selected={permissions} onChange={setPermissions} />
+                </div>
+              )}
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting}>
                 {submitting ? "Creating..." : "Create user"}

@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Search, Receipt } from "lucide-react";
@@ -22,7 +24,7 @@ interface InvoiceRow {
   };
 }
 
-export default function InvoicesPage() {
+function InvoicesPageContent() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -89,5 +91,13 @@ export default function InvoicesPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function InvoicesPage() {
+  return (
+    <RequireAuth permission="INVOICES">
+      <InvoicesPageContent />
+    </RequireAuth>
   );
 }

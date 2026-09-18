@@ -29,6 +29,7 @@ export interface CurrentUser {
   name: string;
   email: string;
   role: string;
+  permissions: string[];
 }
 
 let accessToken: string | null = null;

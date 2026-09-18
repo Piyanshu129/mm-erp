@@ -21,4 +21,10 @@ usersRouter.patch(
   validateBody(usersController.updateUserStatusSchema),
   asyncHandler(usersController.updateStatus)
 );
+usersRouter.patch(
+  "/:id/permissions",
+  validateBody(usersController.updateUserPermissionsSchema),
+  asyncHandler(usersController.updatePermissions)
+);
 usersRouter.get("/roles", asyncHandler(usersController.roles));
+usersRouter.get("/permissions", asyncHandler(usersController.permissions));

@@ -2,19 +2,25 @@ import bcrypt from "bcrypt";
 import { prisma } from "../../lib/prisma";
 import { ConflictError, NotFoundError } from "../../lib/errors";
 
+function shape(u: { id: number; name: string; email: string; isActive: boolean; permissions: string[]; role: { name: string } }) {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role.name,
+    // Meaningless for ADMIN (always a superuser) but harmless to return —
+    // the frontend only shows/edits this when role is STORE_USER.
+    permissions: u.permissions,
+    isActive: u.isActive,
+  };
+}
+
 export async function listUsers() {
   const users = await prisma.user.findMany({
     include: { role: true },
     orderBy: { createdAt: "asc" },
   });
-  return users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    role: u.role.name,
-    isActive: u.isActive,
-    createdAt: u.createdAt,
-  }));
+  return users.map(shape);
 }
 
 export async function createUser(input: {
@@ -22,6 +28,7 @@ export async function createUser(input: {
   email: string;
   password: string;
   role: string;
+  permissions?: string[];
 }) {
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
   if (existing) {
@@ -40,11 +47,29 @@ export async function createUser(input: {
       email: input.email,
       passwordHash,
       roleId: role.id,
+      // ADMIN's permissions list is stored but never consulted (see
+      // requirePermission) — only STORE_USER grants actually gate anything.
+      permissions: input.role === "STORE_USER" ? (input.permissions ?? []) : [],
     },
     include: { role: true },
   });
 
-  return { id: user.id, name: user.name, email: user.email, role: user.role.name, isActive: user.isActive };
+  return shape(user);
+}
+
+export async function updateUserPermissions(userId: number, permissions: string[]) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+  if (!user) throw new NotFoundError("User not found");
+  if (user.role.name !== "STORE_USER") {
+    throw new ConflictError("Only Store User accounts have editable permissions — Admin already has full access");
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { permissions },
+    include: { role: true },
+  });
+  return shape(updated);
 }
 
 export async function updateUserStatus(userId: number, isActive: boolean) {
@@ -67,13 +92,7 @@ export async function updateUserStatus(userId: number, isActive: boolean) {
     });
   }
 
-  return {
-    id: updated.id,
-    name: updated.name,
-    email: updated.email,
-    role: updated.role.name,
-    isActive: updated.isActive,
-  };
+  return shape(updated);
 }
 
 export async function listRoles() {

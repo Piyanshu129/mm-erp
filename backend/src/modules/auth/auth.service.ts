@@ -10,8 +10,8 @@ function refreshExpiryDate(): Date {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
 
-async function issueSession(userId: number, role: string) {
-  const accessToken = signAccessToken({ userId, role });
+async function issueSession(userId: number, role: string, permissions: string[]) {
+  const accessToken = signAccessToken({ userId, role, permissions });
 
   const refreshToken = generateRefreshToken();
   await prisma.refreshToken.create({
@@ -40,12 +40,12 @@ export async function login(email: string, password: string) {
     throw new UnauthorizedError("Invalid email or password");
   }
 
-  const { accessToken, refreshToken } = await issueSession(user.id, user.role.name);
+  const { accessToken, refreshToken } = await issueSession(user.id, user.role.name, user.permissions);
 
   return {
     accessToken,
     refreshToken,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role.name },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role.name, permissions: user.permissions },
   };
 }
 
@@ -68,7 +68,11 @@ export async function refresh(presentedToken: string) {
     data: { revokedAt: new Date() },
   });
 
-  const { accessToken, refreshToken } = await issueSession(stored.user.id, stored.user.role.name);
+  const { accessToken, refreshToken } = await issueSession(
+    stored.user.id,
+    stored.user.role.name,
+    stored.user.permissions
+  );
 
   return {
     accessToken,
@@ -78,6 +82,7 @@ export async function refresh(presentedToken: string) {
       name: stored.user.name,
       email: stored.user.email,
       role: stored.user.role.name,
+      permissions: stored.user.permissions,
     },
   };
 }
@@ -95,5 +100,5 @@ export async function getCurrentUser(userId: number) {
     where: { id: userId },
     include: { role: true },
   });
-  return { id: user.id, name: user.name, email: user.email, role: user.role.name };
+  return { id: user.id, name: user.name, email: user.email, role: user.role.name, permissions: user.permissions };
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, Search, ShoppingCart, Paperclip, IndianRupee } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
@@ -61,7 +63,7 @@ function isInventoryType(t: string) {
   return (INVENTORY_TYPES as readonly string[]).includes(t);
 }
 
-export default function PurchasesPage() {
+function PurchasesPageContent() {
   const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -577,5 +579,13 @@ export default function PurchasesPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function PurchasesPage() {
+  return (
+    <RequireAuth permission="PURCHASES">
+      <PurchasesPageContent />
+    </RequireAuth>
   );
 }

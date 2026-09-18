@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Search, Car, ClipboardPlus } from "lucide-react";
@@ -21,7 +23,7 @@ interface VehicleRow {
   customer: { id: number; name: string; mobile: string };
 }
 
-export default function VehiclesPage() {
+function VehiclesPageContent() {
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -98,5 +100,13 @@ export default function VehiclesPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function VehiclesPage() {
+  return (
+    <RequireAuth permission="VEHICLES">
+      <VehiclesPageContent />
+    </RequireAuth>
   );
 }

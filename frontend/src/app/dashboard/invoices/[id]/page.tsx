@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -46,7 +48,7 @@ interface InvoiceDetail {
   };
 }
 
-export default function InvoiceDetailPage() {
+function InvoiceDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,5 +278,13 @@ export default function InvoiceDetailPage() {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+export default function InvoiceDetailPage() {
+  return (
+    <RequireAuth permission="INVOICES">
+      <InvoiceDetailPageContent />
+    </RequireAuth>
   );
 }

@@ -2,11 +2,12 @@ import { Router } from "express";
 import * as salaryController from "./salary.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
+import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 
 export const salaryRouter = Router();
 
-salaryRouter.use(authenticate);
+salaryRouter.use(authenticate, requirePermission("SALARY"));
 
 salaryRouter.get("/", asyncHandler(salaryController.list));
 salaryRouter.post(

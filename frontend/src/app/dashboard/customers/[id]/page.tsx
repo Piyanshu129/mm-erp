@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -33,7 +35,7 @@ interface CustomerDetail {
   vehicles: Vehicle[];
 }
 
-export default function CustomerDetailPage() {
+function CustomerDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,5 +198,13 @@ export default function CustomerDetailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function CustomerDetailPage() {
+  return (
+    <RequireAuth permission="CUSTOMERS">
+      <CustomerDetailPageContent />
+    </RequireAuth>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, Truck } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -20,7 +22,7 @@ interface SupplierRow {
   isActive: boolean;
 }
 
-export default function SuppliersPage() {
+function SuppliersPageContent() {
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -128,5 +130,13 @@ export default function SuppliersPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function SuppliersPage() {
+  return (
+    <RequireAuth permission="SUPPLIERS">
+      <SuppliersPageContent />
+    </RequireAuth>
   );
 }

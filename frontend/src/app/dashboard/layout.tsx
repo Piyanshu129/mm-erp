@@ -26,12 +26,14 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/context/AuthContext";
+import { hasPermission, Permission } from "@/lib/permissions";
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   adminOnly?: boolean;
+  permission?: Permission;
 }
 
 interface NavGroup {
@@ -44,33 +46,33 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Workshop",
     items: [
-      { href: "/dashboard/jobcards", label: "Job Cards", icon: ClipboardList },
-      { href: "/dashboard/service-history", label: "Service History", icon: History },
+      { href: "/dashboard/jobcards", label: "Job Cards", icon: ClipboardList, permission: "JOB_CARDS" },
+      { href: "/dashboard/service-history", label: "Service History", icon: History, permission: "JOB_CARDS" },
     ],
   },
   {
     label: "Masters",
     items: [
-      { href: "/dashboard/customers", label: "Customers", icon: Users },
-      { href: "/dashboard/vehicles", label: "Vehicles", icon: Car },
-      { href: "/dashboard/items", label: "Items", icon: Package },
-      { href: "/dashboard/suppliers", label: "Suppliers", icon: Truck },
+      { href: "/dashboard/customers", label: "Customers", icon: Users, permission: "CUSTOMERS" },
+      { href: "/dashboard/vehicles", label: "Vehicles", icon: Car, permission: "VEHICLES" },
+      { href: "/dashboard/items", label: "Items", icon: Package, permission: "ITEMS" },
+      { href: "/dashboard/suppliers", label: "Suppliers", icon: Truck, permission: "SUPPLIERS" },
     ],
   },
   {
     label: "Money",
     items: [
-      { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart },
-      { href: "/dashboard/invoices", label: "Invoices", icon: Receipt },
-      { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+      { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart, permission: "PURCHASES" },
+      { href: "/dashboard/invoices", label: "Invoices", icon: Receipt, permission: "INVOICES" },
+      { href: "/dashboard/reports", label: "Reports", icon: BarChart3, permission: "REPORTS" },
     ],
   },
   {
     label: "Staff",
     items: [
-      { href: "/dashboard/employees", label: "Employees", icon: UserCog },
-      { href: "/dashboard/attendance", label: "Attendance", icon: CalendarCheck },
-      { href: "/dashboard/salary", label: "Salary", icon: Banknote },
+      { href: "/dashboard/employees", label: "Employees", icon: UserCog, permission: "EMPLOYEES" },
+      { href: "/dashboard/attendance", label: "Attendance", icon: CalendarCheck, permission: "ATTENDANCE" },
+      { href: "/dashboard/salary", label: "Salary", icon: Banknote, permission: "SALARY" },
     ],
   },
   {
@@ -123,7 +125,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 pb-4">
         {NAV_GROUPS.map((group) => {
-          const items = group.items.filter((i) => !i.adminOnly || user?.role === "ADMIN");
+          const items = group.items.filter(
+            (i) => (!i.adminOnly || user?.role === "ADMIN") && (!i.permission || hasPermission(user, i.permission))
+          );
           if (items.length === 0) return null;
           return (
             <div key={group.label || "root"}>

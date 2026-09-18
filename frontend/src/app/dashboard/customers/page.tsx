@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Search, Users } from "lucide-react";
@@ -21,7 +23,7 @@ interface CustomerRow {
   isActive: boolean;
 }
 
-export default function CustomersPage() {
+function CustomersPageContent() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -147,5 +149,13 @@ export default function CustomersPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <RequireAuth permission="CUSTOMERS">
+      <CustomersPageContent />
+    </RequireAuth>
   );
 }

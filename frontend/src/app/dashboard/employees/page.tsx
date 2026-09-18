@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, UserCog, Pencil, KeyRound, ExternalLink } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -47,7 +49,7 @@ const EMPTY_FORM: FormState = {
   monthlyLeaveAllowance: "0",
 };
 
-export default function EmployeesPage() {
+function EmployeesPageContent() {
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -279,5 +281,13 @@ export default function EmployeesPage() {
         </Table>
       )}
     </div>
+  );
+}
+
+export default function EmployeesPage() {
+  return (
+    <RequireAuth permission="EMPLOYEES">
+      <EmployeesPageContent />
+    </RequireAuth>
   );
 }

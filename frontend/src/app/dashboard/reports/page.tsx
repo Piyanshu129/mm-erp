@@ -1,5 +1,7 @@
 "use client";
 
+import { RequireAuth } from "@/components/RequireAuth";
+
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -275,7 +277,7 @@ function ReportTable({ columns, rows, empty }: { columns: string[]; rows: Record
   );
 }
 
-export default function ReportsPage() {
+function ReportsPageContent() {
   const [tab, setTab] = useState<Tab>("sales");
 
   return (
@@ -302,5 +304,13 @@ export default function ReportsPage() {
       {tab === "workshop" && <WorkshopTab />}
       {tab === "customers" && <CustomersTab />}
     </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <RequireAuth permission="REPORTS">
+      <ReportsPageContent />
+    </RequireAuth>
   );
 }
