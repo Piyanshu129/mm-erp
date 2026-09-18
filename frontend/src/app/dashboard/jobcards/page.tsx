@@ -154,6 +154,12 @@ function JobCardsPageContent() {
                     placeholder="Search vehicle by registration number"
                     value={vehicleQuery}
                     onChange={(e) => setVehicleQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        searchVehicles();
+                      }
+                    }}
                     className="flex-1"
                   />
                   <Button type="button" variant="secondary" onClick={searchVehicles}>

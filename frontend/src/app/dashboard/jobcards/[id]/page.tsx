@@ -774,6 +774,12 @@ function JobCardDetailPageContent() {
                         placeholder="Search item code, name or part number"
                         value={itemQuery}
                         onChange={(e) => setItemQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            searchItems();
+                          }
+                        }}
                         className="flex-1"
                       />
                       <Button type="button" variant="secondary" onClick={searchItems}>
