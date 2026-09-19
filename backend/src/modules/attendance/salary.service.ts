@@ -83,20 +83,31 @@ export async function calculateMonthlySalary(employeeId: number, month: number, 
   });
 }
 
+// input.paymentAmount is what's being paid right now, added on top of
+// whatever's already recorded — never the new running total (see the
+// identical fix in purchases.service.ts's recordPurchasePayment).
 export async function recordSalaryPayment(
   salaryPaymentId: number,
   input: { paymentAmount: number; paymentMode?: string; paymentBy?: string }
 ) {
   const payment = await prisma.salaryPayment.findUnique({ where: { id: salaryPaymentId } });
   if (!payment) throw new NotFoundError("Salary payment not found");
-  if (input.paymentAmount > Number(payment.netSalary)) {
-    throw new ConflictError(`Payment cannot exceed net salary of ${Number(payment.netSalary).toFixed(2)}`);
+  if (input.paymentAmount <= 0) {
+    throw new ConflictError("Payment amount must be greater than zero");
+  }
+
+  const alreadyPaid = Number(payment.paymentAmount);
+  const newTotalPaid = alreadyPaid + input.paymentAmount;
+  if (newTotalPaid > Number(payment.netSalary)) {
+    throw new ConflictError(
+      `That would overpay this salary — only ₹${(Number(payment.netSalary) - alreadyPaid).toFixed(2)} is still due`
+    );
   }
 
   return prisma.salaryPayment.update({
     where: { id: salaryPaymentId },
     data: {
-      paymentAmount: input.paymentAmount,
+      paymentAmount: newTotalPaid,
       paymentMode: input.paymentMode,
       paymentBy: input.paymentBy,
       paymentDate: new Date(),

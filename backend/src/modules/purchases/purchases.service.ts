@@ -133,17 +133,34 @@ export async function createPurchase(input: PurchaseInput) {
   });
 }
 
+// input.paymentAmount is what's being paid right now, added on top of
+// whatever's already recorded — never the new running total. A caller that
+// passed the cumulative total here (easy mistake — that's exactly the bug
+// this replaced) would silently double-count every payment after the
+// first, which is why this rejects anything that would overpay.
 export async function recordPurchasePayment(
   purchaseId: number,
   input: { paymentAmount: number; paymentMode?: string; paymentReference?: string; paymentBy?: string }
 ) {
   const purchase = await prisma.purchase.findUnique({ where: { id: purchaseId } });
   if (!purchase) throw new NotFoundError("Purchase not found");
+  if (input.paymentAmount <= 0) {
+    throw new ConflictError("Payment amount must be greater than zero");
+  }
+
+  const total = purchase.quantity * Number(purchase.purchaseCost);
+  const alreadyPaid = Number(purchase.paymentAmount);
+  const newTotalPaid = alreadyPaid + input.paymentAmount;
+  if (newTotalPaid > total) {
+    throw new ConflictError(
+      `That would overpay this purchase — only ₹${(total - alreadyPaid).toFixed(2)} is still due`
+    );
+  }
 
   return prisma.purchase.update({
     where: { id: purchaseId },
     data: {
-      paymentAmount: input.paymentAmount,
+      paymentAmount: newTotalPaid,
       paymentMode: input.paymentMode,
       paymentReference: input.paymentReference,
       paymentBy: input.paymentBy,

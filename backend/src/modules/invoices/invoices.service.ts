@@ -95,17 +95,31 @@ export function paymentStatusFor(total: number, paid: number): "PENDING" | "PART
   return "PARTIAL";
 }
 
+// input.paymentAmount is what's being paid right now, added on top of
+// whatever's already recorded — never the new running total (see the
+// identical fix in purchases.service.ts's recordPurchasePayment).
 export async function recordInvoicePayment(
   invoiceId: number,
   input: { paymentAmount: number; paymentMode?: string; paymentReference?: string; paymentReceivedBy?: string }
 ) {
   const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
   if (!invoice) throw new NotFoundError("Invoice not found");
+  if (input.paymentAmount <= 0) {
+    throw new ConflictError("Payment amount must be greater than zero");
+  }
+
+  const alreadyPaid = Number(invoice.paymentAmount);
+  const newTotalPaid = alreadyPaid + input.paymentAmount;
+  if (newTotalPaid > Number(invoice.totalAmount)) {
+    throw new ConflictError(
+      `That would overpay this invoice — only ₹${(Number(invoice.totalAmount) - alreadyPaid).toFixed(2)} is still due`
+    );
+  }
 
   return prisma.invoice.update({
     where: { id: invoiceId },
     data: {
-      paymentAmount: input.paymentAmount,
+      paymentAmount: newTotalPaid,
       paymentMode: input.paymentMode,
       paymentReference: input.paymentReference,
       paymentReceivedBy: input.paymentReceivedBy,

@@ -92,7 +92,7 @@ function SalaryPageContent() {
 
   function openPayment(p: SalaryPayment) {
     setPayingId(p.id);
-    setPayAmount(p.paymentAmount);
+    setPayAmount("");
     setPayMode("");
     setPayBy("");
     setPayError(null);
@@ -109,6 +109,7 @@ function SalaryPageContent() {
         body: JSON.stringify({ paymentAmount: Number(payAmount), paymentMode: payMode || undefined, paymentBy: payBy || undefined }),
       });
       setPayingId(null);
+      setPayAmount("");
       await load();
     } catch (err) {
       setPayError(err instanceof ApiError ? err.message : "Could not record payment");
@@ -149,11 +150,14 @@ function SalaryPageContent() {
               <p className="text-sm font-medium text-gray-700">
                 Record payment — {payingPayment.employee.name} ({MONTHS[payingPayment.periodMonth - 1]} {payingPayment.periodYear})
               </p>
-              <p className="text-xs text-gray-500">Net salary: ₹{payingPayment.netSalary}</p>
+              <p className="text-xs text-gray-500">
+                Net salary: ₹{payingPayment.netSalary} · Paid so far: ₹{payingPayment.paymentAmount} · Due: ₹
+                {(Number(payingPayment.netSalary) - Number(payingPayment.paymentAmount)).toFixed(2)}
+              </p>
               <Input
                 type="number"
                 step="0.01"
-                placeholder="Amount paid"
+                placeholder="Amount being paid now"
                 required
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
@@ -210,7 +214,21 @@ function SalaryPageContent() {
                   <Td>{p?.leaveDays ?? "-"}</Td>
                   <Td>{p ? `₹${p.grossSalary}` : "-"}</Td>
                   <Td>{p ? `₹${p.netSalary}` : "-"}</Td>
-                  <Td>{p ? <PaymentStatusBadge total={Number(p.netSalary)} paid={Number(p.paymentAmount)} /> : "-"}</Td>
+                  <Td>
+                    {p ? (
+                      <>
+                        <PaymentStatusBadge total={Number(p.netSalary)} paid={Number(p.paymentAmount)} />
+                        {Number(p.paymentAmount) > 0 && Number(p.paymentAmount) < Number(p.netSalary) && (
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            ₹{Number(p.paymentAmount).toFixed(2)} paid — ₹
+                            {(Number(p.netSalary) - Number(p.paymentAmount)).toFixed(2)} due
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </Td>
                   <Td>
                     {p ? (
                       <button onClick={() => openPayment(p)} className="text-xs text-blue-600 hover:underline">

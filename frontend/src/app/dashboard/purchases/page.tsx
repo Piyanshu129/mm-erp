@@ -214,7 +214,7 @@ function PurchasesPageContent() {
 
   function openPaymentDialog(p: PurchaseRow) {
     setPayingPurchase(p);
-    setPayAmount(p.paymentAmount);
+    setPayAmount("");
     setPayMode("");
     setPayRef("");
     setPayBy("");
@@ -486,12 +486,13 @@ function PurchasesPageContent() {
               </p>
               <p className="text-xs text-gray-500">
                 Total cost: ₹{(payingPurchase.quantity * Number(payingPurchase.purchaseCost)).toFixed(2)} · Paid so far: ₹
-                {Number(payingPurchase.paymentAmount).toFixed(2)}
+                {Number(payingPurchase.paymentAmount).toFixed(2)} · Due: ₹
+                {(payingPurchase.quantity * Number(payingPurchase.purchaseCost) - Number(payingPurchase.paymentAmount)).toFixed(2)}
               </p>
               <Input
                 type="number"
                 step="0.01"
-                placeholder="Total amount paid so far (not just this installment)"
+                placeholder="Amount being paid now"
                 required
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}

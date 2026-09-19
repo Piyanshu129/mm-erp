@@ -64,7 +64,6 @@ function InvoiceDetailPageContent() {
     setLoading(true);
     const body = await apiFetch(`/invoices/${id}`);
     setInvoice(body.invoice);
-    setPayAmount(body.invoice.paymentAmount);
     setLoading(false);
   }
 
@@ -87,6 +86,7 @@ function InvoiceDetailPageContent() {
           paymentReceivedBy: payBy || undefined,
         }),
       });
+      setPayAmount("");
       setPayMode("");
       setPayRef("");
       setPayBy("");
@@ -244,10 +244,13 @@ function InvoiceDetailPageContent() {
             <p className="text-sm font-semibold text-gray-900">Customer payment</p>
             <PaymentStatusBadge total={Number(invoice.totalAmount)} paid={Number(invoice.paymentAmount)} />
           </div>
+          <p className="mb-3 text-xs text-gray-500">
+            Total: ₹{invoice.totalAmount} · Paid so far: ₹{invoice.paymentAmount} · Due: ₹
+            {(Number(invoice.totalAmount) - Number(invoice.paymentAmount)).toFixed(2)}
+          </p>
           {invoice.paymentDate && (
             <p className="mb-3 text-xs text-gray-500">
-              Last recorded: ₹{invoice.paymentAmount} via {invoice.paymentMode ?? "-"} on{" "}
-              {new Date(invoice.paymentDate).toLocaleString()}
+              Last recorded: via {invoice.paymentMode ?? "-"} on {new Date(invoice.paymentDate).toLocaleString()}
               {invoice.paymentReceivedBy ? ` (received by ${invoice.paymentReceivedBy})` : ""}
             </p>
           )}
@@ -255,7 +258,7 @@ function InvoiceDetailPageContent() {
             <Input
               type="number"
               step="0.01"
-              placeholder="Total amount paid so far"
+              placeholder="Amount being paid now"
               required
               value={payAmount}
               onChange={(e) => setPayAmount(e.target.value)}
