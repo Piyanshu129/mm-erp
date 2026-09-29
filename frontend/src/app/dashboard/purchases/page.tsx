@@ -17,6 +17,23 @@ import { PaymentStatusBadge } from "@/components/ui/Badge";
 interface Supplier {
   id: number;
   name: string;
+  mobile: string | null;
+  isActive: boolean;
+}
+
+// Best match first: exact name, then name starts with the query, then a word
+// in the name starts with it, then anything else the server matched (a
+// substring of the name, or of the mobile number).
+function rankSuppliers(suppliers: Supplier[], query: string): Supplier[] {
+  const q = query.trim().toLowerCase();
+  const score = (s: Supplier) => {
+    const name = s.name.toLowerCase();
+    if (name === q) return 0;
+    if (name.startsWith(q)) return 1;
+    if (name.split(/\s+/).some((word) => word.startsWith(q))) return 2;
+    return 3;
+  };
+  return [...suppliers].sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
 }
 
 interface ItemOption {
@@ -68,8 +85,13 @@ function PurchasesPageContent() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState<string>("");
+  const [supplierQuery, setSupplierQuery] = useState("");
+  const [supplierResults, setSupplierResults] = useState<Supplier[]>([]);
+  const [supplierSearchedFor, setSupplierSearchedFor] = useState<string | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [newSupplierMobile, setNewSupplierMobile] = useState("");
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [supplierError, setSupplierError] = useState<string | null>(null);
   const [itemType, setItemType] = useState<string>("SPARE_PART");
 
   const [itemMode, setItemMode] = useState<"existing" | "new">("existing");
@@ -115,8 +137,65 @@ function PurchasesPageContent() {
 
   useEffect(() => {
     loadPurchases();
-    apiFetch("/suppliers").then((body) => setSuppliers(body.suppliers));
   }, []);
+
+  // Search as the user types (debounced), server-side so every supplier is
+  // searchable — not just the first page of the list.
+  useEffect(() => {
+    const q = supplierQuery.trim();
+    if (selectedSupplier || !q) {
+      setSupplierResults([]);
+      setSupplierSearchedFor(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const body = await apiFetch(`/suppliers?q=${encodeURIComponent(q)}&pageSize=20`);
+        if (cancelled) return;
+        const active = (body.suppliers as Supplier[]).filter((s) => s.isActive);
+        setSupplierResults(rankSuppliers(active, q).slice(0, 8));
+        setSupplierSearchedFor(q);
+      } catch (err) {
+        if (!cancelled) setSupplierError(err instanceof ApiError ? err.message : "Could not search suppliers");
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [supplierQuery, selectedSupplier]);
+
+  function selectSupplier(s: Supplier) {
+    setSelectedSupplier(s);
+    setSupplierQuery(s.name);
+    setSupplierError(null);
+  }
+
+  function clearSupplier() {
+    setSelectedSupplier(null);
+    setSupplierQuery("");
+    setNewSupplierMobile("");
+  }
+
+  async function addSupplier() {
+    const name = supplierQuery.trim();
+    if (!name) return;
+    setSupplierError(null);
+    setAddingSupplier(true);
+    try {
+      const body = await apiFetch("/suppliers", {
+        method: "POST",
+        body: JSON.stringify({ name, mobile: newSupplierMobile.trim() || undefined }),
+      });
+      selectSupplier(body.supplier);
+      setNewSupplierMobile("");
+    } catch (err) {
+      setSupplierError(err instanceof ApiError ? err.message : "Could not add supplier");
+    } finally {
+      setAddingSupplier(false);
+    }
+  }
 
   async function searchItems() {
     if (!itemQuery.trim()) return;
@@ -147,8 +226,8 @@ function PurchasesPageContent() {
     e.preventDefault();
     setFormError(null);
 
-    if (!supplierId) {
-      setFormError("Select a supplier");
+    if (!selectedSupplier) {
+      setFormError("Search and select a supplier, or add a new one");
       return;
     }
 
@@ -186,7 +265,7 @@ function PurchasesPageContent() {
       }
 
       const formData = new FormData();
-      formData.set("supplierId", supplierId);
+      formData.set("supplierId", String(selectedSupplier.id));
       formData.set("itemType", itemType);
       if (itemId != null) formData.set("itemId", String(itemId));
       if (!inventory) formData.set("description", description);
@@ -264,19 +343,86 @@ function PurchasesPageContent() {
           <CardBody>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
+                <div className="relative">
                   <Label>Supplier</Label>
-                  <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                    <option value="">Select supplier...</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                  {suppliers.length === 0 && (
-                    <p className="mt-1 text-xs text-gray-500">No suppliers yet — add one on the Suppliers page first.</p>
+                  {selectedSupplier ? (
+                    <div className="flex items-center justify-between gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      <span className="min-w-0 truncate">
+                        <strong>{selectedSupplier.name}</strong>
+                        {selectedSupplier.mobile && ` — ${selectedSupplier.mobile}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearSupplier}
+                        className="flex-shrink-0 text-xs font-medium text-blue-700 hover:underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        placeholder="Type supplier name or mobile"
+                        value={supplierQuery}
+                        onChange={(e) => {
+                          setSupplierQuery(e.target.value);
+                          setSupplierError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          // Don't let Enter submit the whole purchase form —
+                          // pick the best match instead.
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (supplierResults.length > 0) selectSupplier(supplierResults[0]);
+                          }
+                        }}
+                        autoComplete="off"
+                      />
+
+                      {supplierResults.length > 0 && (
+                        <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-gray-200 bg-white text-sm shadow-lg">
+                          {supplierResults.map((s) => (
+                            <li key={s.id}>
+                              <button
+                                type="button"
+                                onClick={() => selectSupplier(s)}
+                                className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                              >
+                                <span className="font-medium text-gray-900">{s.name}</span>
+                                {s.mobile && <span className="text-gray-500"> — {s.mobile}</span>}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {supplierSearchedFor !== null &&
+                        supplierSearchedFor === supplierQuery.trim() &&
+                        supplierResults.length === 0 && (
+                          <div className="mt-2 space-y-2 rounded-md border border-dashed border-gray-300 p-3">
+                            <p className="text-xs text-gray-600">
+                              No supplier matches &ldquo;{supplierSearchedFor}&rdquo;.
+                            </p>
+                            <Input
+                              placeholder="Mobile (optional)"
+                              value={newSupplierMobile}
+                              onChange={(e) => setNewSupplierMobile(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  addSupplier();
+                                }
+                              }}
+                            />
+                            <Button type="button" size="sm" onClick={addSupplier} disabled={addingSupplier}>
+                              <Plus className="h-4 w-4" />
+                              {addingSupplier ? "Adding..." : `Add "${supplierSearchedFor}" as supplier`}
+                            </Button>
+                          </div>
+                        )}
+                    </>
                   )}
+                  {supplierError && <p className="mt-1 text-xs text-red-600">{supplierError}</p>}
                 </div>
                 <div>
                   <Label>Purchase type</Label>
