@@ -138,7 +138,7 @@ function ItemsPageContent() {
                 <Input type="number" step="0.01" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
               </div>
               <div>
-                <Label>Selling price</Label>
+                <Label>MRP</Label>
                 <Input type="number" step="0.01" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} />
               </div>
               <div>
@@ -198,7 +198,7 @@ function ItemsPageContent() {
               <Th>Name</Th>
               <Th>Category</Th>
               <Th>UOM</Th>
-              <Th>Selling Price</Th>
+              <Th>MRP</Th>
               <Th>Stock</Th>
             </tr>
           </thead>

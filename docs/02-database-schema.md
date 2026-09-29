@@ -25,21 +25,24 @@ Customer ──< Vehicle
 - **`Customer`** — `mobile` is globally unique (the app's primary lookup key for a customer).
 - **`Vehicle`** — `registrationNumber` is globally unique; the service layer normalizes it (uppercase, no spaces) before the uniqueness check so `"hr06 ab 1234"` and `"HR06AB1234"` collide as the same vehicle.
 - **`Item`** — the parts/consumables catalog. `itemCode` (`ITM-000123`) is generated server-side from the row's own `id` right after insert — never typed by a user, so it can never collide (same pattern used for `Vehicle`/`JobCard`/`Invoice` numbers). `currentStock` is a **denormalized counter**: it's not computed live from `ItemUnit` rows on every read: it's incremented/decremented transactionally alongside every purchase and every parts issue/removal ([`purchases.service.ts`](../backend/src/modules/purchases/purchases.service.ts), [`jobCardParts.service.ts`](../backend/src/modules/jobCards/jobCardParts.service.ts)), so it's always in sync.
-- **`Supplier`** — simple master for Purchases.
+- **`Supplier`** — master for Purchases, and the account that supplier payments are made against (see `SupplierPayment` below).
 
 ## Purchasing & inventory (Phase 3, reworked September 2026)
 
 ```
 Supplier ──< Purchase ──< ItemUnit >── Item
+         ──< SupplierPayment
 ```
 
 This is the part of the schema that changed shape most dramatically. The **original** Phase 3 design gave one serial number per *purchase transaction* and tracked stock as an aggregate count plus an append-only `stock_ledger` table. The client's actual shop-floor practice, surfaced by their own flowchart documentation, is different: **a serial sticker gets written on every individual physical part**, even when ten identical brake pads arrive in one purchase. The schema was reworked to match:
 
-- **`Purchase`** — one row per buying event. `itemType` is one of:
+- **`Purchase`** — one row per purchased line. A single purchase entry in the UI (one supplier, one bill) can contain several items; each becomes its own `Purchase` row sharing `supplierId`, `purchaseDate`, `billUrl` and `remarks`, all created in one transaction. `itemType` is one of:
   - Inventory types: `SPARE_PART`, `PAINT`, `TOOL` — these reference an `Item` and generate `ItemUnit` rows.
   - Expense types: `TRAVEL`, `PETROL`, `FOOD`, `OTHERS` — no `Item`, just a `description` and a cost; no stock implications at all.
-  
-  Payment is a **single evolving snapshot on the row itself** (`paymentAmount`, `paymentMode`, `paymentReference`, `paymentBy`, `paymentDate`) rather than a separate payments table. `Pending`/`Partial`/`Paid` is *computed* from `paymentAmount` vs. the purchase total (`paymentStatusFor()` in the service), never stored — so it can never drift out of sync with reality. The exact same pattern is reused on `Invoice` and `SalaryPayment` below.
+
+  `purchaseCost` is the **per-unit** rate for inventory lines (the line total is `quantity × purchaseCost`) and the total for expense lines (quantity is always 1). `sellingPrice` is labelled **MRP** in the UI, and can't be below `purchaseCost`. Purchases carry **no payment fields** — payment is tracked per supplier, below.
+
+- **`SupplierPayment`** (added 2026-09-29) — one row per payment made to a supplier: `amount`, `paymentDate`, `paymentMode`, `reference`, `paidBy`, `proofUrl` (photo/screenshot of the transaction), `notes`, and `createdById`. Payments go against the supplier's **running account**, not against any one purchase, because that's how the workshop actually pays ("₹20,000 towards the balance"). The account is always computed and never stored: `totalPurchased` (sum of `quantity × purchaseCost` over the supplier's purchases) minus `totalPaid` (sum of these rows) = `balanceDue`. Because each payment is its own row, the full partial-payment history is kept. Before this table existed, each purchase stored one accumulated payment total. The migration `20260929130000_supplier_payments` copied each paid purchase into one row here, noted "Recorded against purchase #N", and then dropped those columns.
 
 - **`ItemUnit`** — one row per **physical unit**. Its own `id` **is** its permanent serial number: assigned the moment it's created, never reused, never hand-typed. `status` is `IN_STOCK` or `ISSUED`. This single table is now the entire traceability mechanism — a unit's `purchase` relation says exactly where it came from (which supplier, which purchase), and its `jobCardPart` relation (if any) says exactly where it went (which job card, which vehicle). The old `stock_ledger` table is gone entirely; nothing replaced it as a separate ledger because none is needed anymore.
 
@@ -74,7 +77,7 @@ Employee ──< JobCard   (assignedEmployee, optional)
 
 ## Invoices (Phase 5)
 
-- **`Invoice`** — 1:1 with `JobCard` (`jobCardId @unique`, DB-enforced — a job card can only be invoiced once). Deliberately **has no line-item tables of its own**: parts and labour are read live from the job card's own (already-locked) records at invoice-generation time, so an invoice can never show numbers different from the job card it came from. `invoiceNumber` follows the `INV-000123` pattern. `taxRate`/`taxAmount` exist, unused, so GST support can be added later without a schema migration touching this table's shape. Payment uses the same evolving-snapshot pattern as `Purchase`.
+- **`Invoice`** — 1:1 with `JobCard` (`jobCardId @unique`, DB-enforced — a job card can only be invoiced once). Deliberately **has no line-item tables of its own**: parts and labour are read live from the job card's own (already-locked) records at invoice-generation time, so an invoice can never show numbers different from the job card it came from. `invoiceNumber` follows the `INV-000123` pattern. `taxRate`/`taxAmount` exist, unused, so GST support can be added later without a schema migration touching this table's shape. Payment is a single evolving snapshot on the row itself (`paymentAmount`, `paymentMode`, `paymentReference`, `paymentReceivedBy`, `paymentDate`), with `Pending`/`Partial`/`Paid` computed from `paymentAmount` vs. `totalAmount`, never stored. `SalaryPayment` below uses the same pattern.
 
 ## HR: Attendance → Salary (Phase 6, expanded with the Employee Portal)
 
@@ -94,5 +97,5 @@ Employee ──< Attendance
 
 - **No `stock_ledger` table** — replaced by `ItemUnit`'s own relations (see above).
 - **No line items on `Invoice`** — reads live from `JobCard.parts`/`JobCard.labour`.
-- **No separate `Payment` table** anywhere — `Purchase`, `Invoice`, and `SalaryPayment` each carry their own single evolving payment snapshot instead.
+- **No payment fields on `Purchase`** — supplier payments are their own table (`SupplierPayment`), against the supplier's account. `Invoice` and `SalaryPayment`, by contrast, each still carry a single evolving payment snapshot on the row itself.
 - **GST/tax fields exist but are unused** (`Invoice.taxRate`/`taxAmount`) — reserved for a future feature, not yet wired into any calculation.

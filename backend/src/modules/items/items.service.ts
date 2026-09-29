@@ -51,7 +51,7 @@ export async function getItem(id: number) {
 
 function assertSellingPriceValid(purchaseCost: number | undefined, sellingPrice: number | undefined) {
   if (purchaseCost != null && sellingPrice != null && sellingPrice < purchaseCost) {
-    throw new ConflictError("Selling price cannot be lower than purchase cost");
+    throw new ConflictError("MRP cannot be lower than purchase cost");
   }
 }
 

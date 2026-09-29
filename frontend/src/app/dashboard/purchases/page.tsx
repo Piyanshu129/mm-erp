@@ -3,8 +3,9 @@
 import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Plus, Search, ShoppingCart, Paperclip, IndianRupee } from "lucide-react";
+import { Plus, ShoppingCart, Paperclip, Trash2 } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { formatINR, todayISO } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label, Textarea } from "@/components/ui/Input";
@@ -12,7 +13,6 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
-import { PaymentStatusBadge } from "@/components/ui/Badge";
 
 interface Supplier {
   id: number;
@@ -21,27 +21,15 @@ interface Supplier {
   isActive: boolean;
 }
 
-// Best match first: exact name, then name starts with the query, then a word
-// in the name starts with it, then anything else the server matched (a
-// substring of the name, or of the mobile number).
-function rankSuppliers(suppliers: Supplier[], query: string): Supplier[] {
-  const q = query.trim().toLowerCase();
-  const score = (s: Supplier) => {
-    const name = s.name.toLowerCase();
-    if (name === q) return 0;
-    if (name.startsWith(q)) return 1;
-    if (name.split(/\s+/).some((word) => word.startsWith(q))) return 2;
-    return 3;
-  };
-  return [...suppliers].sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
-}
-
 interface ItemOption {
   id: number;
   itemCode: string;
   name: string;
   uom: string;
   currentStock: number;
+  purchaseCost: string;
+  sellingPrice: string;
+  isActive: boolean;
 }
 
 interface PurchaseRow {
@@ -50,19 +38,35 @@ interface PurchaseRow {
   itemType: string;
   quantity: number;
   purchaseCost: string;
+  sellingPrice: string | null;
   billUrl: string | null;
-  paymentAmount: string;
   supplier: { name: string };
   item: { itemCode: string; name: string; uom: string } | null;
   description: string | null;
   createdBy: { name: string };
 }
 
+// One item row of the purchase form, before it's sent.
+interface LineDraft {
+  key: number;
+  itemType: string;
+  itemMode: "new" | "existing";
+  selectedItem: ItemOption | null;
+  newItemName: string;
+  newItemCategory: string;
+  newItemUom: string;
+  newItemMinStock: string;
+  newItemPhoto: File | null;
+  description: string;
+  quantity: string;
+  purchaseCost: string;
+  sellingPrice: string;
+}
+
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
 
 const INVENTORY_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
 const EXPENSE_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
-const ALL_TYPES = [...INVENTORY_TYPES, ...EXPENSE_TYPES];
 
 const TYPE_LABELS: Record<string, string> = {
   SPARE_PART: "Spare Part",
@@ -74,10 +78,330 @@ const TYPE_LABELS: Record<string, string> = {
   OTHERS: "Others",
 };
 
-const PAYMENT_MODES = ["CASH", "UPI", "CARD", "BANK_TRANSFER", "CHEQUE"];
+const FILE_INPUT_CLASS =
+  "block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200";
 
 function isInventoryType(t: string) {
   return (INVENTORY_TYPES as readonly string[]).includes(t);
+}
+
+let nextLineKey = 1;
+
+// New item is the default — most purchases bring in parts not yet on file.
+function emptyLine(): LineDraft {
+  return {
+    key: nextLineKey++,
+    itemType: "SPARE_PART",
+    itemMode: "new",
+    selectedItem: null,
+    newItemName: "",
+    newItemCategory: CATEGORIES[0],
+    newItemUom: "PCS",
+    newItemMinStock: "",
+    newItemPhoto: null,
+    description: "",
+    quantity: "1",
+    purchaseCost: "",
+    sellingPrice: "",
+  };
+}
+
+function lineTotal(line: LineDraft): number {
+  const cost = Number(line.purchaseCost) || 0;
+  return isInventoryType(line.itemType) ? cost * (Number(line.quantity) || 0) : cost;
+}
+
+// Best match first: exact name, then name starts with the query, then a word
+// in the name starts with it, then anything else the server matched.
+function rankByName<T extends { name: string }>(rows: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  const score = (r: T) => {
+    const name = r.name.toLowerCase();
+    if (name === q) return 0;
+    if (name.startsWith(q)) return 1;
+    if (name.split(/\s+/).some((word) => word.startsWith(q))) return 2;
+    return 3;
+  };
+  return [...rows].sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
+}
+
+// Labelled form field — the label sits above the box as its heading.
+function Field({ label, hint, className, children }: { label: string; hint?: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={className}>
+      <Label>{label}</Label>
+      {children}
+      {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+    </div>
+  );
+}
+
+// Type-to-search for an existing item on one line — searches the server as
+// the user types, same as the supplier box.
+function ExistingItemPicker({ line, onSelect, onClear }: { line: LineDraft; onSelect: (item: ItemOption) => void; onClear: () => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ItemOption[]>([]);
+  const [searchedFor, setSearchedFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (line.selectedItem || !q) {
+      setResults([]);
+      setSearchedFor(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const body = await apiFetch(`/items?q=${encodeURIComponent(q)}&pageSize=20`);
+        if (cancelled) return;
+        const active = (body.items as ItemOption[]).filter((i) => i.isActive);
+        setResults(rankByName(active, q).slice(0, 8));
+        setSearchedFor(q);
+      } catch {
+        if (!cancelled) setResults([]);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, line.selectedItem]);
+
+  if (line.selectedItem) {
+    const it = line.selectedItem;
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+        <span className="min-w-0 truncate">
+          <strong>{it.itemCode}</strong> — {it.name} (stock: {it.currentStock} {it.uom})
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            setQuery("");
+            onClear();
+          }}
+          className="flex-shrink-0 text-xs font-medium text-blue-700 hover:underline"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <Input
+        placeholder="Type item code, name or part number"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (results.length > 0) onSelect(results[0]);
+          }
+        }}
+        autoComplete="off"
+      />
+      {results.length > 0 && (
+        <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-gray-200 bg-white text-sm shadow-lg">
+          {results.map((it) => (
+            <li key={it.id}>
+              <button type="button" onClick={() => onSelect(it)} className="block w-full px-3 py-2 text-left hover:bg-gray-50">
+                <span className="font-medium text-gray-900">{it.itemCode}</span> — {it.name}
+                <span className="text-gray-500"> (stock: {it.currentStock})</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {searchedFor !== null && searchedFor === query.trim() && results.length === 0 && (
+        <p className="mt-1 text-xs text-gray-500">No item matches &ldquo;{searchedFor}&rdquo; — switch to New item to add it.</p>
+      )}
+    </div>
+  );
+}
+
+function LineEditor({
+  index,
+  line,
+  canRemove,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  line: LineDraft;
+  canRemove: boolean;
+  onChange: (patch: Partial<LineDraft>) => void;
+  onRemove: () => void;
+}) {
+  const inventory = isInventoryType(line.itemType);
+
+  return (
+    <div className="space-y-3 rounded-md border border-gray-200 p-3 sm:p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-900">Item {index + 1}</p>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-600">Line total: {formatINR(lineTotal(line))}</span>
+          {canRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
+              aria-label={`Remove item ${index + 1}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      <Field label="Purchase type">
+        <Select value={line.itemType} onChange={(e) => onChange({ itemType: e.target.value })}>
+          <optgroup label="Inventory (gets serial numbers)">
+            {INVENTORY_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {TYPE_LABELS[t]}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Expense (no stock)">
+            {EXPENSE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {TYPE_LABELS[t]}
+              </option>
+            ))}
+          </optgroup>
+        </Select>
+      </Field>
+
+      {inventory ? (
+        <>
+          <div className="flex gap-4 text-sm text-gray-700">
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={line.itemMode === "new"} onChange={() => onChange({ itemMode: "new" })} />
+              New item
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={line.itemMode === "existing"} onChange={() => onChange({ itemMode: "existing" })} />
+              Existing item
+            </label>
+          </div>
+
+          {line.itemMode === "existing" ? (
+            <Field label="Item">
+              <ExistingItemPicker
+                line={line}
+                onSelect={(item) =>
+                  onChange({
+                    selectedItem: item,
+                    // Start from the item's last known prices; still editable.
+                    purchaseCost: line.purchaseCost || (Number(item.purchaseCost) > 0 ? String(Number(item.purchaseCost)) : ""),
+                    sellingPrice: line.sellingPrice || (Number(item.sellingPrice) > 0 ? String(Number(item.sellingPrice)) : ""),
+                  })
+                }
+                onClear={() => onChange({ selectedItem: null })}
+              />
+            </Field>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Item name" className="sm:col-span-2">
+                <Input value={line.newItemName} onChange={(e) => onChange({ newItemName: e.target.value })} />
+              </Field>
+              <Field label="Category">
+                <Select value={line.newItemCategory} onChange={(e) => onChange({ newItemCategory: e.target.value })}>
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Unit of measure" hint="e.g. PCS, LTR, SET">
+                <Input value={line.newItemUom} onChange={(e) => onChange({ newItemUom: e.target.value })} />
+              </Field>
+              <Field label="Minimum stock (optional)">
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={line.newItemMinStock}
+                  onChange={(e) => onChange({ newItemMinStock: e.target.value })}
+                />
+              </Field>
+              <Field label="Item photo (optional)">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => onChange({ newItemPhoto: e.target.files?.[0] ?? null })}
+                  className={FILE_INPUT_CLASS}
+                />
+              </Field>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Quantity">
+              <Input type="number" min={1} step={1} value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} />
+            </Field>
+            <Field label="Purchase cost (per unit)">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={line.purchaseCost}
+                onChange={(e) => onChange({ purchaseCost: e.target.value })}
+              />
+            </Field>
+            <Field label="MRP (optional)">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={line.sellingPrice}
+                onChange={(e) => onChange({ sellingPrice: e.target.value })}
+              />
+            </Field>
+          </div>
+        </>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="Description" hint="e.g. Fuel for pickup van, tollway pass" className="sm:col-span-2">
+            <Textarea rows={2} value={line.description} onChange={(e) => onChange({ description: e.target.value })} />
+          </Field>
+          <Field label="Total cost">
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={line.purchaseCost}
+              onChange={(e) => onChange({ purchaseCost: e.target.value })}
+            />
+          </Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Returns the first problem with a line, or null — checked before anything
+// is sent so the user sees exactly which item to fix.
+function lineProblem(line: LineDraft): string | null {
+  if (line.purchaseCost === "" || Number(line.purchaseCost) < 0) return "enter the purchase cost";
+  if (isInventoryType(line.itemType)) {
+    if (line.itemMode === "existing" && !line.selectedItem) return "search and select an existing item";
+    if (line.itemMode === "new") {
+      if (!line.newItemName.trim()) return "enter the item name";
+      if (!line.newItemUom.trim()) return "enter the unit of measure";
+    }
+    if (!Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1) return "quantity must be a whole number, at least 1";
+    if (line.sellingPrice !== "" && Number(line.sellingPrice) < Number(line.purchaseCost)) {
+      return "MRP cannot be lower than purchase cost";
+    }
+  } else if (!line.description.trim()) {
+    return "enter a description";
+  }
+  return null;
 }
 
 function PurchasesPageContent() {
@@ -92,41 +416,16 @@ function PurchasesPageContent() {
   const [newSupplierMobile, setNewSupplierMobile] = useState("");
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [supplierError, setSupplierError] = useState<string | null>(null);
-  const [itemType, setItemType] = useState<string>("SPARE_PART");
 
-  const [itemMode, setItemMode] = useState<"existing" | "new">("existing");
-  const [itemQuery, setItemQuery] = useState("");
-  const [itemResults, setItemResults] = useState<ItemOption[]>([]);
-  const [selectedItem, setSelectedItem] = useState<ItemOption | null>(null);
-
-  const [newItemName, setNewItemName] = useState("");
-  const [newItemCategory, setNewItemCategory] = useState(CATEGORIES[0]);
-  const [newItemUom, setNewItemUom] = useState("PCS");
-  const [newItemMinStock, setNewItemMinStock] = useState("");
-  const [newItemPhoto, setNewItemPhoto] = useState<File | null>(null);
-
-  const [description, setDescription] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [purchaseCost, setPurchaseCost] = useState("");
-  const [sellingPrice, setSellingPrice] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(todayISO());
+  const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [remarks, setRemarks] = useState("");
   const [bill, setBill] = useState<File | null>(null);
-
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMode, setPaymentMode] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentBy, setPaymentBy] = useState("");
+  // Bumped after a save to clear the file inputs, which can't be reset by value.
+  const [fileInputsKey, setFileInputsKey] = useState(0);
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const [payingPurchase, setPayingPurchase] = useState<PurchaseRow | null>(null);
-  const [payAmount, setPayAmount] = useState("");
-  const [payMode, setPayMode] = useState("");
-  const [payRef, setPayRef] = useState("");
-  const [payBy, setPayBy] = useState("");
-  const [payError, setPayError] = useState<string | null>(null);
-  const [paySubmitting, setPaySubmitting] = useState(false);
 
   async function loadPurchases() {
     setLoading(true);
@@ -154,7 +453,7 @@ function PurchasesPageContent() {
         const body = await apiFetch(`/suppliers?q=${encodeURIComponent(q)}&pageSize=20`);
         if (cancelled) return;
         const active = (body.suppliers as Supplier[]).filter((s) => s.isActive);
-        setSupplierResults(rankSuppliers(active, q).slice(0, 8));
+        setSupplierResults(rankByName(active, q).slice(0, 8));
         setSupplierSearchedFor(q);
       } catch (err) {
         if (!cancelled) setSupplierError(err instanceof ApiError ? err.message : "Could not search suppliers");
@@ -197,29 +496,21 @@ function PurchasesPageContent() {
     }
   }
 
-  async function searchItems() {
-    if (!itemQuery.trim()) return;
-    const body = await apiFetch(`/items?q=${encodeURIComponent(itemQuery)}`);
-    setItemResults(body.items);
+  function updateLine(key: number, patch: Partial<LineDraft>) {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
-  function resetForm() {
-    setSelectedItem(null);
-    setItemQuery("");
-    setItemResults([]);
-    setNewItemName("");
-    setNewItemMinStock("");
-    setNewItemPhoto(null);
-    setDescription("");
-    setQuantity("1");
-    setPurchaseCost("");
-    setSellingPrice("");
+  function removeLine(key: number) {
+    setLines((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  // The supplier and date are kept after a save, so several bills from the
+  // same supplier can be entered one after another.
+  function resetEntry() {
+    setLines([emptyLine()]);
     setRemarks("");
     setBill(null);
-    setPaymentAmount("");
-    setPaymentMode("");
-    setPaymentReference("");
-    setPaymentBy("");
+    setFileInputsKey((k) => k + 1);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -230,58 +521,49 @@ function PurchasesPageContent() {
       setFormError("Search and select a supplier, or add a new one");
       return;
     }
+    for (const [i, line] of lines.entries()) {
+      const problem = lineProblem(line);
+      if (problem) {
+        setFormError(`Item ${i + 1}: ${problem}`);
+        return;
+      }
+    }
 
-    const inventory = isInventoryType(itemType);
+    const formData = new FormData();
+    formData.set("supplierId", String(selectedSupplier.id));
+    formData.set("purchaseDate", purchaseDate);
+    if (remarks.trim()) formData.set("remarks", remarks.trim());
+    if (bill) formData.set("bill", bill);
+
+    const payload = lines.map((line, i) => {
+      const cost = Number(line.purchaseCost);
+      if (!isInventoryType(line.itemType)) {
+        return { itemType: line.itemType, description: line.description.trim(), quantity: 1, purchaseCost: cost };
+      }
+      if (line.itemMode === "new" && line.newItemPhoto) formData.set(`itemPhoto_${i}`, line.newItemPhoto);
+      return {
+        itemType: line.itemType,
+        ...(line.itemMode === "existing"
+          ? { itemId: line.selectedItem!.id }
+          : {
+              newItem: {
+                name: line.newItemName.trim(),
+                category: line.newItemCategory,
+                uom: line.newItemUom.trim(),
+                ...(line.newItemMinStock ? { minStock: Number(line.newItemMinStock) } : {}),
+              },
+            }),
+        quantity: Number(line.quantity),
+        purchaseCost: cost,
+        ...(line.sellingPrice !== "" ? { sellingPrice: Number(line.sellingPrice) } : {}),
+      };
+    });
+    formData.set("lines", JSON.stringify(payload));
 
     setSubmitting(true);
     try {
-      let itemId: number | undefined;
-
-      if (inventory) {
-        if (itemMode === "existing") {
-          if (!selectedItem) {
-            setFormError("Search and select an existing item");
-            setSubmitting(false);
-            return;
-          }
-          itemId = selectedItem.id;
-        } else {
-          const itemFormData = new FormData();
-          itemFormData.set("name", newItemName);
-          itemFormData.set("category", newItemCategory);
-          itemFormData.set("uom", newItemUom);
-          if (purchaseCost) itemFormData.set("purchaseCost", purchaseCost);
-          if (sellingPrice) itemFormData.set("sellingPrice", sellingPrice);
-          if (newItemMinStock) itemFormData.set("minStock", newItemMinStock);
-          if (newItemPhoto) itemFormData.set("photo", newItemPhoto);
-
-          const itemBody = await apiFetch("/items", { method: "POST", body: itemFormData });
-          itemId = itemBody.item.id;
-        }
-      } else if (!description.trim()) {
-        setFormError("Enter a description for this expense");
-        setSubmitting(false);
-        return;
-      }
-
-      const formData = new FormData();
-      formData.set("supplierId", String(selectedSupplier.id));
-      formData.set("itemType", itemType);
-      if (itemId != null) formData.set("itemId", String(itemId));
-      if (!inventory) formData.set("description", description);
-      formData.set("quantity", inventory ? quantity : "1");
-      formData.set("purchaseCost", purchaseCost);
-      if (inventory && sellingPrice) formData.set("sellingPrice", sellingPrice);
-      if (bill) formData.set("bill", bill);
-      if (paymentAmount) formData.set("paymentAmount", paymentAmount);
-      if (paymentMode) formData.set("paymentMode", paymentMode);
-      if (paymentReference) formData.set("paymentReference", paymentReference);
-      if (paymentBy) formData.set("paymentBy", paymentBy);
-      if (remarks) formData.set("remarks", remarks);
-
       await apiFetch("/purchases", { method: "POST", body: formData });
-
-      resetForm();
+      resetEntry();
       setShowForm(false);
       await loadPurchases();
     } catch (err) {
@@ -291,46 +573,13 @@ function PurchasesPageContent() {
     }
   }
 
-  function openPaymentDialog(p: PurchaseRow) {
-    setPayingPurchase(p);
-    setPayAmount("");
-    setPayMode("");
-    setPayRef("");
-    setPayBy("");
-    setPayError(null);
-  }
-
-  async function submitPayment(e: FormEvent) {
-    e.preventDefault();
-    if (!payingPurchase) return;
-    setPayError(null);
-    setPaySubmitting(true);
-    try {
-      await apiFetch(`/purchases/${payingPurchase.id}/payment`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          paymentAmount: Number(payAmount),
-          paymentMode: payMode || undefined,
-          paymentReference: payRef || undefined,
-          paymentBy: payBy || undefined,
-        }),
-      });
-      setPayingPurchase(null);
-      await loadPurchases();
-    } catch (err) {
-      setPayError(err instanceof ApiError ? err.message : "Could not record payment");
-    } finally {
-      setPaySubmitting(false);
-    }
-  }
-
-  const inventory = isInventoryType(itemType);
+  const grandTotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Purchases"
-        description="Spare parts, paint and tools generate a permanent serial per unit. Travel, petrol, food and other costs are recorded as plain expenses."
+        description="Spare parts, paint and tools generate a permanent serial per unit. Travel, petrol, food and other costs are recorded as plain expenses. Payments to suppliers are recorded on the Suppliers page."
         action={
           <Button onClick={() => setShowForm((s) => !s)}>
             <Plus className="h-4 w-4" /> New purchase
@@ -339,9 +588,9 @@ function PurchasesPageContent() {
       />
 
       {showForm && (
-        <Card className="max-w-2xl">
+        <Card className="max-w-3xl">
           <CardBody>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="relative">
                   <Label>Supplier</Label>
@@ -403,17 +652,18 @@ function PurchasesPageContent() {
                             <p className="text-xs text-gray-600">
                               No supplier matches &ldquo;{supplierSearchedFor}&rdquo;.
                             </p>
-                            <Input
-                              placeholder="Mobile (optional)"
-                              value={newSupplierMobile}
-                              onChange={(e) => setNewSupplierMobile(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  addSupplier();
-                                }
-                              }}
-                            />
+                            <Field label="Mobile (optional)">
+                              <Input
+                                value={newSupplierMobile}
+                                onChange={(e) => setNewSupplierMobile(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    addSupplier();
+                                  }
+                                }}
+                              />
+                            </Field>
                             <Button type="button" size="sm" onClick={addSupplier} disabled={addingSupplier}>
                               <Plus className="h-4 w-4" />
                               {addingSupplier ? "Adding..." : `Add "${supplierSearchedFor}" as supplier`}
@@ -424,255 +674,62 @@ function PurchasesPageContent() {
                   )}
                   {supplierError && <p className="mt-1 text-xs text-red-600">{supplierError}</p>}
                 </div>
-                <div>
-                  <Label>Purchase type</Label>
-                  <Select value={itemType} onChange={(e) => setItemType(e.target.value)}>
-                    <optgroup label="Inventory (gets serial numbers)">
-                      {INVENTORY_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Expense (no stock)">
-                      {EXPENSE_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </Select>
+                <Field label="Purchase date">
+                  <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+                </Field>
+              </div>
+
+              <div className="space-y-3" key={fileInputsKey}>
+                {lines.map((line, i) => (
+                  <LineEditor
+                    key={line.key}
+                    index={i}
+                    line={line}
+                    canRemove={lines.length > 1}
+                    onChange={(patch) => updateLine(line.key, patch)}
+                    onRemove={() => removeLine(line.key)}
+                  />
+                ))}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
+                    <Plus className="h-4 w-4" /> Add another item
+                  </Button>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {lines.length} {lines.length === 1 ? "item" : "items"} · Total {formatINR(grandTotal)}
+                  </p>
                 </div>
               </div>
 
-              {inventory ? (
-                <>
-                  <div className="flex gap-4 text-sm text-gray-700">
-                    <label className="flex items-center gap-1.5">
-                      <input type="radio" checked={itemMode === "existing"} onChange={() => setItemMode("existing")} />
-                      Existing item
-                    </label>
-                    <label className="flex items-center gap-1.5">
-                      <input type="radio" checked={itemMode === "new"} onChange={() => setItemMode("new")} />
-                      New item
-                    </label>
-                  </div>
-
-                  {itemMode === "existing" ? (
-                    <div>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Search item code, name or part number"
-                          value={itemQuery}
-                          onChange={(e) => setItemQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              searchItems();
-                            }
-                          }}
-                          className="flex-1"
-                        />
-                        <Button type="button" variant="secondary" onClick={searchItems}>
-                          <Search className="h-4 w-4" /> Search
-                        </Button>
-                      </div>
-                      {selectedItem ? (
-                        <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                          Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} (stock:{" "}
-                          {selectedItem.currentStock} {selectedItem.uom})
-                        </p>
-                      ) : (
-                        itemResults.length > 0 && (
-                          <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                            {itemResults.map((it) => (
-                              <li key={it.id}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedItem(it);
-                                    setItemResults([]);
-                                  }}
-                                  className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                                >
-                                  {it.itemCode} — {it.name} (stock: {it.currentStock})
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <Input
-                        placeholder="Item name"
-                        required
-                        value={newItemName}
-                        onChange={(e) => setNewItemName(e.target.value)}
-                        className="sm:col-span-2"
-                      />
-                      <Select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)}>
-                        {CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </Select>
-                      <Input placeholder="UOM (e.g. PCS)" required value={newItemUom} onChange={(e) => setNewItemUom(e.target.value)} />
-                      <Input
-                        type="number"
-                        placeholder="Minimum stock (optional)"
-                        value={newItemMinStock}
-                        onChange={(e) => setNewItemMinStock(e.target.value)}
-                      />
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => setNewItemPhoto(e.target.files?.[0] ?? null)}
-                        className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
-                      />
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Input type="number" placeholder="Quantity" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Purchase cost (per unit)"
-                      required
-                      value={purchaseCost}
-                      onChange={(e) => setPurchaseCost(e.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Selling price (optional)"
-                      value={sellingPrice}
-                      onChange={(e) => setSellingPrice(e.target.value)}
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Textarea
-                    placeholder="Description (e.g. Fuel for pickup van, tollway pass)"
-                    required
-                    rows={2}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="sm:col-span-2"
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Bill / receipt photo (optional)">
+                  <input
+                    key={fileInputsKey}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => setBill(e.target.files?.[0] ?? null)}
+                    className={FILE_INPUT_CLASS}
                   />
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="Total cost"
-                    required
-                    value={purchaseCost}
-                    onChange={(e) => setPurchaseCost(e.target.value)}
-                  />
-                </div>
-              )}
-
-              <div>
-                <Label>Bill / receipt (optional)</Label>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                  onChange={(e) => setBill(e.target.files?.[0] ?? null)}
-                  className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
-                />
-              </div>
-
-              <Input placeholder="Remarks (optional)" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
-
-              <div className="rounded-md border border-gray-200 p-3">
-                <p className="mb-2 text-sm font-medium text-gray-700">Supplier payment (optional — can be added later)</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="Amount paid now"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                  />
-                  <Select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>
-                    <option value="">Payment mode...</option>
-                    {PAYMENT_MODES.map((m) => (
-                      <option key={m} value={m}>
-                        {m.replace("_", " ")}
-                      </option>
-                    ))}
-                  </Select>
-                  <Input
-                    placeholder="Reference / transaction ID"
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                  />
-                  <Input placeholder="Paid by" value={paymentBy} onChange={(e) => setPaymentBy(e.target.value)} />
-                </div>
+                </Field>
+                <Field label="Remarks (optional)">
+                  <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+                </Field>
               </div>
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Saving..." : "Save purchase"}
+                {submitting ? "Saving..." : `Save purchase (${lines.length} ${lines.length === 1 ? "item" : "items"})`}
               </Button>
             </form>
           </CardBody>
         </Card>
       )}
 
-      {payingPurchase && (
-        <Card className="max-w-md">
-          <CardBody>
-            <form onSubmit={submitPayment} className="space-y-3">
-              <p className="text-sm font-medium text-gray-700">
-                Record payment — Purchase #{payingPurchase.id}
-              </p>
-              <p className="text-xs text-gray-500">
-                Total cost: ₹{(payingPurchase.quantity * Number(payingPurchase.purchaseCost)).toFixed(2)} · Paid so far: ₹
-                {Number(payingPurchase.paymentAmount).toFixed(2)} · Due: ₹
-                {(payingPurchase.quantity * Number(payingPurchase.purchaseCost) - Number(payingPurchase.paymentAmount)).toFixed(2)}
-              </p>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="Amount being paid now"
-                required
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-              />
-              <Select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-                <option value="">Payment mode...</option>
-                {PAYMENT_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m.replace("_", " ")}
-                  </option>
-                ))}
-              </Select>
-              <Input placeholder="Reference / transaction ID" value={payRef} onChange={(e) => setPayRef(e.target.value)} />
-              <Input placeholder="Paid by" value={payBy} onChange={(e) => setPayBy(e.target.value)} />
-              {payError && <p className="text-sm text-red-600">{payError}</p>}
-              <div className="flex gap-2">
-                <Button type="submit" disabled={paySubmitting}>
-                  {paySubmitting ? "Saving..." : "Save payment"}
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => setPayingPurchase(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </CardBody>
-        </Card>
-      )}
-
       {loading ? (
-        <TableSkeleton cols={8} />
+        <TableSkeleton cols={9} />
       ) : purchases.length === 0 ? (
         <EmptyState icon={ShoppingCart} title="No purchases recorded yet" />
       ) : (
-        <Table minWidth={850}>
+        <Table minWidth={900}>
           <thead>
             <tr>
               <Th>Serial No.</Th>
@@ -680,63 +737,46 @@ function PurchasesPageContent() {
               <Th>Type</Th>
               <Th>Item / Expense</Th>
               <Th>Supplier</Th>
-              <Th>Qty</Th>
-              <Th>Cost</Th>
-              <Th>Payment</Th>
-              <Th />
+              <Th className="text-right">Qty</Th>
+              <Th className="text-right">Rate</Th>
+              <Th className="text-right">MRP</Th>
+              <Th className="text-right">Total</Th>
             </tr>
           </thead>
           <tbody>
-            {purchases.map((p) => {
-              const total = p.quantity * Number(p.purchaseCost);
-              return (
-                <Tr key={p.id}>
-                  <Td className="font-mono">#{p.id}</Td>
-                  <Td>{new Date(p.purchaseDate).toLocaleDateString()}</Td>
-                  <Td>{TYPE_LABELS[p.itemType] ?? p.itemType}</Td>
-                  <Td>
-                    {p.item ? (
-                      <>
-                        {p.item.itemCode} — {p.item.name}
-                      </>
-                    ) : (
-                      p.description
-                    )}
-                    {p.billUrl && (
-                      <a
-                        href={assetUrl(p.billUrl)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-2 inline-flex items-center gap-0.5 text-xs text-blue-600 hover:underline"
-                      >
-                        <Paperclip className="h-3 w-3" /> Bill
-                      </a>
-                    )}
-                  </Td>
-                  <Td>{p.supplier.name}</Td>
-                  <Td>
-                    {p.quantity} {p.item?.uom ?? ""}
-                  </Td>
-                  <Td>₹{total.toFixed(2)}</Td>
-                  <Td>
-                    <PaymentStatusBadge total={total} paid={Number(p.paymentAmount)} />
-                    {Number(p.paymentAmount) > 0 && Number(p.paymentAmount) < total && (
-                      <p className="mt-0.5 text-xs text-gray-500">
-                        ₹{Number(p.paymentAmount).toFixed(2)} paid — ₹{(total - Number(p.paymentAmount)).toFixed(2)} due
-                      </p>
-                    )}
-                  </Td>
-                  <Td>
-                    <button
-                      onClick={() => openPaymentDialog(p)}
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+            {purchases.map((p) => (
+              <Tr key={p.id}>
+                <Td className="font-mono">#{p.id}</Td>
+                <Td>{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                <Td>{TYPE_LABELS[p.itemType] ?? p.itemType}</Td>
+                <Td>
+                  {p.item ? (
+                    <>
+                      {p.item.itemCode} — {p.item.name}
+                    </>
+                  ) : (
+                    p.description
+                  )}
+                  {p.billUrl && (
+                    <a
+                      href={assetUrl(p.billUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 inline-flex items-center gap-0.5 text-xs text-blue-600 hover:underline"
                     >
-                      <IndianRupee className="h-3 w-3" /> Payment
-                    </button>
-                  </Td>
-                </Tr>
-              );
-            })}
+                      <Paperclip className="h-3 w-3" /> Bill
+                    </a>
+                  )}
+                </Td>
+                <Td>{p.supplier.name}</Td>
+                <Td className="text-right">
+                  {p.quantity} {p.item?.uom ?? ""}
+                </Td>
+                <Td className="text-right">{formatINR(p.purchaseCost)}</Td>
+                <Td className="text-right">{p.sellingPrice != null ? formatINR(p.sellingPrice) : "-"}</Td>
+                <Td className="text-right font-medium text-gray-900">{formatINR(p.quantity * Number(p.purchaseCost))}</Td>
+              </Tr>
+            ))}
           </tbody>
         </Table>
       )}

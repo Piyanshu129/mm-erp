@@ -10,15 +10,30 @@ Nothing unusual here except normalization: registration numbers are uppercased a
 
 ## 2. Purchasing & per-unit serial numbers
 
-`/dashboard/purchases` → `POST /purchases` (multipart, optional `bill`) → [`purchases.service.ts#createPurchase`](../backend/src/modules/purchases/purchases.service.ts).
+`/dashboard/purchases` → `POST /purchases` → [`purchases.service.ts#createPurchaseEntry`](../backend/src/modules/purchases/purchases.service.ts).
 
-This is the single most business-critical write in the system, and it's the piece that changed most in the September 2026 rework (see [02-database-schema.md](02-database-schema.md#purchasing--inventory-phase-3-reworked-september-2026) for the *why*). One `prisma.$transaction`:
+One purchase entry is one supplier and one bill, with **any number of items**. The request is multipart:
+- `supplierId`, `purchaseDate` and `remarks` are shared by every line.
+- `lines` is a JSON array. Each line has an `itemType` and either an existing `itemId` or a `newItem` (name, category, UOM, min stock), plus `quantity`, `purchaseCost` (per unit) and an optional `sellingPrice` (MRP). Expense lines carry a `description` instead of an item.
+- `bill` is an optional photo shared by all lines. Each new item can have its own photo as `itemPhoto_<line index>`. `uploadPurchaseFiles()` in `middleware/upload.ts` stores the bill with the other purchase bills and each item photo with the other item photos.
 
-1. For an **inventory** `itemType` (`SPARE_PART`/`PAINT`/`TOOL`): creates the `Purchase` row, then `itemUnit.createMany` — **one row per unit of `quantity`**, each of which gets its own permanent serial number for free (its own auto-increment `id`). Then `Item.currentStock` is incremented by exactly that quantity, and `Item.purchaseCost`/`sellingPrice` are updated to the latest purchase's values.
-2. For an **expense** `itemType` (`TRAVEL`/`PETROL`/`FOOD`/`OTHERS`): just the `Purchase` row with a `description`, no `Item`, no units, no stock change.
-3. Guardrail: `sellingPrice` can never be set below `purchaseCost` (checked here, and again in `items.service.ts` for direct Item edits).
+This is the single most business-critical write in the system, and it's the piece that changed most in the September 2026 rework (see [02-database-schema.md](02-database-schema.md#purchasing--inventory-phase-3-reworked-september-2026) for the *why*). **The whole entry is one `prisma.$transaction`**: every line saves or none does. For example, if item 3 fails, a new item created for item 1 is rolled back too. For each line:
 
-Payment is entered later via `PATCH /purchases/:id/payment` — see "The payment-snapshot pattern" below.
+1. **Inventory** `itemType` (`SPARE_PART`/`PAINT`/`TOOL`): if it's a new item, the `Item` is created first (Item Code derived from its own id). Then the `Purchase` row is created, then `itemUnit.createMany` adds **one row per unit of `quantity`**, and each unit gets its own permanent serial number for free (its own auto-increment `id`). `Item.currentStock` goes up by exactly that quantity, and `Item.purchaseCost`/`sellingPrice` are set to this purchase's values.
+2. **Expense** `itemType` (`TRAVEL`/`PETROL`/`FOOD`/`OTHERS`): just the `Purchase` row with a `description`. No `Item`, no units, no stock change.
+3. **Guardrail**: MRP (`sellingPrice`) can never be set below `purchaseCost`. It's checked here and again in `items.service.ts` for direct Item edits.
+
+Every error names the line it's about (`"Item 2: MRP cannot be lower than purchase cost"`), and the frontend runs the same checks before sending.
+
+## 2b. Supplier payments
+
+`/dashboard/suppliers` → **Pay** → `POST /suppliers/:id/payments` (multipart, optional `proof` photo of the transaction) → [`suppliers.service.ts#recordSupplierPayment`](../backend/src/modules/suppliers/suppliers.service.ts). **Payment history** → `GET /suppliers/:id/payments`.
+
+Payments are made against the supplier's running account, not a specific purchase. Each payment is its own `SupplierPayment` row, so the history shows every partial payment: date, amount, mode, reference, who paid, and the photo. The account (`totalPurchased`, `totalPaid`, `balanceDue`) is computed on every read and never stored, and it's also returned alongside each supplier in `GET /suppliers`.
+
+A payment can't exceed the current balance due, which catches a mistyped extra zero. To check that safely, `recordSupplierPayment` locks the supplier row (`SELECT … FOR UPDATE`) for the whole check-and-insert. Without the lock, two payments entered at the same moment could each pass the check and together overpay. Like the other payment endpoints, `amount` is what's being paid *now*, never a running total.
+
+Payment routes follow the Suppliers page's own permission (`SUPPLIERS`). Searching and adding suppliers also accepts `PURCHASES`, because the purchase form's supplier box can add a missing supplier inline.
 
 ## 3. The Job Card lifecycle
 
@@ -73,11 +88,11 @@ One transaction: reads `parts`/`labour` **live** from the job card (safe because
 
 Invoice math is worth knowing precisely if you ever touch this: `Parts + Labour − Discount = Total`, no tax applied yet (`taxRate`/`taxAmount` columns exist but nothing writes to them — reserved for a future GST feature).
 
-### The payment-snapshot pattern (Purchase, Invoice, SalaryPayment all use this)
+### The payment-snapshot pattern (Invoice and SalaryPayment use this)
 
-None of these three has a separate payments table. Instead, each row carries its own running `paymentAmount` plus `paymentMode`/`paymentReference`/`paymentBy`/`paymentDate`, and `Pending`/`Partial`/`Paid` is *computed*, never stored (`paymentStatusFor(total, paid)` — duplicated identically in `purchases.service.ts` and `invoices.service.ts`).
+Neither has a separate payments table. Instead, each row carries its own running `paymentAmount` plus `paymentMode`, reference, who paid and `paymentDate`. `Pending`/`Partial`/`Paid` is *computed* by `paymentStatusFor(total, paid)` and never stored. Supplier payments used to work this way too, per purchase, but moved to their own table in September 2026 so partial-payment history is kept (see section 2b).
 
-**The one rule that matters if you ever touch these endpoints**: `PATCH .../payment`'s `paymentAmount` is *what's being paid right now*, added on top of whatever's already recorded — **never the new cumulative total**. This was a real bug (fixed — see the root README's recent commits): a caller passing the running total here would silently double-count every payment after the first. All three payment-recording functions (`recordPurchasePayment`, `recordInvoicePayment`, `recordSalaryPayment`) also reject anything that would overpay (`newTotalPaid > total` → `ConflictError`).
+**The one rule that matters if you ever touch these endpoints**: `PATCH .../payment`'s `paymentAmount` is *what's being paid right now*, added on top of whatever's already recorded. It is **never the new cumulative total**. This was a real bug, since fixed (see the root README's recent commits): a caller that passed the running total would silently double-count every payment after the first. `recordInvoicePayment`, `recordSalaryPayment` and `recordSupplierPayment` all reject anything that would overpay with a `ConflictError`.
 
 ## 5. Reports & the Dashboard
 

@@ -59,8 +59,8 @@ Every page under `app/dashboard/` is a `"use client"` component that fetches its
 | `/dashboard/customers`, `/customers/[id]` | `customers`, `vehicles` | Detail page lists all vehicles for that customer, with an inline "add vehicle" form (same shape/fields as the Vehicles page's own form — see below) |
 | `/dashboard/vehicles` | `vehicles` | Global search across all vehicles; "New vehicle" form can create a brand-new customer inline instead of requiring one to exist first |
 | `/dashboard/items`, `/items/[id]` | `items`, `itemUnits` | Photo upload (multipart); detail page shows stock history (every `ItemUnit` ever created) via `/items/:id/stock-history` |
-| `/dashboard/suppliers` | `suppliers` | Simple master CRUD |
-| `/dashboard/purchases` | `purchases` | Inventory vs. expense item types, bill upload, running payment entry |
+| `/dashboard/suppliers` | `suppliers` | Each supplier's purchased / paid / balance due. **Pay** records a payment with an optional transaction photo; **Payment history** lists every partial payment |
+| `/dashboard/purchases` | `purchases` | One entry = one supplier + bill with any number of items (new item is the default; existing items via type-to-search). Supplier is a type-to-search box that can add a missing supplier inline. The list shows per-unit rate, MRP and total |
 | `/dashboard/jobcards`, `/jobcards/[id]` | `jobCards` + parts/labour/media/invoice sub-resources | The most complex page — status transitions, mandatory before/after photo upload, parts issue by serial lookup, labour lines, invoice generation. See [05-workflows.md](05-workflows.md) for the rules it's enforcing |
 | `/dashboard/invoices`, `/invoices/[id]` | `invoices` | Detail page is print-friendly (dashboard chrome hidden via `print:hidden` CSS) — "Print / Save as PDF" uses the browser's native print dialog, no server-side PDF generation |
 | `/dashboard/service-history` | `vehicles` (`/:id/service-history`) | Search by registration, customer mobile, or customer name |

@@ -4,8 +4,11 @@ import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
+import { uploadImage } from "../../middleware/upload";
 
 export const suppliersRouter = Router();
+
+const uploadPaymentProof = uploadImage("supplier-payments").single("proof");
 
 suppliersRouter.use(authenticate);
 
@@ -30,4 +33,14 @@ suppliersRouter.patch(
   requirePermission("SUPPLIERS"),
   validateBody(suppliersController.setActiveSchema),
   asyncHandler(suppliersController.setActive)
+);
+
+// Supplier payments live on the Suppliers page, so they follow that page's
+// permission.
+suppliersRouter.get("/:id/payments", requirePermission("SUPPLIERS"), asyncHandler(suppliersController.payments));
+suppliersRouter.post(
+  "/:id/payments",
+  requirePermission("SUPPLIERS"),
+  uploadPaymentProof,
+  asyncHandler(suppliersController.recordPayment)
 );

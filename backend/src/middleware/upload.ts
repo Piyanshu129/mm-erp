@@ -22,12 +22,18 @@ function uniqueFilename(originalname: string): string {
   return `${unique}${ext}`;
 }
 
-function diskStorageFor(subfolder: string): multer.StorageEngine {
-  const dir = path.join(UPLOAD_ROOT, subfolder);
-  fs.mkdirSync(dir, { recursive: true });
+// Chooses the storage subfolder per uploaded file — a fixed folder for
+// single-purpose uploads, or by form field when one request carries files
+// that belong in different places (see uploadPurchaseFiles).
+type SubfolderFor = (file: Express.Multer.File) => string;
 
+function diskStorageFor(subfolderFor: SubfolderFor): multer.StorageEngine {
   return multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, dir),
+    destination: (_req, file, cb) => {
+      const dir = path.join(UPLOAD_ROOT, subfolderFor(file));
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
     filename: (_req, file, cb) => cb(null, uniqueFilename(file.originalname)),
   });
 }
@@ -52,11 +58,11 @@ function getS3Client(): S3Client {
 // whenever the host has no persistent disk (see config/env.ts's
 // R2_CONFIGURED). `file.filename` is set to match diskStorage's shape, so
 // publicUrlFor and every caller stay identical regardless of backend.
-function s3StorageFor(subfolder: string): multer.StorageEngine {
+function s3StorageFor(subfolderFor: SubfolderFor): multer.StorageEngine {
   return {
     _handleFile(_req, file, cb) {
       const filename = uniqueFilename(file.originalname);
-      const key = `${subfolder}/${filename}`;
+      const key = `${subfolderFor(file)}/${filename}`;
 
       new Upload({
         client: getS3Client(),
@@ -77,8 +83,9 @@ function s3StorageFor(subfolder: string): multer.StorageEngine {
   };
 }
 
-function storageFor(subfolder: string): multer.StorageEngine {
-  return R2_CONFIGURED ? s3StorageFor(subfolder) : diskStorageFor(subfolder);
+function storageFor(subfolder: string | SubfolderFor): multer.StorageEngine {
+  const subfolderFor = typeof subfolder === "string" ? () => subfolder : subfolder;
+  return R2_CONFIGURED ? s3StorageFor(subfolderFor) : diskStorageFor(subfolderFor);
 }
 
 function fileFilterFor(allowed: Set<string>, message: string) {
@@ -110,6 +117,27 @@ export function uploadMedia(subfolder: string) {
     ),
     limits: { fileSize: 50 * 1024 * 1024 },
   });
+}
+
+// A multi-item purchase posts one bill ("bill") plus an optional photo for
+// each new item it creates ("itemPhoto_<line index>"), in one request. The
+// bill is stored with the other purchase bills and each item photo with the
+// other item photos, exactly where a single-purpose upload would put them.
+export const PURCHASE_BILL_FIELD = "bill";
+export const ITEM_PHOTO_FIELD = /^itemPhoto_(\d+)$/;
+
+export function uploadPurchaseFiles() {
+  return multer({
+    storage: storageFor((file) => (file.fieldname === PURCHASE_BILL_FIELD ? "purchase-bills" : "items")),
+    fileFilter: (_req, file, cb) => {
+      if (file.fieldname !== PURCHASE_BILL_FIELD && !ITEM_PHOTO_FIELD.test(file.fieldname)) {
+        cb(new AppError(400, `Unexpected file field: ${file.fieldname}`));
+        return;
+      }
+      fileFilterFor(ALLOWED_IMAGE_MIME_TYPES, "Only JPEG, PNG or WEBP photos are allowed")(_req, file, cb);
+    },
+    limits: { fileSize: 5 * 1024 * 1024, files: 51 },
+  }).any();
 }
 
 export function publicUrlFor(subfolder: string, filename: string): string {

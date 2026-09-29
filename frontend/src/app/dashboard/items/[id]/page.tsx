@@ -101,7 +101,7 @@ function ItemDetailPageContent() {
               <dd className="text-gray-900">{item.brand ?? "-"}</dd>
               <dt className="text-gray-500">Purchase Cost</dt>
               <dd className="text-gray-900">₹{item.purchaseCost}</dd>
-              <dt className="text-gray-500">Selling Price</dt>
+              <dt className="text-gray-500">MRP</dt>
               <dd className="text-gray-900">₹{item.sellingPrice}</dd>
               <dt className="text-gray-500">Current Stock</dt>
               <dd className="font-semibold text-gray-900">

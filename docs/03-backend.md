@@ -144,11 +144,17 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 ### Item Units — `/item-units` (permission `ITEMS` **or** `JOB_CARDS`, [routes](../backend/src/modules/itemUnits/itemUnits.routes.ts))
 `GET /:id` — look up one serial number directly (the "scan/type the sticker" lookup used by Parts Issue).
 
-### Suppliers — `/suppliers` (permission `SUPPLIERS`, [routes](../backend/src/modules/suppliers/suppliers.routes.ts))
-`GET /`, `POST /`, `PATCH /:id`, `PATCH /:id/status`.
+### Suppliers — `/suppliers` ([routes](../backend/src/modules/suppliers/suppliers.routes.ts))
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/` | `SUPPLIERS` or `PURCHASES` | search with `q`; each supplier includes its computed `account` (`totalPurchased`, `totalPaid`, `balanceDue`) |
+| POST | `/` | `SUPPLIERS` or `PURCHASES` | the purchase form can add a missing supplier inline |
+| PATCH | `/:id`, `/:id/status` | `SUPPLIERS` | edit / deactivate |
+| GET | `/:id/payments` | `SUPPLIERS` | payment history, newest first, plus the account summary |
+| POST | `/:id/payments` | `SUPPLIERS` | multipart: `amount`, `paymentDate`, `paymentMode`, `reference`, `paidBy`, `notes`, optional `proof` photo; rejects paying more than the balance due |
 
-### Purchases — `/purchases` (permission `PURCHASES`, [routes](../backend/src/modules/purchases/purchases.routes.ts)) — multipart (`bill` field)
-`GET /` (optionally filtered by `itemId`), `POST /` (creates the purchase and, for inventory types, one `ItemUnit` per unit of quantity — see [05-workflows.md](05-workflows.md)), `PATCH /:id/payment` (adds to the running `paymentAmount`; rejects overpayment).
+### Purchases — `/purchases` (permission `PURCHASES`, [routes](../backend/src/modules/purchases/purchases.routes.ts))
+`GET /` (optionally filtered by `itemId`). `POST /` creates a multi-item purchase entry in one transaction. It's multipart: `supplierId`, `purchaseDate`, `remarks`, a JSON `lines` array, an optional `bill` photo and optional `itemPhoto_<n>` photos for new items. For inventory types it creates one `ItemUnit` per unit of quantity (see [05-workflows.md](05-workflows.md)). There's no payment route here; payments are made per supplier.
 
 ### Job Cards — `/job-cards` (permission `JOB_CARDS`, [routes](../backend/src/modules/jobCards/jobCards.routes.ts))
 | Method | Path | Notes |

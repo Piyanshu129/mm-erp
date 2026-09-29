@@ -15,6 +15,7 @@ export const BACKUP_TABLES = [
   "employee",
   "jobCard",
   "purchase",
+  "supplierPayment",
   "itemUnit",
   "jobCardPart",
   "jobCardLabour",
@@ -43,7 +44,48 @@ export async function buildBackupBundle(): Promise<BackupBundle> {
   return { generatedAt: new Date().toISOString(), tables };
 }
 
-export async function restoreFromBundle(bundle: BackupBundle): Promise<Record<BackupTable, number>> {
+const LEGACY_PURCHASE_PAYMENT_FIELDS = [
+  "paymentAmount",
+  "paymentMode",
+  "paymentReference",
+  "paymentBy",
+  "paymentDate",
+] as const;
+
+// Backups taken before supplier-level payments (2026-09-29) have no
+// supplierPayment table and carry payment fields on each purchase instead.
+// Convert those the same way the database migration did — each paid
+// purchase becomes one supplier payment — so an older backup still
+// restores cleanly into the current schema.
+function upgradeLegacyBundle(bundle: BackupBundle): BackupBundle {
+  if (bundle.tables.supplierPayment) return bundle;
+
+  const purchases = (bundle.tables.purchase ?? []) as Record<string, any>[];
+  const supplierPayment = purchases
+    .filter((p) => Number(p.paymentAmount ?? 0) > 0)
+    .map((p) => ({
+      supplierId: p.supplierId,
+      amount: p.paymentAmount,
+      paymentDate: p.paymentDate ?? p.purchaseDate,
+      paymentMode: p.paymentMode ?? null,
+      reference: p.paymentReference ?? null,
+      paidBy: p.paymentBy ?? null,
+      notes: `Recorded against purchase #${p.id} before supplier-level payments`,
+      createdById: p.createdById,
+      createdAt: p.paymentDate ?? p.createdAt,
+    }));
+
+  const purchase = purchases.map((p) => {
+    const copy = { ...p };
+    for (const field of LEGACY_PURCHASE_PAYMENT_FIELDS) delete copy[field];
+    return copy;
+  });
+
+  return { ...bundle, tables: { ...bundle.tables, purchase, supplierPayment } };
+}
+
+export async function restoreFromBundle(original: BackupBundle): Promise<Record<BackupTable, number>> {
+  const bundle = upgradeLegacyBundle(original);
   const counts = {} as Record<BackupTable, number>;
 
   await prisma.$transaction(
@@ -100,6 +142,7 @@ function tableNameFor(table: BackupTable): string {
     employee: "employees",
     jobCard: "job_cards",
     purchase: "purchases",
+    supplierPayment: "supplier_payments",
     itemUnit: "item_units",
     jobCardPart: "job_card_parts",
     jobCardLabour: "job_card_labour",
