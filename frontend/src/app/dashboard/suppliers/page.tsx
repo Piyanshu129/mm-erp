@@ -9,6 +9,7 @@ import { formatINR, todayISO } from "@/lib/format";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { MobileInput } from "@/components/ui/MobileInput";
 import { Input, Select, Label, Textarea } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -379,7 +380,7 @@ function SuppliersPageContent() {
                 <Input required value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
               <Field label="Mobile (optional)">
-                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} />
+                <MobileInput value={mobile} onChange={setMobile} />
               </Field>
               <Field label="Address (optional)">
                 <Input value={address} onChange={(e) => setAddress(e.target.value)} />

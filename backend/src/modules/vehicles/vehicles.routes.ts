@@ -12,6 +12,7 @@ vehiclesRouter.use(authenticate, requirePermission("VEHICLES"));
 vehiclesRouter.get("/", asyncHandler(vehiclesController.list));
 vehiclesRouter.get("/:id", asyncHandler(vehiclesController.get));
 vehiclesRouter.get("/:id/service-history", asyncHandler(vehiclesController.serviceHistory));
+vehiclesRouter.get("/:id/account", asyncHandler(vehiclesController.account));
 vehiclesRouter.post(
   "/",
   validateBody(vehiclesController.createVehicleSchema),

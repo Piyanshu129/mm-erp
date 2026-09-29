@@ -2,18 +2,22 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Printer } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { ArrowLeft, Printer, Download } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { invoiceFileName, downloadElementAsPdf } from "@/lib/invoicePdf";
+import {
+  InvoiceAccountSummary,
+  InvoicePaymentHistory,
+  InvoicePaymentRow,
+  RecordInvoicePaymentForm,
+} from "@/components/InvoiceAccountPanel";
 import { Button } from "@/components/ui/Button";
-import { Input, Select } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { PaymentStatusBadge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
-
-const PAYMENT_MODES = ["CASH", "UPI", "CARD", "BANK_TRANSFER", "CHEQUE"];
 
 interface InvoiceDetail {
   id: number;
@@ -24,10 +28,7 @@ interface InvoiceDetail {
   discount: string;
   totalAmount: string;
   paymentAmount: string;
-  paymentMode: string | null;
-  paymentReference: string | null;
-  paymentReceivedBy: string | null;
-  paymentDate: string | null;
+  payments: InvoicePaymentRow[];
   jobCard: {
     jobCardNumber: string;
     kmAtService: number | null;
@@ -50,18 +51,23 @@ interface InvoiceDetail {
 
 function InvoiceDetailPageContent() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // ?download=1 — sent here by a "Download" link elsewhere; download the PDF
+  // as soon as the invoice has rendered.
+  const autoDownload = searchParams.get("download") === "1";
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const invoiceRef = useRef<HTMLDivElement>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const [payAmount, setPayAmount] = useState("");
-  const [payMode, setPayMode] = useState("");
-  const [payRef, setPayRef] = useState("");
-  const [payBy, setPayBy] = useState("");
-  const [payError, setPayError] = useState<string | null>(null);
-  const [paySubmitting, setPaySubmitting] = useState(false);
+  // Remounts the payment form after a save so it starts from the new amount due.
+  const [payFormKey, setPayFormKey] = useState(0);
 
-  async function load() {
-    setLoading(true);
+  // quiet: refresh after a payment without blanking the page.
+  async function load(quiet = false) {
+    if (!quiet) setLoading(true);
     const body = await apiFetch(`/invoices/${id}`);
     setInvoice(body.invoice);
     setLoading(false);
@@ -72,31 +78,40 @@ function InvoiceDetailPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function submitPayment(e: FormEvent) {
-    e.preventDefault();
-    setPayError(null);
-    setPaySubmitting(true);
+  const fileName = invoice ? invoiceFileName(invoice.jobCard.vehicle.registrationNumber, invoice.invoiceDate) : null;
+
+  // The browser's own Print → "Save as PDF" suggests the page title as the
+  // file name, so that route gives the same name as the Download button.
+  useEffect(() => {
+    if (!fileName) return;
+    const previous = document.title;
+    document.title = fileName;
+    return () => {
+      document.title = previous;
+    };
+  }, [fileName]);
+
+  async function downloadPdf() {
+    if (!invoiceRef.current || !fileName) return;
+    setDownloadError(null);
+    setDownloading(true);
     try {
-      await apiFetch(`/invoices/${id}/payment`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          paymentAmount: Number(payAmount),
-          paymentMode: payMode || undefined,
-          paymentReference: payRef || undefined,
-          paymentReceivedBy: payBy || undefined,
-        }),
-      });
-      setPayAmount("");
-      setPayMode("");
-      setPayRef("");
-      setPayBy("");
-      await load();
-    } catch (err) {
-      setPayError(err instanceof ApiError ? err.message : "Could not record payment");
+      await downloadElementAsPdf(invoiceRef.current, fileName);
+    } catch {
+      setDownloadError("Could not create the PDF — use Print / Save as PDF instead.");
     } finally {
-      setPaySubmitting(false);
+      setDownloading(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoDownload || !invoice) return;
+    // Drop the flag first so a reload doesn't download again.
+    router.replace(`/dashboard/invoices/${id}`);
+    downloadPdf();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDownload, invoice]);
+
 
   if (loading || !invoice) {
     return (
@@ -115,12 +130,23 @@ function InvoiceDetailPageContent() {
         <Link href="/dashboard/invoices" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
           <ArrowLeft className="h-4 w-4" /> All invoices
         </Link>
-        <Button onClick={() => window.print()}>
-          <Printer className="h-4 w-4" /> Print / Save as PDF
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+          <Button onClick={downloadPdf} disabled={downloading}>
+            <Download className="h-4 w-4" /> {downloading ? "Preparing PDF..." : "Download PDF"}
+          </Button>
+        </div>
       </div>
+      {fileName && (
+        <p className="-mt-4 text-right text-xs text-gray-500 print:hidden">
+          Saves as <span className="font-mono">{fileName}.pdf</span>
+        </p>
+      )}
+      {downloadError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 print:hidden">{downloadError}</p>}
 
-      <div className="rounded-md border border-gray-200 bg-white p-6 print:border-0 print:p-0">
+      <div ref={invoiceRef} className="rounded-md border border-gray-200 bg-white p-6 print:border-0 print:p-0">
         <div className="mb-6 flex items-start justify-between border-b border-gray-200 pb-4">
           <div>
             <h1 className="text-xl font-bold">Motors Mitra</h1>
@@ -239,45 +265,37 @@ function InvoiceDetailPageContent() {
       </div>
 
       <Card className="print:hidden">
-        <CardBody>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm font-semibold text-gray-900">Customer payment</p>
+        <CardBody className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-gray-900">Customer payments</p>
             <PaymentStatusBadge total={Number(invoice.totalAmount)} paid={Number(invoice.paymentAmount)} />
           </div>
-          <p className="mb-3 text-xs text-gray-500">
-            Total: ₹{invoice.totalAmount} · Paid so far: ₹{invoice.paymentAmount} · Due: ₹
-            {(Number(invoice.totalAmount) - Number(invoice.paymentAmount)).toFixed(2)}
-          </p>
-          {invoice.paymentDate && (
-            <p className="mb-3 text-xs text-gray-500">
-              Last recorded: via {invoice.paymentMode ?? "-"} on {new Date(invoice.paymentDate).toLocaleString()}
-              {invoice.paymentReceivedBy ? ` (received by ${invoice.paymentReceivedBy})` : ""}
-            </p>
-          )}
-          <form onSubmit={submitPayment} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input
-              type="number"
-              step="0.01"
-              placeholder="Amount being paid now"
-              required
-              value={payAmount}
-              onChange={(e) => setPayAmount(e.target.value)}
-            />
-            <Select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-              <option value="">Payment mode...</option>
-              {PAYMENT_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m.replace("_", " ")}
-                </option>
-              ))}
-            </Select>
-            <Input placeholder="Reference / transaction ID" value={payRef} onChange={(e) => setPayRef(e.target.value)} />
-            <Input placeholder="Received by" value={payBy} onChange={(e) => setPayBy(e.target.value)} />
-            {payError && <p className="text-sm text-red-600 sm:col-span-2">{payError}</p>}
-            <Button type="submit" disabled={paySubmitting} className="sm:col-span-2">
-              {paySubmitting ? "Saving..." : "Save payment"}
-            </Button>
-          </form>
+          <InvoiceAccountSummary
+            account={{
+              invoiceCount: 1,
+              totalInvoiced: Number(invoice.totalAmount),
+              totalPaid: Number(invoice.paymentAmount),
+              balanceDue: Number(invoice.totalAmount) - Number(invoice.paymentAmount),
+            }}
+          />
+          <RecordInvoicePaymentForm
+            key={payFormKey}
+            invoices={[
+              {
+                id: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                due: Math.round((Number(invoice.totalAmount) - Number(invoice.paymentAmount)) * 100) / 100,
+              },
+            ]}
+            onSaved={async () => {
+              await load(true);
+              setPayFormKey((k) => k + 1);
+            }}
+          />
+          <div>
+            <p className="mb-2 text-sm font-semibold text-gray-900">Payment history</p>
+            <InvoicePaymentHistory payments={invoice.payments} />
+          </div>
         </CardBody>
       </Card>
     </div>
@@ -287,7 +305,9 @@ function InvoiceDetailPageContent() {
 export default function InvoiceDetailPage() {
   return (
     <RequireAuth permission="INVOICES">
-      <InvoiceDetailPageContent />
+      <Suspense fallback={<p className="text-sm text-gray-500">Loading...</p>}>
+        <InvoiceDetailPageContent />
+      </Suspense>
     </RequireAuth>
   );
 }

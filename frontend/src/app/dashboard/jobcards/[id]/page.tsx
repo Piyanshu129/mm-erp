@@ -29,22 +29,10 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { JobCardStatusBadge, Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: "Draft",
-  VEHICLE_RECEIVED: "Vehicle Received",
-  WORK_STARTED: "Work Started",
-  WAITING_FOR_PARTS: "Waiting for Parts",
-  WORK_IN_PROGRESS: "Work in Progress",
-  COMPLETED: "Completed",
-  INVOICED: "Invoiced",
-  READY_FOR_DELIVERY: "Ready for Delivery",
-  DELIVERED: "Delivered",
-  CLOSED: "Closed",
-  CANCELLED: "Cancelled",
-};
-const LOCKED_STATUSES = ["INVOICED", "READY_FOR_DELIVERY", "DELIVERED", "CLOSED", "CANCELLED"];
-const POST_INVOICE_STATUSES = ["INVOICED", "READY_FOR_DELIVERY", "DELIVERED", "CLOSED"];
+const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
+const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   GENERAL_SERVICE: "General Service",
@@ -145,6 +133,9 @@ function JobCardDetailPageContent() {
 
   const [discount, setDiscount] = useState("0");
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
+  // Choosing "Invoiced" opens this confirmation instead of just changing a
+  // label — marking a job card Invoiced means generating its invoice.
+  const [showInvoicePrompt, setShowInvoicePrompt] = useState(false);
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [jobType, setJobType] = useState("");
@@ -212,6 +203,11 @@ function JobCardDetailPageContent() {
 
   async function handleStatusChange(status: string) {
     setActionError(null);
+    if (status === "INVOICED") {
+      setShowInvoicePrompt(true);
+      return;
+    }
+    setShowInvoicePrompt(false);
     try {
       await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
       await load();
@@ -465,22 +461,23 @@ function JobCardDetailPageContent() {
               </Link>
             </p>
           </div>
-          <Select
-            value={jobCard.status}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            className="w-auto"
-          >
-            {Object.entries(STATUS_LABELS)
-              // Once invoiced, the backend refuses anything but a forward move
-              // through delivery/closed — matching that here so the dropdown
-              // doesn't offer a choice that would just come back as an error.
-              .filter(([value]) => !jobCard.invoice || POST_INVOICE_STATUSES.includes(value))
-              .map(([value, label]) => (
+          <div>
+            <Label>Status</Label>
+            {/* An invoiced job card's status is final — the backend refuses
+                any change — so the dropdown is locked to match. */}
+            <Select
+              value={showInvoicePrompt ? "INVOICED" : jobCard.status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              disabled={!!jobCard.invoice}
+              className="w-auto"
+            >
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
-          </Select>
+            </Select>
+          </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <JobCardStatusBadge status={jobCard.status} label={STATUS_LABELS[jobCard.status]} />
@@ -495,6 +492,50 @@ function JobCardDetailPageContent() {
       </div>
 
       {actionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
+
+      {showInvoicePrompt && !jobCard.invoice && (
+        <Card className="max-w-md border-blue-200">
+          <CardBody>
+            <form onSubmit={handleGenerateInvoice} className="space-y-3">
+              <p className="text-base font-semibold text-gray-900">Mark as Invoiced</p>
+              <p className="text-sm text-gray-600">
+                This generates the invoice for {jobCard.jobCardNumber}. It will appear in the Invoices tab, and parts and
+                labour can no longer be changed.
+              </p>
+              <div className="rounded-md bg-gray-50 px-3 py-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Parts</span>
+                  <span>₹{jobCard.partsTotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Labour</span>
+                  <span>₹{jobCard.labourTotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Discount</span>
+                  <span>− ₹{(Number(discount) || 0).toFixed(2)}</span>
+                </div>
+                <div className="mt-1 flex justify-between border-t border-gray-200 pt-1 font-semibold text-gray-900">
+                  <span>Invoice total</span>
+                  <span>₹{Math.max(0, jobCard.grandTotal - (Number(discount) || 0)).toFixed(2)}</span>
+                </div>
+              </div>
+              <div>
+                <Label>Discount (optional)</Label>
+                <Input type="number" step="0.01" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={generatingInvoice}>
+                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Generating..." : "Generate invoice"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setShowInvoicePrompt(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Details */}
       <div>
@@ -668,7 +709,7 @@ function JobCardDetailPageContent() {
           </button>
         </div>
         <p className="mb-2 text-xs text-gray-500">
-          Front, Rear, Left and Right are mandatory for each phase before the job card's status can move forward.
+          Front, Rear, Left and Right are mandatory for both phases before the job card can be invoiced.
         </p>
         <div className="flex flex-wrap gap-2">
           {MEDIA_ANGLES.map((a) => {
@@ -985,22 +1026,34 @@ function JobCardDetailPageContent() {
 
           <div className="mt-3 border-t border-gray-200 pt-3">
             {jobCard.invoice ? (
-              <Link
-                href={`/dashboard/invoices/${jobCard.invoice.id}`}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <Link
+                  href={`/dashboard/invoices/${jobCard.invoice.id}`}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
+                >
+                  <Receipt className="h-4 w-4" /> View invoice {jobCard.invoice.invoiceNumber}
+                </Link>
+                <Link
+                  href={`/dashboard/invoices/${jobCard.invoice.id}?download=1`}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
+                >
+                  Download PDF
+                </Link>
+              </div>
+            ) : jobCard.status === "OPEN" ? (
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => {
+                  setActionError(null);
+                  setShowInvoicePrompt(true);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
               >
-                <Receipt className="h-4 w-4" /> View invoice {jobCard.invoice.invoiceNumber}
-              </Link>
-            ) : jobCard.status === "COMPLETED" ? (
-              <form onSubmit={handleGenerateInvoice} className="space-y-2">
-                <Label>Discount (optional)</Label>
-                <Input type="number" step="0.01" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
-                <Button type="submit" disabled={generatingInvoice} className="w-full">
-                  {generatingInvoice ? "Generating..." : "Generate invoice"}
-                </Button>
-              </form>
+                <Receipt className="h-4 w-4" /> Mark as Invoiced
+              </Button>
             ) : (
-              <p className="text-xs text-gray-500">Mark this job card as Completed to generate an invoice.</p>
+              <p className="text-xs text-gray-500">This job card is cancelled. Set it back to Open to invoice it.</p>
             )}
           </div>
         </CardBody>

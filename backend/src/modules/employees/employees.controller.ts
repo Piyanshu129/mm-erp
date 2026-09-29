@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import { mobileSchema } from "../../lib/phone";
 import * as employeesService from "./employees.service";
 import { parsePageParams } from "../../lib/pagination";
 
@@ -9,7 +10,7 @@ export const createEmployeeSchema = z.object({
   name: z.string().trim().min(1),
   role: optionalString,
   email: z.string().trim().toLowerCase().email().optional(),
-  mobile: optionalString,
+  mobile: mobileSchema.optional(),
   password: z.string().min(6).optional(),
   joiningDate: z.coerce.date(),
   monthlySalary: z.coerce.number().min(0),

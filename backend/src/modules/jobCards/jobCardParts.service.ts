@@ -17,7 +17,11 @@ async function assertJobCardEditable(tx: any, jobCardId: number) {
   const jobCard = await tx.jobCard.findUnique({ where: { id: jobCardId } });
   if (!jobCard) throw new NotFoundError("Job card not found");
   if (isLocked(jobCard.status)) {
-    throw new ConflictError("This job card is invoiced/closed and can no longer be edited");
+    throw new ConflictError(
+      jobCard.status === "CANCELLED"
+        ? "This job card is cancelled — reopen it to make changes"
+        : "This job card is invoiced and can no longer be edited"
+    );
   }
   const invoice = await tx.invoice.findUnique({ where: { jobCardId } });
   if (invoice) {

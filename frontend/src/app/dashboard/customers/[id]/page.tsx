@@ -14,6 +14,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { ActiveBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { InvoiceAccountPanel } from "@/components/InvoiceAccountPanel";
 
 interface Vehicle {
   id: number;
@@ -262,6 +263,8 @@ function CustomerDetailPageContent() {
           </Table>
         )}
       </div>
+
+      <InvoiceAccountPanel accountUrl={`/customers/${customer.id}/account`} title="Invoices & payments" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { ConflictError, NotFoundError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
+import { accountsBy, accountDetail } from "../invoices/invoices.service";
 
 export interface VehicleInput {
   registrationNumber: string;
@@ -49,7 +50,19 @@ export async function listVehicles(q: string | undefined, page: PageParams) {
     }),
   ]);
 
-  return { total, vehicles };
+  const accounts = await accountsBy("vehicle", vehicles.map((v) => v.id));
+  return { total, vehicles: vehicles.map((v) => ({ ...v, account: accounts.get(v.id)! })) };
+}
+
+// Invoiced / paid / due for this one vehicle, with every invoice and the
+// full payment history.
+export async function getVehicleAccount(id: number) {
+  const vehicle = await prisma.vehicle.findUnique({
+    where: { id },
+    select: { id: true, registrationNumber: true, make: true, model: true, customer: { select: { id: true, name: true } } },
+  });
+  if (!vehicle) throw new NotFoundError("Vehicle not found");
+  return { vehicle, ...(await accountDetail("vehicle", id)) };
 }
 
 export async function getVehicle(id: number) {

@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
-import { JOB_CARD_STATUSES, AFTER_VEHICLE_RECEIVED, AT_OR_PAST_COMPLETED, POST_INVOICE_STATUSES } from "../../lib/jobCardStatus";
+import { JOB_CARD_STATUSES } from "../../lib/jobCardStatus";
 
 export const JOB_TYPES = ["GENERAL_SERVICE", "ACCIDENTAL_CLAIM", "AC", "DENT_PAINT", "MECHANICAL"] as const;
 
@@ -106,7 +106,8 @@ export interface JobCardUpdateInput extends Partial<JobCardInput> {
 // Every photo taken for a phase must cover all four mandatory angles — this
 // is what actually enforces the workshop's "before" and "after" comparison
 // shots, rather than just letting staff upload anything and call it done.
-async function assertMandatoryPhotos(jobCardId: number, phase: "BEFORE" | "AFTER") {
+// Checked when the job card is invoiced (invoices.service.ts).
+export async function assertMandatoryPhotos(jobCardId: number, phase: "BEFORE" | "AFTER") {
   const media = await prisma.jobCardMedia.findMany({
     where: { jobCardId, phase, mediaType: "PHOTO" },
     select: { angle: true },
@@ -132,31 +133,20 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
     throw new ConflictError(`Invalid status: ${input.status}`);
   }
 
-  // The status dropdown is otherwise freely editable, but once an invoice
-  // exists it must only move forward through the delivery statuses (or to
-  // Closed) — never back to an "open" status, which would silently make the
-  // job card look editable again even though jobCardParts/jobCardLabour
-  // still refuse the edit.
-  if (jobCard.invoice && input.status && !(POST_INVOICE_STATUSES as readonly string[]).includes(input.status)) {
+  // Once invoiced, a job card's status is final — moving it back to Open
+  // or Cancelled would make it look editable (or void) while its invoice
+  // still stands.
+  if (jobCard.invoice && input.status && input.status !== "INVOICED") {
     throw new ConflictError(
-      `This job card was already invoiced (${jobCard.invoice.invoiceNumber}) — status can only move forward to Ready for Delivery, Delivered or Closed`
+      `This job card was already invoiced (${jobCard.invoice.invoiceNumber}) — its status can't be changed`
     );
   }
 
-  if (
-    input.status &&
-    (POST_INVOICE_STATUSES as readonly string[]).includes(input.status) &&
-    input.status !== "INVOICED" &&
-    !jobCard.invoice
-  ) {
-    throw new ConflictError("An invoice must be generated before moving this job card to delivery");
-  }
-
-  if (input.status && (AFTER_VEHICLE_RECEIVED as readonly string[]).includes(input.status)) {
-    await assertMandatoryPhotos(id, "BEFORE");
-  }
-  if (input.status && (AT_OR_PAST_COMPLETED as readonly string[]).includes(input.status)) {
-    await assertMandatoryPhotos(id, "AFTER");
+  // Invoiced is reached only by generating the invoice (which sets it in the
+  // same transaction), never by setting the status directly — otherwise a
+  // job card could say Invoiced with no invoice behind it.
+  if (input.status === "INVOICED" && !jobCard.invoice) {
+    throw new ConflictError("Generate the invoice to mark this job card Invoiced");
   }
 
   if (input.assignedEmployeeId != null) {
@@ -171,9 +161,6 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
   }
   if (input.finalInspectionStatus !== undefined) {
     data.finalInspectionAt = new Date();
-  }
-  if (input.status === "DELIVERED" && !jobCard.deliveredAt) {
-    data.deliveredAt = new Date();
   }
 
   return prisma.jobCard.update({

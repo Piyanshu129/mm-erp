@@ -2,12 +2,26 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Plus, ShoppingCart, Paperclip, Trash2 } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 import { formatINR, todayISO } from "@/lib/format";
+import {
+  INVENTORY_TYPES,
+  EXPENSE_TYPES,
+  TYPE_LABELS,
+  CATEGORY_LABELS,
+  PurchaseCategory,
+  PurchaseTotals,
+  isInventoryType,
+  categoryOf,
+  typesIn,
+} from "@/lib/purchaseTypes";
+import { MonthNav, TotalTile, CategoryBadge, FilterHeaderSelect, currentMonth, monthLabel } from "@/components/PurchaseListControls";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { MobileInput } from "@/components/ui/MobileInput";
 import { Input, Select, Label, Textarea } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -29,7 +43,15 @@ interface ItemOption {
   currentStock: number;
   purchaseCost: string;
   sellingPrice: string;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
+  variant: string | null;
   isActive: boolean;
+}
+
+// "Maruti Swift VXI" — whichever of the three are filled in.
+function carLabel(item: { vehicleMake: string | null; vehicleModel: string | null; variant: string | null }): string {
+  return [item.vehicleMake, item.vehicleModel, item.variant].filter(Boolean).join(" ");
 }
 
 interface PurchaseRow {
@@ -40,11 +62,21 @@ interface PurchaseRow {
   purchaseCost: string;
   sellingPrice: string | null;
   billUrl: string | null;
-  supplier: { name: string };
-  item: { itemCode: string; name: string; uom: string } | null;
+  supplier: { name: string } | null;
+  item: {
+    itemCode: string;
+    name: string;
+    uom: string;
+    vehicleMake: string | null;
+    vehicleModel: string | null;
+    variant: string | null;
+  } | null;
   description: string | null;
+  remarks: string | null;
   createdBy: { name: string };
 }
+
+const PAGE_SIZE = 100;
 
 // One item row of the purchase form, before it's sent.
 interface LineDraft {
@@ -56,6 +88,9 @@ interface LineDraft {
   newItemCategory: string;
   newItemUom: string;
   newItemMinStock: string;
+  newItemMake: string;
+  newItemModel: string;
+  newItemVariant: string;
   newItemPhoto: File | null;
   description: string;
   quantity: string;
@@ -63,41 +98,27 @@ interface LineDraft {
   sellingPrice: string;
 }
 
-const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
-
-const INVENTORY_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
-const EXPENSE_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
-
-const TYPE_LABELS: Record<string, string> = {
-  SPARE_PART: "Spare Part",
-  PAINT: "Paint",
-  TOOL: "Tool",
-  TRAVEL: "Travel",
-  PETROL: "Petrol",
-  FOOD: "Food",
-  OTHERS: "Others",
-};
+const ITEM_CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
 
 const FILE_INPUT_CLASS =
   "block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200";
 
-function isInventoryType(t: string) {
-  return (INVENTORY_TYPES as readonly string[]).includes(t);
-}
-
 let nextLineKey = 1;
 
 // New item is the default — most purchases bring in parts not yet on file.
-function emptyLine(): LineDraft {
+function emptyLine(itemType: string): LineDraft {
   return {
     key: nextLineKey++,
-    itemType: "SPARE_PART",
+    itemType,
     itemMode: "new",
     selectedItem: null,
     newItemName: "",
-    newItemCategory: CATEGORIES[0],
+    newItemCategory: ITEM_CATEGORIES[0],
     newItemUom: "PCS",
     newItemMinStock: "",
+    newItemMake: "",
+    newItemModel: "",
+    newItemVariant: "",
     newItemPhoto: null,
     description: "",
     quantity: "1",
@@ -209,6 +230,7 @@ function ExistingItemPicker({ line, onSelect, onClear }: { line: LineDraft; onSe
             <li key={it.id}>
               <button type="button" onClick={() => onSelect(it)} className="block w-full px-3 py-2 text-left hover:bg-gray-50">
                 <span className="font-medium text-gray-900">{it.itemCode}</span> — {it.name}
+                {carLabel(it) && <span className="text-gray-500"> · {carLabel(it)}</span>}
                 <span className="text-gray-500"> (stock: {it.currentStock})</span>
               </button>
             </li>
@@ -225,12 +247,14 @@ function ExistingItemPicker({ line, onSelect, onClear }: { line: LineDraft; onSe
 function LineEditor({
   index,
   line,
+  category,
   canRemove,
   onChange,
   onRemove,
 }: {
   index: number;
   line: LineDraft;
+  category: PurchaseCategory;
   canRemove: boolean;
   onChange: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
@@ -240,7 +264,9 @@ function LineEditor({
   return (
     <div className="space-y-3 rounded-md border border-gray-200 p-3 sm:p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-900">Item {index + 1}</p>
+        <p className="text-sm font-semibold text-gray-900">
+          {inventory ? "Item" : "Expense"} {index + 1}
+        </p>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-600">Line total: {formatINR(lineTotal(line))}</span>
           {canRemove && (
@@ -256,22 +282,13 @@ function LineEditor({
         </div>
       </div>
 
-      <Field label="Purchase type">
+      <Field label={inventory ? "Item type" : "Expense type"}>
         <Select value={line.itemType} onChange={(e) => onChange({ itemType: e.target.value })}>
-          <optgroup label="Inventory (gets serial numbers)">
-            {INVENTORY_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t]}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="Expense (no stock)">
-            {EXPENSE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t]}
-              </option>
-            ))}
-          </optgroup>
+          {typesIn(category).map((t) => (
+            <option key={t} value={t}>
+              {TYPE_LABELS[t]}
+            </option>
+          ))}
         </Select>
       </Field>
 
@@ -308,9 +325,20 @@ function LineEditor({
               <Field label="Item name" className="sm:col-span-2">
                 <Input value={line.newItemName} onChange={(e) => onChange({ newItemName: e.target.value })} />
               </Field>
+              <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
+                <Field label="Car maker (optional)" hint="e.g. Maruti">
+                  <Input value={line.newItemMake} onChange={(e) => onChange({ newItemMake: e.target.value })} />
+                </Field>
+                <Field label="Car model (optional)" hint="e.g. Swift">
+                  <Input value={line.newItemModel} onChange={(e) => onChange({ newItemModel: e.target.value })} />
+                </Field>
+                <Field label="Variant (optional)" hint="e.g. VXI">
+                  <Input value={line.newItemVariant} onChange={(e) => onChange({ newItemVariant: e.target.value })} />
+                </Field>
+              </div>
               <Field label="Category">
                 <Select value={line.newItemCategory} onChange={(e) => onChange({ newItemCategory: e.target.value })}>
-                  {CATEGORIES.map((c) => (
+                  {ITEM_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>
@@ -405,9 +433,27 @@ function lineProblem(line: LineDraft): string | null {
 }
 
 function PurchasesPageContent() {
+  const searchParams = useSearchParams();
+  // ?new=<type> opens the form ready for that type — the Expenses page's
+  // "New expense" button links here with an expense type.
+  const prefillType = searchParams.get("new");
+  const initialType = prefillType && TYPE_LABELS[prefillType] ? prefillType : "SPARE_PART";
+
   const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
+  const [listTotal, setListTotal] = useState(0);
+  const [listPage, setListPage] = useState(1);
+  const [summary, setSummary] = useState<PurchaseTotals | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [showForm, setShowForm] = useState(prefillType != null);
+
+  const [month, setMonth] = useState(currentMonth());
+  const [categoryFilter, setCategoryFilter] = useState<"" | PurchaseCategory>("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  // Asked first — it decides whether a supplier is needed at all.
+  const [purchaseType, setPurchaseType] = useState(initialType);
+  const category = categoryOf(purchaseType);
 
   const [supplierQuery, setSupplierQuery] = useState("");
   const [supplierResults, setSupplierResults] = useState<Supplier[]>([]);
@@ -418,7 +464,7 @@ function PurchasesPageContent() {
   const [supplierError, setSupplierError] = useState<string | null>(null);
 
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
-  const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
+  const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine(initialType)]);
   const [remarks, setRemarks] = useState("");
   const [bill, setBill] = useState<File | null>(null);
   // Bumped after a save to clear the file inputs, which can't be reset by value.
@@ -427,16 +473,49 @@ function PurchasesPageContent() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  function listQuery(page: number): string {
+    const params = new URLSearchParams({ month, page: String(page), pageSize: String(PAGE_SIZE) });
+    if (typeFilter) params.set("itemType", typeFilter);
+    else if (categoryFilter) params.set("category", categoryFilter);
+    return `/purchases?${params}`;
+  }
+
   async function loadPurchases() {
     setLoading(true);
-    const body = await apiFetch("/purchases");
+    const body = await apiFetch(listQuery(1));
     setPurchases(body.purchases);
+    setListTotal(body.total);
+    setListPage(1);
+    setSummary(body.summary);
     setLoading(false);
+  }
+
+  async function loadMore() {
+    setLoadingMore(true);
+    const body = await apiFetch(listQuery(listPage + 1));
+    setPurchases((prev) => [...prev, ...body.purchases]);
+    setListPage((p) => p + 1);
+    setLoadingMore(false);
   }
 
   useEffect(() => {
     loadPurchases();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month, categoryFilter, typeFilter]);
+
+  // Changing the purchase type within the same group (e.g. Spare Part →
+  // Paint) keeps the items entered so far and retypes them; switching
+  // between inventory and expense starts the items over, since the fields
+  // are completely different.
+  function changePurchaseType(next: string) {
+    if (categoryOf(next) === category) {
+      setLines((prev) => prev.map((l) => ({ ...l, itemType: next })));
+    } else {
+      setLines([emptyLine(next)]);
+      setFormError(null);
+    }
+    setPurchaseType(next);
+  }
 
   // Search as the user types (debounced), server-side so every supplier is
   // searchable — not just the first page of the list.
@@ -480,6 +559,10 @@ function PurchasesPageContent() {
   async function addSupplier() {
     const name = supplierQuery.trim();
     if (!name) return;
+    if (newSupplierMobile && newSupplierMobile.length !== 10) {
+      setSupplierError("Mobile number must be 10 digits");
+      return;
+    }
     setSupplierError(null);
     setAddingSupplier(true);
     try {
@@ -504,10 +587,10 @@ function PurchasesPageContent() {
     setLines((prev) => prev.filter((l) => l.key !== key));
   }
 
-  // The supplier and date are kept after a save, so several bills from the
-  // same supplier can be entered one after another.
+  // The type, supplier and date are kept after a save, so several bills from
+  // the same supplier can be entered one after another.
   function resetEntry() {
-    setLines([emptyLine()]);
+    setLines([emptyLine(purchaseType)]);
     setRemarks("");
     setBill(null);
     setFileInputsKey((k) => k + 1);
@@ -517,20 +600,22 @@ function PurchasesPageContent() {
     e.preventDefault();
     setFormError(null);
 
-    if (!selectedSupplier) {
+    const inventory = category === "INVENTORY";
+    if (inventory && !selectedSupplier) {
       setFormError("Search and select a supplier, or add a new one");
       return;
     }
     for (const [i, line] of lines.entries()) {
       const problem = lineProblem(line);
       if (problem) {
-        setFormError(`Item ${i + 1}: ${problem}`);
+        setFormError(`${inventory ? "Item" : "Expense"} ${i + 1}: ${problem}`);
         return;
       }
     }
 
     const formData = new FormData();
-    formData.set("supplierId", String(selectedSupplier.id));
+    // Expenses aren't bought on a supplier's account, so none is sent.
+    if (inventory && selectedSupplier) formData.set("supplierId", String(selectedSupplier.id));
     formData.set("purchaseDate", purchaseDate);
     if (remarks.trim()) formData.set("remarks", remarks.trim());
     if (bill) formData.set("bill", bill);
@@ -551,6 +636,9 @@ function PurchasesPageContent() {
                 category: line.newItemCategory,
                 uom: line.newItemUom.trim(),
                 ...(line.newItemMinStock ? { minStock: Number(line.newItemMinStock) } : {}),
+                ...(line.newItemMake.trim() ? { vehicleMake: line.newItemMake.trim() } : {}),
+                ...(line.newItemModel.trim() ? { vehicleModel: line.newItemModel.trim() } : {}),
+                ...(line.newItemVariant.trim() ? { variant: line.newItemVariant.trim() } : {}),
               },
             }),
         quantity: Number(line.quantity),
@@ -574,6 +662,20 @@ function PurchasesPageContent() {
   }
 
   const grandTotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
+  const noun = category === "INVENTORY" ? "item" : "expense";
+  const nounPlural = category === "INVENTORY" ? "items" : "expenses";
+
+  // Total of the rows the filters currently select, for the whole month —
+  // from the server's per-type totals, so it covers rows not loaded yet.
+  const filteredTotal = summary
+    ? Object.entries(summary.byType)
+        .filter(([t]) => (typeFilter ? t === typeFilter : categoryFilter ? categoryOf(t) === categoryFilter : true))
+        .reduce((sum, [, v]) => sum + v.total, 0)
+    : 0;
+  const typeFilterOptions = (categoryFilter ? typesIn(categoryFilter) : [...INVENTORY_TYPES, ...EXPENSE_TYPES]).map((t) => ({
+    value: t,
+    label: TYPE_LABELS[t],
+  }));
 
   return (
     <div className="space-y-6">
@@ -592,7 +694,38 @@ function PurchasesPageContent() {
           <CardBody>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="relative">
+                <Field
+                  label="Purchase type"
+                  hint={
+                    category === "INVENTORY"
+                      ? "Bought from a supplier — each unit gets its own serial number."
+                      : "A business expense — no supplier and no stock."
+                  }
+                >
+                  <Select value={purchaseType} onChange={(e) => changePurchaseType(e.target.value)}>
+                    <optgroup label="Inventory (from a supplier)">
+                      {INVENTORY_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Expense (no supplier)">
+                      {EXPENSE_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </Select>
+                </Field>
+                <Field label={category === "INVENTORY" ? "Purchase date" : "Expense date"}>
+                  <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+                </Field>
+              </div>
+
+              {category === "INVENTORY" && (
+                <div className="relative sm:w-1/2 sm:pr-1.5">
                   <Label>Supplier</Label>
                   {selectedSupplier ? (
                     <div className="flex items-center justify-between gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
@@ -653,9 +786,9 @@ function PurchasesPageContent() {
                               No supplier matches &ldquo;{supplierSearchedFor}&rdquo;.
                             </p>
                             <Field label="Mobile (optional)">
-                              <Input
+                              <MobileInput
                                 value={newSupplierMobile}
-                                onChange={(e) => setNewSupplierMobile(e.target.value)}
+                                onChange={setNewSupplierMobile}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
                                     e.preventDefault();
@@ -674,10 +807,7 @@ function PurchasesPageContent() {
                   )}
                   {supplierError && <p className="mt-1 text-xs text-red-600">{supplierError}</p>}
                 </div>
-                <Field label="Purchase date">
-                  <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-                </Field>
-              </div>
+              )}
 
               <div className="space-y-3" key={fileInputsKey}>
                 {lines.map((line, i) => (
@@ -685,17 +815,23 @@ function PurchasesPageContent() {
                     key={line.key}
                     index={i}
                     line={line}
+                    category={category}
                     canRemove={lines.length > 1}
                     onChange={(patch) => updateLine(line.key, patch)}
                     onRemove={() => removeLine(line.key)}
                   />
                 ))}
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
-                    <Plus className="h-4 w-4" /> Add another item
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setLines((prev) => [...prev, emptyLine(purchaseType)])}
+                  >
+                    <Plus className="h-4 w-4" /> Add another {noun}
                   </Button>
                   <p className="text-sm font-semibold text-gray-900">
-                    {lines.length} {lines.length === 1 ? "item" : "items"} · Total {formatINR(grandTotal)}
+                    {lines.length} {lines.length === 1 ? noun : nounPlural} · Total {formatINR(grandTotal)}
                   </p>
                 </div>
               </div>
@@ -717,24 +853,79 @@ function PurchasesPageContent() {
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Saving..." : `Save purchase (${lines.length} ${lines.length === 1 ? "item" : "items"})`}
+                {submitting
+                  ? "Saving..."
+                  : `Save ${category === "INVENTORY" ? "purchase" : "expense"} (${lines.length} ${lines.length === 1 ? noun : nounPlural})`}
               </Button>
             </form>
           </CardBody>
         </Card>
       )}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <MonthNav month={month} onChange={setMonth} />
+        {(categoryFilter || typeFilter) && (
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryFilter("");
+              setTypeFilter("");
+            }}
+            className="text-xs font-medium text-blue-600 hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {summary && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <TotalTile label={`Total purchases — ${monthLabel(month)}`} value={summary.total} />
+          <TotalTile
+            label="Inventory (parts, paint, tools)"
+            value={summary.inventoryTotal}
+            tone="blue"
+            sub={INVENTORY_TYPES.filter((t) => summary.byType[t])
+              .map((t) => `${TYPE_LABELS[t]} ${formatINR(summary.byType[t].total)}`)
+              .join(" · ")}
+          />
+          <TotalTile
+            label="Expenses"
+            value={summary.expenseTotal}
+            tone="amber"
+            sub={EXPENSE_TYPES.filter((t) => summary.byType[t])
+              .map((t) => `${TYPE_LABELS[t]} ${formatINR(summary.byType[t].total)}`)
+              .join(" · ")}
+          />
+        </div>
+      )}
+
       {loading ? (
-        <TableSkeleton cols={9} />
-      ) : purchases.length === 0 ? (
-        <EmptyState icon={ShoppingCart} title="No purchases recorded yet" />
+        <TableSkeleton cols={10} />
       ) : (
-        <Table minWidth={900}>
+        <Table minWidth={1000}>
           <thead>
             <tr>
               <Th>Serial No.</Th>
               <Th>Date</Th>
-              <Th>Type</Th>
+              <Th>
+                <FilterHeaderSelect
+                  label="Category"
+                  value={categoryFilter}
+                  onChange={(v) => {
+                    setCategoryFilter(v as "" | PurchaseCategory);
+                    // A type from the other category would match nothing.
+                    if (v && typeFilter && categoryOf(typeFilter) !== v) setTypeFilter("");
+                  }}
+                  options={[
+                    { value: "INVENTORY", label: CATEGORY_LABELS.INVENTORY },
+                    { value: "EXPENSE", label: CATEGORY_LABELS.EXPENSE },
+                  ]}
+                />
+              </Th>
+              <Th>
+                <FilterHeaderSelect label="Type" value={typeFilter} onChange={setTypeFilter} options={typeFilterOptions} />
+              </Th>
               <Th>Item / Expense</Th>
               <Th>Supplier</Th>
               <Th className="text-right">Qty</Th>
@@ -744,15 +935,29 @@ function PurchasesPageContent() {
             </tr>
           </thead>
           <tbody>
+            {purchases.length === 0 && (
+              <tr>
+                <td colSpan={10} className="px-4 py-10">
+                  <EmptyState
+                    icon={ShoppingCart}
+                    title={categoryFilter || typeFilter ? "No purchases match these filters" : "No purchases this month"}
+                  />
+                </td>
+              </tr>
+            )}
             {purchases.map((p) => (
               <Tr key={p.id}>
                 <Td className="font-mono">#{p.id}</Td>
-                <Td>{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                <Td className="whitespace-nowrap">{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                <Td>
+                  <CategoryBadge itemType={p.itemType} />
+                </Td>
                 <Td>{TYPE_LABELS[p.itemType] ?? p.itemType}</Td>
                 <Td>
                   {p.item ? (
                     <>
                       {p.item.itemCode} — {p.item.name}
+                      {carLabel(p.item) && <span className="block text-xs text-gray-500">For: {carLabel(p.item)}</span>}
                     </>
                   ) : (
                     p.description
@@ -768,7 +973,7 @@ function PurchasesPageContent() {
                     </a>
                   )}
                 </Td>
-                <Td>{p.supplier.name}</Td>
+                <Td>{p.supplier?.name ?? "-"}</Td>
                 <Td className="text-right">
                   {p.quantity} {p.item?.uom ?? ""}
                 </Td>
@@ -778,7 +983,32 @@ function PurchasesPageContent() {
               </Tr>
             ))}
           </tbody>
+          {purchases.length > 0 && (
+            <tfoot>
+              <tr className="bg-gray-50">
+                <td colSpan={9} className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-medium text-gray-700">
+                  {typeFilter
+                    ? `${TYPE_LABELS[typeFilter]} total`
+                    : categoryFilter
+                      ? `${CATEGORY_LABELS[categoryFilter]} total`
+                      : "Month total"}{" "}
+                  ({listTotal} {listTotal === 1 ? "entry" : "entries"})
+                </td>
+                <td className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-semibold text-gray-900">
+                  {formatINR(filteredTotal)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </Table>
+      )}
+
+      {!loading && purchases.length < listTotal && (
+        <div className="flex justify-center">
+          <Button type="button" variant="secondary" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : `Show more (${purchases.length} of ${listTotal})`}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -787,7 +1017,9 @@ function PurchasesPageContent() {
 export default function PurchasesPage() {
   return (
     <RequireAuth permission="PURCHASES">
-      <PurchasesPageContent />
+      <Suspense fallback={<p className="text-sm text-gray-500">Loading...</p>}>
+        <PurchasesPageContent />
+      </Suspense>
     </RequireAuth>
   );
 }

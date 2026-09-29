@@ -7,11 +7,15 @@ export const createInvoiceSchema = z.object({
   discount: z.coerce.number().min(0).optional(),
 });
 
+const optionalString = z.string().trim().min(1).optional();
+
 export const recordPaymentSchema = z.object({
-  paymentAmount: z.coerce.number().min(0),
-  paymentMode: z.string().trim().min(1).optional(),
-  paymentReference: z.string().trim().min(1).optional(),
-  paymentReceivedBy: z.string().trim().min(1).optional(),
+  amount: z.coerce.number().positive(),
+  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "paymentDate must be YYYY-MM-DD").optional(),
+  paymentMode: optionalString,
+  reference: optionalString,
+  receivedBy: optionalString,
+  notes: optionalString,
 });
 
 export async function list(req: Request, res: Response) {
@@ -38,6 +42,6 @@ export async function create(req: Request, res: Response) {
 
 export async function recordPayment(req: Request, res: Response) {
   const input = req.body as z.infer<typeof recordPaymentSchema>;
-  const invoice = await invoicesService.recordInvoicePayment(Number(req.params.id), input);
-  res.json({ invoice });
+  const invoice = await invoicesService.recordInvoicePayment(Number(req.params.id), input, req.user!.id);
+  res.status(201).json({ invoice });
 }

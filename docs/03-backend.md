@@ -15,7 +15,8 @@ backend/src/
 │   ├── errors.ts            — AppError + 4 subclasses (Unauthorized/Forbidden/NotFound/Conflict)
 │   ├── permissions.ts       — the PERMISSIONS constant (grantable modules)
 │   ├── pagination.ts        — parsePageParams / toSkipTake shared by every list endpoint
-│   ├── jobCardStatus.ts     — the job card status machine's constants
+│   ├── jobCardStatus.ts     — job card statuses (Open / Invoiced / Cancelled) and which ones lock editing
+│   ├── phone.ts             — the shared 10-digit mobile number validator
 │   ├── backup.ts            — JSON backup/restore of every business table
 │   ├── excelExport.ts       — builds the one-tab-per-table Excel workbook
 │   ├── excelExportScheduler.ts — regenerates it every 60s
@@ -154,7 +155,7 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | POST | `/:id/payments` | `SUPPLIERS` | multipart: `amount`, `paymentDate`, `paymentMode`, `reference`, `paidBy`, `notes`, optional `proof` photo; rejects paying more than the balance due |
 
 ### Purchases — `/purchases` (permission `PURCHASES`, [routes](../backend/src/modules/purchases/purchases.routes.ts))
-`GET /` (optionally filtered by `itemId`). `POST /` creates a multi-item purchase entry in one transaction. It's multipart: `supplierId`, `purchaseDate`, `remarks`, a JSON `lines` array, an optional `bill` photo and optional `itemPhoto_<n>` photos for new items. For inventory types it creates one `ItemUnit` per unit of quantity (see [05-workflows.md](05-workflows.md)). There's no payment route here; payments are made per supplier.
+`GET /` accepts optional filters: `month` (`YYYY-MM`, the server's local calendar month), `category` (`INVENTORY`/`EXPENSE`), `itemType`, and `itemId`. It is paged and newest first. Alongside the rows it returns a `summary` of per-type counts and totals (`byType`, `inventoryTotal`, `expenseTotal`, `total`). The summary covers the whole month for every type, whatever the category/type filter, and is summed in the database so it covers rows not on the current page. The same `purchaseTotals()` function feeds the dashboard's month total. `POST /` creates a multi-item purchase entry in one transaction. `supplierId` is required when any line is an inventory type, and omitted for expense-only entries. It's multipart: `supplierId`, `purchaseDate`, `remarks`, a JSON `lines` array, an optional `bill` photo and optional `itemPhoto_<n>` photos for new items. For inventory types it creates one `ItemUnit` per unit of quantity (see [05-workflows.md](05-workflows.md)). There's no payment route here; payments are made per supplier.
 
 ### Job Cards — `/job-cards` (permission `JOB_CARDS`, [routes](../backend/src/modules/jobCards/jobCards.routes.ts))
 | Method | Path | Notes |
@@ -173,8 +174,10 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 
 All of the parts/labour/media mutations are blocked once the job card is locked (see [02-database-schema.md](02-database-schema.md#job-cards-phase-4-reworked-september-2026) and [05-workflows.md](05-workflows.md)).
 
-### Invoices — `/invoices` (permission `INVOICES`, [routes](../backend/src/modules/invoices/invoices.routes.ts))
-`GET /`, `GET /:id`, `PATCH /:id/payment` (same running-total pattern as Purchases). Creation happens via `POST /job-cards/:jobCardId/invoice` above, not a route on this router.
+**Accounts:** `GET /customers/:id/account` (permission `CUSTOMERS`) and `GET /vehicles/:id/account` (permission `VEHICLES`) return the invoiced / paid / due summary, every invoice with its amount due, and the full payment history. The `GET /customers` and `GET /vehicles` lists include each row's `account` summary.
+
+### Invoices — `/invoices` ([routes](../backend/src/modules/invoices/invoices.routes.ts))
+`GET /` and `GET /:id` need `INVOICES`; the detail includes `payments`, newest first. `POST /:id/payments` takes `{amount, paymentDate?, paymentMode?, reference?, receivedBy?, notes?}` and accepts `INVOICES`, `CUSTOMERS` or `VEHICLES`. It records one payment and rejects overpayment. This replaced `PATCH /:id/payment`. Invoice creation happens via `POST /job-cards/:jobCardId/invoice` above, not a route on this router.
 
 ### Employees — `/employees` (permission `EMPLOYEES`, [routes](../backend/src/modules/employees/employees.routes.ts))
 `GET /`, `GET /:id`, `POST /`, `PATCH /:id`, `PATCH /:id/status`.
@@ -184,6 +187,9 @@ All of the parts/labour/media mutations are blocked once the job card is locked 
 
 ### Salary — `/salary` (permission `SALARY`, [routes](../backend/src/modules/attendance/salary.routes.ts))
 `GET /` (`?month=&year=`), `POST /calculate` (`{employeeId, month, year}` — computes and stores; blocked if a payment already started), `PATCH /:id/payment`.
+
+### Advances — `/advances` (permission `ATTENDANCE` or `SALARY`, [routes](../backend/src/modules/attendance/advances.routes.ts))
+`GET /?month=YYYY-MM[&employeeId=]` returns the advances given in that calendar month. `POST /` takes `{employeeId, date, amount, notes?}` and works out which salary month the advance is charged to. `DELETE /:id` only works while that salary hasn't started being paid. Both writes recalculate that month's salary automatically if it's calculated but unpaid.
 
 ### Employee Portal — `/employee-portal` ([routes](../backend/src/modules/employeePortal/employeePortal.routes.ts)) — **its own auth, not staff auth**
 | Method | Path | Auth | Notes |

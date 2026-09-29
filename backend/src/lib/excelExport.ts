@@ -129,7 +129,7 @@ async function purchasesSheet(): Promise<SheetSpec> {
     rows: purchases.map((p) => ({
       id: p.id,
       purchaseDate: p.purchaseDate,
-      supplierName: p.supplier.name,
+      supplierName: p.supplier?.name ?? "",
       itemType: p.itemType,
       itemCode: p.item?.itemCode ?? "",
       itemName: p.item?.name ?? p.description ?? "",
@@ -207,7 +207,7 @@ async function itemUnitsSheet(): Promise<SheetSpec> {
       itemName: u.item.name,
       status: u.status,
       purchaseId: u.purchaseId,
-      supplierName: u.purchase.supplier.name,
+      supplierName: u.purchase.supplier?.name ?? "",
       jobCardNumber: u.jobCardPart?.jobCard.jobCardNumber ?? "",
       vehicleRegistration: u.jobCardPart?.jobCard.vehicle.registrationNumber ?? "",
       createdAt: u.createdAt,
@@ -339,10 +339,7 @@ async function invoicesSheet(): Promise<SheetSpec> {
       { header: "Discount", key: "discount", width: 10 },
       { header: "Total", key: "totalAmount", width: 12 },
       { header: "Paid", key: "paymentAmount", width: 12 },
-      { header: "Payment Mode", key: "paymentMode", width: 14 },
-      { header: "Payment Ref.", key: "paymentReference", width: 16 },
-      { header: "Received By", key: "paymentReceivedBy", width: 16 },
-      { header: "Payment Date", key: "paymentDate", width: 18 },
+      { header: "Due", key: "due", width: 12 },
       { header: "Created By", key: "createdByName", width: 16 },
     ],
     rows: invoices.map((inv) => ({
@@ -356,11 +353,45 @@ async function invoicesSheet(): Promise<SheetSpec> {
       discount: n(inv.discount),
       totalAmount: n(inv.totalAmount),
       paymentAmount: n(inv.paymentAmount),
-      paymentMode: inv.paymentMode,
-      paymentReference: inv.paymentReference,
-      paymentReceivedBy: inv.paymentReceivedBy,
-      paymentDate: inv.paymentDate,
+      due: Number(inv.totalAmount) - Number(inv.paymentAmount),
       createdByName: inv.createdBy.name,
+    })),
+  };
+}
+
+async function invoicePaymentsSheet(): Promise<SheetSpec> {
+  const payments = await prisma.invoicePayment.findMany({
+    include: {
+      invoice: { include: { jobCard: { include: { vehicle: { include: { customer: true } } } } } },
+      createdBy: true,
+    },
+    orderBy: [{ paymentDate: "asc" }, { id: "asc" }],
+  });
+  return {
+    name: "Invoice Payments",
+    columns: [
+      { header: "Date", key: "paymentDate", width: 18 },
+      { header: "Invoice No.", key: "invoiceNumber", width: 14 },
+      { header: "Vehicle", key: "vehicleRegistration", width: 16 },
+      { header: "Customer", key: "customerName", width: 20 },
+      { header: "Amount", key: "amount", width: 12 },
+      { header: "Payment Mode", key: "paymentMode", width: 14 },
+      { header: "Reference", key: "reference", width: 18 },
+      { header: "Received By", key: "receivedBy", width: 16 },
+      { header: "Notes", key: "notes", width: 26 },
+      { header: "Entered By", key: "createdByName", width: 16 },
+    ],
+    rows: payments.map((p) => ({
+      paymentDate: p.paymentDate,
+      invoiceNumber: p.invoice.invoiceNumber,
+      vehicleRegistration: p.invoice.jobCard.vehicle.registrationNumber,
+      customerName: p.invoice.jobCard.vehicle.customer.name,
+      amount: n(p.amount),
+      paymentMode: p.paymentMode,
+      reference: p.reference,
+      receivedBy: p.receivedBy,
+      notes: p.notes,
+      createdByName: p.createdBy.name,
     })),
   };
 }
@@ -439,6 +470,7 @@ async function salaryPaymentsSheet(): Promise<SheetSpec> {
       { header: "Absent Days", key: "absentDays", width: 12 },
       { header: "Leave Days", key: "leaveDays", width: 12 },
       { header: "Gross Salary", key: "grossSalary", width: 14 },
+      { header: "Advance Deducted", key: "advanceDeduction", width: 16 },
       { header: "Net Salary", key: "netSalary", width: 14 },
       { header: "Paid", key: "paymentAmount", width: 12 },
       { header: "Payment Date", key: "paymentDate", width: 18 },
@@ -453,11 +485,38 @@ async function salaryPaymentsSheet(): Promise<SheetSpec> {
       absentDays: s.absentDays,
       leaveDays: s.leaveDays,
       grossSalary: n(s.grossSalary),
+      advanceDeduction: n(s.advanceDeduction),
       netSalary: n(s.netSalary),
       paymentAmount: n(s.paymentAmount),
       paymentDate: s.paymentDate,
       paymentMode: s.paymentMode,
       paymentBy: s.paymentBy,
+    })),
+  };
+}
+
+async function employeeAdvancesSheet(): Promise<SheetSpec> {
+  const advances = await prisma.employeeAdvance.findMany({
+    include: { employee: true, createdBy: true },
+    orderBy: [{ date: "asc" }, { id: "asc" }],
+  });
+  return {
+    name: "Employee Advances",
+    columns: [
+      { header: "Date Given", key: "date", width: 14 },
+      { header: "Employee", key: "employeeName", width: 22 },
+      { header: "Amount", key: "amount", width: 12 },
+      { header: "Deducted From (Month)", key: "salaryMonth", width: 20 },
+      { header: "Notes", key: "notes", width: 24 },
+      { header: "Entered By", key: "createdByName", width: 16 },
+    ],
+    rows: advances.map((a) => ({
+      date: a.date,
+      employeeName: a.employee.name,
+      amount: n(a.amount),
+      salaryMonth: `${a.salaryYear}-${String(a.salaryMonth).padStart(2, "0")}`,
+      notes: a.notes,
+      createdByName: a.createdBy.name,
     })),
   };
 }
@@ -482,9 +541,11 @@ export async function regenerateExcelExport(): Promise<void> {
     jobCardPartsSheet(),
     jobCardLabourSheet(),
     invoicesSheet(),
+    invoicePaymentsSheet(),
     employeesSheet(),
     attendanceSheet(),
     salaryPaymentsSheet(),
+    employeeAdvancesSheet(),
   ]);
 
   for (const sheet of sheets) {

@@ -6,14 +6,13 @@ import {
   Car,
   ClipboardList,
   CheckCircle2,
-  Clock,
+  Ban,
   IndianRupee,
   ShoppingCart,
   AlertTriangle,
   XCircle,
   Plus,
-  Package,
-  Users,
+  CalendarCheck,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
@@ -24,12 +23,19 @@ import { Skeleton } from "@/components/ui/Skeleton";
 interface Summary {
   todaysVehicles: number;
   openJobCards: number;
-  completedJobs: number;
-  pendingJobs: number;
+  invoicedToday: number;
+  cancelledThisMonth: number;
   todaysSales: number;
   todaysPurchaseValue: number;
   lowStockCount: number;
   outOfStockCount: number;
+  monthPurchaseValue: number;
+  monthInventoryPurchaseValue: number;
+  monthExpenseValue: number;
+}
+
+function rupees(value: number): string {
+  return `₹${Math.round(value).toLocaleString("en-IN")}`;
 }
 
 type Tone = "default" | "warning" | "danger";
@@ -88,19 +94,14 @@ export default function DashboardPage() {
       {summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label="Today's Vehicles" value={summary.todaysVehicles} href="/dashboard/jobcards" icon={Car} />
-          <StatCard label="Open Job Cards" value={summary.openJobCards} href="/dashboard/jobcards" icon={ClipboardList} />
+          <StatCard label="Open Job Cards" value={summary.openJobCards} href="/dashboard/jobcards?status=OPEN" icon={ClipboardList} />
+          <StatCard label="Invoiced Today" value={summary.invoicedToday} href="/dashboard/invoices" icon={CheckCircle2} />
           <StatCard
-            label="Awaiting Invoice"
-            value={summary.completedJobs}
-            href="/dashboard/jobcards?status=COMPLETED"
-            icon={CheckCircle2}
-          />
-          <StatCard
-            label="Waiting for Parts"
-            value={summary.pendingJobs}
-            href="/dashboard/jobcards?status=WAITING_FOR_PARTS"
-            icon={Clock}
-            tone={summary.pendingJobs > 0 ? "warning" : "default"}
+            label="Cancelled This Month"
+            value={summary.cancelledThisMonth}
+            href="/dashboard/jobcards?status=CANCELLED"
+            icon={Ban}
+            tone={summary.cancelledThisMonth > 0 ? "warning" : "default"}
           />
           <StatCard label="Today's Sales" value={`₹${summary.todaysSales.toFixed(0)}`} href="/dashboard/reports" icon={IndianRupee} />
           <StatCard
@@ -123,6 +124,24 @@ export default function DashboardPage() {
             icon={XCircle}
             tone={summary.outOfStockCount > 0 ? "danger" : "default"}
           />
+          <Link href="/dashboard/purchases" className="col-span-2 block transition-transform hover:-translate-y-0.5">
+            <Card>
+              <CardBody className="flex items-center gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                  <ShoppingCart className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xs text-gray-500">
+                    Total Purchases — {new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                  </p>
+                  <p className="text-xl font-semibold text-gray-900">{rupees(summary.monthPurchaseValue)}</p>
+                  <p className="truncate text-xs text-gray-500">
+                    Inventory {rupees(summary.monthInventoryPurchaseValue)} · Expenses {rupees(summary.monthExpenseValue)}
+                  </p>
+                </div>
+              </CardBody>
+            </Card>
+          </Link>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -135,20 +154,15 @@ export default function DashboardPage() {
       <div>
         <h2 className="mb-3 text-sm font-semibold text-gray-500">Quick actions</h2>
         <div className="flex flex-wrap gap-2">
-          <LinkButton href="/dashboard/jobcards">
+          {/* A job card needs a vehicle, so start with the new vehicle form. */}
+          <LinkButton href="/dashboard/vehicles?for=jobcard">
             <Plus className="h-4 w-4" /> New Job Card
           </LinkButton>
           <LinkButton href="/dashboard/purchases">
             <Plus className="h-4 w-4" /> New Purchase
           </LinkButton>
-          <LinkButton href="/dashboard/items" variant="secondary">
-            <Package className="h-4 w-4" /> Inventory
-          </LinkButton>
-          <LinkButton href="/dashboard/customers" variant="secondary">
-            <Users className="h-4 w-4" /> Customers
-          </LinkButton>
-          <LinkButton href="/dashboard/vehicles" variant="secondary">
-            <Car className="h-4 w-4" /> Vehicles
+          <LinkButton href="/dashboard/attendance">
+            <CalendarCheck className="h-4 w-4" /> Attendance
           </LinkButton>
         </div>
       </div>

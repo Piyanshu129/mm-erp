@@ -12,8 +12,8 @@ Nothing unusual here except normalization: registration numbers are uppercased a
 
 `/dashboard/purchases` → `POST /purchases` → [`purchases.service.ts#createPurchaseEntry`](../backend/src/modules/purchases/purchases.service.ts).
 
-One purchase entry is one supplier and one bill, with **any number of items**. The request is multipart:
-- `supplierId`, `purchaseDate` and `remarks` are shared by every line.
+One purchase entry is one supplier and one bill, with **any number of items**. The form asks for the purchase type first. For an **expense** type there is no supplier: the entry is sent without `supplierId`, and the lines are description + amount. The service only requires a supplier when a line is an inventory type. Expenses are also listed on their own page, `/dashboard/expenses`. The request is multipart:
+- `supplierId` (inventory only), `purchaseDate` and `remarks` are shared by every line.
 - `lines` is a JSON array. Each line has an `itemType` and either an existing `itemId` or a `newItem` (name, category, UOM, min stock), plus `quantity`, `purchaseCost` (per unit) and an optional `sellingPrice` (MRP). Expense lines carry a `description` instead of an item.
 - `bill` is an optional photo shared by all lines. Each new item can have its own photo as `itemPhoto_<line index>`. `uploadPurchaseFiles()` in `middleware/upload.ts` stores the bill with the other purchase bills and each item photo with the other item photos.
 
@@ -39,24 +39,24 @@ Payment routes follow the Suppliers page's own permission (`SUPPLIERS`). Searchi
 
 This is the central workflow — `/dashboard/jobcards/[id]` is the most complex page in the app because it's driving all of the following through one status field plus several sub-resources.
 
-### The status machine
+### Statuses: Open, Invoiced, Cancelled
 
-Defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts), enforced in [`jobCards.service.ts#updateJobCard`](../backend/src/modules/jobCards/jobCards.service.ts):
+Defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts), enforced in [`jobCards.service.ts#updateJobCard`](../backend/src/modules/jobCards/jobCards.service.ts) and [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). On 2026-09-30 they were simplified from an eleven-step workflow (Draft → … → Completed → Invoiced → Ready for Delivery → Delivered → Closed):
 
 ```
-DRAFT → VEHICLE_RECEIVED → WORK_STARTED → WAITING_FOR_PARTS → WORK_IN_PROGRESS
-      → COMPLETED → INVOICED → READY_FOR_DELIVERY → DELIVERED → CLOSED
-                                                                    ↑
-                                                              CANCELLED (from most states)
+OPEN ──(generate invoice)──> INVOICED   (final)
+  ↑ ↓
+CANCELLED
 ```
 
-The status field is a free-editable dropdown in the UI, but `updateJobCard` layers several rules on top of just "accept whatever status was sent":
-
-- **Mandatory before/after photos**: moving into any status in `AFTER_VEHICLE_RECEIVED` requires all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) already uploaded with `phase: "BEFORE"`; moving into `AT_OR_PAST_COMPLETED` requires the same four with `phase: "AFTER"`. This is `assertMandatoryPhotos()` — it's what actually forces the workshop's before/after comparison-shot practice, rather than just trusting staff to remember.
-- **Invoice-forward-only**: once `jobCard.invoice` exists, `status` can only move to `READY_FOR_DELIVERY`, `DELIVERED`, or `CLOSED` — never back to an "open" status. This exists because the status dropdown alone is user-editable and *not* trustworthy as the sole lock signal (see next point) — but allowing it to go backward would make the UI *look* editable again even though it isn't.
-- **Delivery requires an invoice**: can't move into `READY_FOR_DELIVERY`/`DELIVERED`/`CLOSED` without an invoice already existing.
+- **Invoiced is reached only by generating the invoice.** `PATCH` with `status: "INVOICED"` is refused. In the UI, choosing *Invoiced* in the status dropdown opens a confirmation (totals plus an optional discount), which calls `POST /job-cards/:id/invoice`; that sets the status in the same transaction. A job card therefore can't say Invoiced without an invoice behind it.
+- **Invoiced is final.** Once an invoice exists, the status can't be changed back to Open or to Cancelled, and the dropdown is disabled.
+- **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be invoiced.
+- **Mandatory before/after photos** are checked at invoicing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`. Before the simplification it guarded the old in-progress/Completed statuses; invoicing was only possible from Completed, so the rule's effect is unchanged.
 - **Assignment validation**: `assignedEmployeeId` must reference an active employee.
-- Side effects: setting `estimateApproved` stamps `estimateApprovedAt`; setting `finalInspectionStatus` stamps `finalInspectionAt`; first transition to `DELIVERED` stamps `deliveredAt`.
+- Side effects: setting `estimateApproved` stamps `estimateApprovedAt`, and setting `finalInspectionStatus` stamps `finalInspectionAt`. (`deliveredAt` remains in the schema but is no longer set, since there is no Delivered status.)
+
+The migration `20260930110000_simplify_job_card_statuses` converted existing job cards by what was actually true of them. Any job card with an invoice became Invoiced, a cancelled one without an invoice stayed Cancelled, and everything else became Open.
 
 ### The real lock: invoice existence, not the status field
 
@@ -82,21 +82,30 @@ Simple — `POST/DELETE /job-cards/:jobCardId/labour`, same lock check, `amount 
 
 ## 4. Invoice generation & the payment-snapshot pattern
 
-`/dashboard/jobcards/[id]` (once `status === "COMPLETED"`) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts).
+`/dashboard/jobcards/[id]` (an Open job card, choosing *Invoiced* in the status dropdown or clicking *Mark as Invoiced*) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). After generating, the page moves to the invoice.
+
+**Viewing and downloading:** the invoice page (`/dashboard/invoices/[id]`) has *Print* and *Download PDF*. The Invoices list has *View* and *Download* on every row. Download renders the on-screen invoice to an A4 PDF in the browser (`lib/invoicePdf.ts`, using `html2pdf.js`, which loads only when a download is requested). The file is named `<car number>_<DD-MM-YYYY>.pdf`, for example `HR06AB1234_30-09-2026.pdf`. The page title is set to the same name, so the browser's own Print → Save as PDF suggests it too. `?download=1` on the invoice page starts the download automatically; that's how the list's Download link works.
 
 One transaction: reads `parts`/`labour` **live** from the job card (safe because the job card is about to be locked by this same transaction), computes `partsTotal + labourTotal - discount` (discount validated to be within `[0, subtotal]`), creates the `Invoice`, assigns `INV-000123`, and — critically — sets `JobCard.status = "INVOICED"` **in the same transaction**. This last write is what actually locks the job card; everything else (parts/labour services checking `isLocked()`) is downstream of it.
 
 Invoice math is worth knowing precisely if you ever touch this: `Parts + Labour − Discount = Total`, no tax applied yet (`taxRate`/`taxAmount` columns exist but nothing writes to them — reserved for a future GST feature).
 
-### The payment-snapshot pattern (Invoice and SalaryPayment use this)
+### Customer payments and their history
 
-Neither has a separate payments table. Instead, each row carries its own running `paymentAmount` plus `paymentMode`, reference, who paid and `paymentDate`. `Pending`/`Partial`/`Paid` is *computed* by `paymentStatusFor(total, paid)` and never stored. Supplier payments used to work this way too, per purchase, but moved to their own table in September 2026 so partial-payment history is kept (see section 2b).
+`POST /invoices/:id/payments` records one payment. It adds an `InvoicePayment` row and increments `Invoice.paymentAmount` in the same transaction, with the invoice row locked so two simultaneous payments can't together overpay. Payments can be taken from:
+- the **invoice page**: totals, a payment form, and that invoice's payment history;
+- the **Customers** and **Vehicles** pages: each row shows Invoiced / Paid / Due, and **Pay** or **Payment history** opens an account panel (`components/InvoiceAccountPanel.tsx`) with a payment form against a chosen unpaid invoice, every invoice with what's due, and the full payment history (`GET /customers/:id/account`, `GET /vehicles/:id/account`);
+- the **customer detail page**, where the same panel sits permanently.
+
+A payment always belongs to one specific invoice, so each invoice's Pending/Partial/Paid stays exact. Recording one therefore accepts any of the `INVOICES`, `CUSTOMERS` or `VEHICLES` permissions, while opening the invoice itself still needs `INVOICES`.
+
+`SalaryPayment` still uses the older single-snapshot pattern: a running `paymentAmount` on the row, with `Pending`/`Partial`/`Paid` computed.
 
 **The one rule that matters if you ever touch these endpoints**: `PATCH .../payment`'s `paymentAmount` is *what's being paid right now*, added on top of whatever's already recorded. It is **never the new cumulative total**. This was a real bug, since fixed (see the root README's recent commits): a caller that passed the running total would silently double-count every payment after the first. `recordInvoicePayment`, `recordSalaryPayment` and `recordSupplierPayment` all reject anything that would overpay with a `ConflictError`.
 
 ## 5. Reports & the Dashboard
 
-`/dashboard` and `/dashboard/reports` both read live from Postgres on every request — nothing is precomputed or cached. `reports.service.ts`'s `getDashboardSummary()` is the one exception worth knowing: `openJobCards` is `count(status NOT IN LOCKED_STATUSES)`, so it automatically tracks the job card status machine without needing its own list of "open" statuses to keep in sync.
+`/dashboard` and `/dashboard/reports` both read live from Postgres on every request — nothing is precomputed or cached. `reports.service.ts`'s `getDashboardSummary()` returns open job cards (`status = OPEN`), invoices generated today, job cards cancelled this month, today's sales and purchases, stock alerts, and this month's purchase total.
 
 The Reports page's CSV export ([`lib/csv.ts`](../frontend/src/lib/csv.ts)) is entirely client-side — no server export endpoint — it just serializes whatever JSON the report endpoint already returned.
 
@@ -114,8 +123,11 @@ Two ways attendance gets marked, writing to the **same** `Attendance` table (`@@
 perDayRate = monthlySalary / daysInThatMonth
 unpaidLeaveDays = max(0, leaveDays - monthlyLeaveAllowance)
 deductionDays = absentDays + unpaidLeaveDays
-netSalary = max(0, monthlySalary - deductionDays × perDayRate)
+advances = sum of EmployeeAdvance.amount charged to this month
+netSalary = max(0, monthlySalary - deductionDays × perDayRate - advances)
 ```
+
+**Advances** are entered in the attendance sheet's "Advance paid" column (`POST /advances`), and each row's history column lists that month's advances. An advance is charged to the month it was given. If that month's salary has already started being paid, it's too late to deduct there, so it's charged to the next unpaid month and the page says so. Recording or removing an advance recalculates that month's salary automatically, but only while it's calculated and unpaid, the same rule as manual recalculation. The advances charged to one month can't total more than the monthly salary; the employee row is locked during that check.
 This is computed **once and stored** (`SalaryPayment`, `@@unique([employeeId, periodMonth, periodYear])`), not a live view — recalculating is an explicit re-run of the same endpoint, and it's **blocked entirely** once `paymentAmount > 0` for that month, so a later attendance correction can never silently change an already-paid salary figure.
 
 ### Why the Employee Portal is a separate auth system entirely

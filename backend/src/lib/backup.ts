@@ -21,8 +21,10 @@ export const BACKUP_TABLES = [
   "jobCardLabour",
   "jobCardMedia",
   "invoice",
+  "invoicePayment",
   "attendance",
   "salaryPayment",
+  "employeeAdvance",
 ] as const;
 
 export type BackupTable = (typeof BACKUP_TABLES)[number];
@@ -52,12 +54,17 @@ const LEGACY_PURCHASE_PAYMENT_FIELDS = [
   "paymentDate",
 ] as const;
 
-// Backups taken before supplier-level payments (2026-09-29) have no
-// supplierPayment table and carry payment fields on each purchase instead.
-// Convert those the same way the database migration did — each paid
-// purchase becomes one supplier payment — so an older backup still
-// restores cleanly into the current schema.
+// Older backups predate some schema changes. Each step below converts one
+// of them the same way the matching database migration did, so a backup of
+// any age still restores cleanly into the current schema.
 function upgradeLegacyBundle(bundle: BackupBundle): BackupBundle {
+  return upgradeInvoicePayments(upgradeSupplierPayments(bundle));
+}
+
+// Before supplier-level payments (2026-09-29) there was no supplierPayment
+// table; each purchase carried its own payment fields. Each paid purchase
+// becomes one supplier payment.
+function upgradeSupplierPayments(bundle: BackupBundle): BackupBundle {
   if (bundle.tables.supplierPayment) return bundle;
 
   const purchases = (bundle.tables.purchase ?? []) as Record<string, any>[];
@@ -82,6 +89,39 @@ function upgradeLegacyBundle(bundle: BackupBundle): BackupBundle {
   });
 
   return { ...bundle, tables: { ...bundle.tables, purchase, supplierPayment } };
+}
+
+const LEGACY_INVOICE_PAYMENT_FIELDS = ["paymentMode", "paymentReference", "paymentReceivedBy", "paymentDate"] as const;
+
+// Before invoice payment history (2026-09-30) there was no invoicePayment
+// table; each invoice carried its running total plus the last payment's
+// details. Each paid invoice becomes one payment row (its paymentAmount
+// running total is kept as it is).
+function upgradeInvoicePayments(bundle: BackupBundle): BackupBundle {
+  if (bundle.tables.invoicePayment) return bundle;
+
+  const invoices = (bundle.tables.invoice ?? []) as Record<string, any>[];
+  const invoicePayment = invoices
+    .filter((i) => Number(i.paymentAmount ?? 0) > 0)
+    .map((i) => ({
+      invoiceId: i.id,
+      amount: i.paymentAmount,
+      paymentDate: i.paymentDate ?? i.invoiceDate,
+      paymentMode: i.paymentMode ?? null,
+      reference: i.paymentReference ?? null,
+      receivedBy: i.paymentReceivedBy ?? null,
+      notes: "Recorded before payment history was kept",
+      createdById: i.createdById,
+      createdAt: i.paymentDate ?? i.createdAt,
+    }));
+
+  const invoice = invoices.map((i) => {
+    const copy = { ...i };
+    for (const field of LEGACY_INVOICE_PAYMENT_FIELDS) delete copy[field];
+    return copy;
+  });
+
+  return { ...bundle, tables: { ...bundle.tables, invoice, invoicePayment } };
 }
 
 export async function restoreFromBundle(original: BackupBundle): Promise<Record<BackupTable, number>> {
@@ -148,8 +188,10 @@ function tableNameFor(table: BackupTable): string {
     jobCardLabour: "job_card_labour",
     jobCardMedia: "job_card_media",
     invoice: "invoices",
+    invoicePayment: "invoice_payments",
     attendance: "attendance",
     salaryPayment: "salary_payments",
+    employeeAdvance: "employee_advances",
   };
   return map[table];
 }

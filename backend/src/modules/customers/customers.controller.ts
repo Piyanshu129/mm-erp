@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import { mobileSchema } from "../../lib/phone";
 import * as customersService from "./customers.service";
 import { parsePageParams } from "../../lib/pagination";
 
@@ -7,8 +8,8 @@ const optionalString = z.string().trim().min(1).optional();
 
 export const createCustomerSchema = z.object({
   name: z.string().trim().min(1),
-  mobile: z.string().trim().min(6).max(20),
-  whatsapp: optionalString,
+  mobile: mobileSchema,
+  whatsapp: mobileSchema.optional(),
   email: z.string().trim().email().optional(),
   address: optionalString,
   notes: optionalString,
@@ -46,4 +47,9 @@ export async function setActive(req: Request, res: Response) {
   const { isActive } = req.body as z.infer<typeof setActiveSchema>;
   const customer = await customersService.setCustomerActive(Number(req.params.id), isActive);
   res.json({ customer });
+}
+
+export async function account(req: Request, res: Response) {
+  const result = await customersService.getCustomerAccount(Number(req.params.id));
+  res.json(result);
 }

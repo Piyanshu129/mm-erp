@@ -2,17 +2,25 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Car, ClipboardPlus, Plus } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { MobileInput } from "@/components/ui/MobileInput";
 import { Input, Select, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import {
+  InvoiceAccount,
+  InvoiceAccountPanel,
+  InvoiceAccountCells,
+  InvoiceAccountActions,
+} from "@/components/InvoiceAccountPanel";
 
 interface VehicleRow {
   id: number;
@@ -22,6 +30,7 @@ interface VehicleRow {
   currentKm: number | null;
   isActive: boolean;
   customer: { id: number; name: string; mobile: string };
+  account: InvoiceAccount;
 }
 
 interface CustomerOption {
@@ -34,11 +43,18 @@ const FUEL_TYPES = ["Petrol", "Diesel", "CNG", "Electric", "Hybrid"];
 const TRANSMISSIONS = ["Manual", "Automatic"];
 
 function VehiclesPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // ?for=jobcard — arrived from the dashboard's "New Job Card": open the new
+  // vehicle form straight away, and once it's saved carry on to the job card
+  // form for that vehicle.
+  const forJobCard = searchParams.get("for") === "jobcard";
+
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
 
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(forJobCard);
   const [customerMode, setCustomerMode] = useState<"existing" | "new">("existing");
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerOption[]>([]);
@@ -60,9 +76,12 @@ function VehiclesPageContent() {
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The account panel (Pay / Payment history) for one vehicle.
+  const [accountFor, setAccountFor] = useState<{ vehicle: VehicleRow; focusPay: boolean } | null>(null);
 
-  async function load(query: string) {
-    setLoading(true);
+  // quiet: refresh the amounts after a payment without blanking the table.
+  async function load(query: string, quiet = false) {
+    if (!quiet) setLoading(true);
     const body = await apiFetch(`/vehicles?${query ? `q=${encodeURIComponent(query)}` : ""}`);
     setVehicles(body.vehicles);
     setLoading(false);
@@ -120,6 +139,10 @@ function VehiclesPageContent() {
         setFormError("Enter the new owner's name and mobile number");
         return;
       }
+      if (newCustomerMobile.length !== 10) {
+        setFormError("The owner's mobile number must be 10 digits");
+        return;
+      }
       customerId = -1; // resolved below once we create the customer
     }
 
@@ -133,7 +156,7 @@ function VehiclesPageContent() {
         customerId = customerBody.customer.id;
       }
 
-      await apiFetch("/vehicles", {
+      const vehicleBody = await apiFetch("/vehicles", {
         method: "POST",
         body: JSON.stringify({
           registrationNumber,
@@ -150,6 +173,11 @@ function VehiclesPageContent() {
           customerId,
         }),
       });
+
+      if (forJobCard) {
+        router.push(`/dashboard/jobcards?vehicleId=${vehicleBody.vehicle.id}`);
+        return;
+      }
 
       resetForm();
       setShowForm(false);
@@ -184,6 +212,12 @@ function VehiclesPageContent() {
         <Card className="max-w-lg">
           <CardBody>
             <form onSubmit={handleAddVehicle} className="space-y-4">
+              {forJobCard && (
+                <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  New job card — add the vehicle first. After saving you&apos;ll go straight to the job card form. Vehicle
+                  already on file? Search for it below and use its &ldquo;New job card&rdquo; link.
+                </p>
+              )}
               <div>
                 <Label>Owner</Label>
                 <div className="mb-2 flex gap-4 text-sm text-gray-700">
@@ -248,10 +282,10 @@ function VehiclesPageContent() {
                       value={newCustomerName}
                       onChange={(e) => setNewCustomerName(e.target.value)}
                     />
-                    <Input
-                      placeholder="Owner mobile"
+                    <MobileInput
+                      placeholder="Owner mobile (10 digits)"
                       value={newCustomerMobile}
-                      onChange={(e) => setNewCustomerMobile(e.target.value)}
+                      onChange={setNewCustomerMobile}
                     />
                   </div>
                 )}
@@ -321,25 +355,39 @@ function VehiclesPageContent() {
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Saving..." : "Save vehicle"}
+                {submitting ? "Saving..." : forJobCard ? "Save vehicle & continue to job card" : "Save vehicle"}
               </Button>
             </form>
           </CardBody>
         </Card>
       )}
 
+      {accountFor && (
+        <InvoiceAccountPanel
+          key={`${accountFor.vehicle.id}-${accountFor.focusPay}`}
+          accountUrl={`/vehicles/${accountFor.vehicle.id}/account`}
+          title={`${accountFor.vehicle.registrationNumber} (${accountFor.vehicle.customer.name}) — invoices & payments`}
+          focusPay={accountFor.focusPay}
+          onClose={() => setAccountFor(null)}
+          onChanged={() => load(q, true)}
+        />
+      )}
+
       {loading ? (
-        <TableSkeleton cols={5} />
+        <TableSkeleton cols={8} />
       ) : vehicles.length === 0 ? (
         <EmptyState icon={Car} title="No vehicles found" description="Try a different search term, or add it as a new vehicle above." />
       ) : (
-        <Table minWidth={600}>
+        <Table minWidth={1050}>
           <thead>
             <tr>
               <Th>Registration</Th>
               <Th>Make / Model</Th>
               <Th>KM</Th>
               <Th>Owner</Th>
+              <Th className="text-right">Invoiced</Th>
+              <Th className="text-right">Paid</Th>
+              <Th className="text-right">Due</Th>
               <Th></Th>
             </tr>
           </thead>
@@ -356,13 +404,21 @@ function VehiclesPageContent() {
                     {v.customer.name}
                   </Link>
                 </Td>
+                <InvoiceAccountCells account={v.account} />
                 <Td>
-                  <Link
-                    href={`/dashboard/jobcards?vehicleId=${v.id}`}
-                    className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                  >
-                    <ClipboardPlus className="h-3.5 w-3.5" /> New job card
-                  </Link>
+                  <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                    <Link
+                      href={`/dashboard/jobcards?vehicleId=${v.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    >
+                      <ClipboardPlus className="h-3 w-3" /> New job card
+                    </Link>
+                    <InvoiceAccountActions
+                      account={v.account}
+                      onPay={() => setAccountFor({ vehicle: v, focusPay: true })}
+                      onHistory={() => setAccountFor({ vehicle: v, focusPay: false })}
+                    />
+                  </div>
                 </Td>
               </Tr>
             ))}
@@ -376,7 +432,9 @@ function VehiclesPageContent() {
 export default function VehiclesPage() {
   return (
     <RequireAuth permission="VEHICLES">
-      <VehiclesPageContent />
+      <Suspense fallback={<p className="text-sm text-gray-500">Loading...</p>}>
+        <VehiclesPageContent />
+      </Suspense>
     </RequireAuth>
   );
 }

@@ -13,6 +13,7 @@ customersRouter.use(authenticate, requirePermission("CUSTOMERS"));
 
 customersRouter.get("/", asyncHandler(customersController.list));
 customersRouter.get("/:id", asyncHandler(customersController.get));
+customersRouter.get("/:id/account", asyncHandler(customersController.account));
 customersRouter.post(
   "/",
   validateBody(customersController.createCustomerSchema),

@@ -55,18 +55,19 @@ Every page under `app/dashboard/` is a `"use client"` component that fetches its
 
 | Page | Backend module | Notable behavior |
 |---|---|---|
-| `/dashboard` | `reports` (`/reports/dashboard`) | Live widgets — today's vehicles, open/completed/waiting-for-parts job cards, today's sales/purchase value, low/out-of-stock counts |
-| `/dashboard/customers`, `/customers/[id]` | `customers`, `vehicles` | Detail page lists all vehicles for that customer, with an inline "add vehicle" form (same shape/fields as the Vehicles page's own form — see below) |
-| `/dashboard/vehicles` | `vehicles` | Global search across all vehicles; "New vehicle" form can create a brand-new customer inline instead of requiring one to exist first |
+| `/dashboard` | `reports` (`/reports/dashboard`) | Live widgets: today's vehicles, open/completed/waiting-for-parts job cards, today's sales/purchase value, low/out-of-stock counts, and this month's total purchases split into inventory vs. expenses |
+| `/dashboard/customers`, `/customers/[id]` | `customers`, `vehicles`, `invoices` | List rows show Invoiced / Paid / Due with **Pay** and **Payment history**, which open the shared account panel. The detail page lists the customer's vehicles, with an inline "add vehicle" form, and has the account panel permanently at the bottom |
+| `/dashboard/vehicles` | `vehicles`, `invoices` | Global search across all vehicles, with Invoiced / Paid / Due and **Pay** / **Payment history** per vehicle. The "New vehicle" form can create a brand-new customer inline |
 | `/dashboard/items`, `/items/[id]` | `items`, `itemUnits` | Photo upload (multipart); detail page shows stock history (every `ItemUnit` ever created) via `/items/:id/stock-history` |
 | `/dashboard/suppliers` | `suppliers` | Each supplier's purchased / paid / balance due. **Pay** records a payment with an optional transaction photo; **Payment history** lists every partial payment |
-| `/dashboard/purchases` | `purchases` | One entry = one supplier + bill with any number of items (new item is the default; existing items via type-to-search). Supplier is a type-to-search box that can add a missing supplier inline. The list shows per-unit rate, MRP and total |
+| `/dashboard/purchases` | `purchases` | The form asks for the **purchase type first**. Inventory types show the supplier box (type-to-search, can add a missing supplier inline) and item lines (new item is the default). Expense types skip the supplier and take description + amount lines. `?new=<TYPE>` opens the form preset to that type. The list is per month (◀ month ▶) with Total / Inventory / Expenses tiles, a Category column, and Category/Type filters in the column headers. It shows per-unit rate, MRP and total, with a filtered total in the footer |
+| `/dashboard/expenses` | `purchases` (`category=EXPENSE`) | Sidebar entry right below Suppliers. The month's expenses with a total per expense type (click a tile to filter), a Type column filter, and **New expense**, which links to the Purchases form preset to an expense type |
 | `/dashboard/jobcards`, `/jobcards/[id]` | `jobCards` + parts/labour/media/invoice sub-resources | The most complex page — status transitions, mandatory before/after photo upload, parts issue by serial lookup, labour lines, invoice generation. See [05-workflows.md](05-workflows.md) for the rules it's enforcing |
-| `/dashboard/invoices`, `/invoices/[id]` | `invoices` | Detail page is print-friendly (dashboard chrome hidden via `print:hidden` CSS) — "Print / Save as PDF" uses the browser's native print dialog, no server-side PDF generation |
+| `/dashboard/invoices`, `/invoices/[id]` | `invoices` | The list shows Total / Paid / Due / status with **View** and **Download**. The detail page has *Print* and *Download PDF* (named `<car number>_<date>.pdf`), plus customer payments: totals, a payment form, and the full payment history |
 | `/dashboard/service-history` | `vehicles` (`/:id/service-history`) | Search by registration, customer mobile, or customer name |
 | `/dashboard/employees` | `employees` | Includes setting/clearing the Employee Portal password |
-| `/dashboard/attendance` | `attendance` | Daily grid for all active employees; admin corrections |
-| `/dashboard/salary` | `attendance/salary` (`salary` router) | Calculate + record payments |
+| `/dashboard/attendance` | `attendance`, `advances` | Daily grid for all active employees with admin corrections. Each row has an **Advance paid** box and an advance history column for the month; advances are deducted from salary |
+| `/dashboard/salary` | `attendance/salary` (`salary` router) | Calculate (and **Recalculate** while unpaid) + record payments. An Advance column shows what was deducted |
 | `/dashboard/reports` | `reports` | Sales/Purchases/Inventory/Workshop/Customers, each with a date range and a client-side CSV export (`lib/csv.ts` — no server export library needed) |
 | `/dashboard/users` | `users` | **Admin-only** — create/disable staff, edit per-module permissions |
 | `/dashboard/settings` | `backup` | **Admin-only** — "Download backup now" (JSON) and Excel export download |

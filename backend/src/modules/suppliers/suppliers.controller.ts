@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import { mobileSchema } from "../../lib/phone";
 import * as suppliersService from "./suppliers.service";
 import { parsePageParams } from "../../lib/pagination";
 import { publicUrlFor } from "../../middleware/upload";
@@ -9,7 +10,7 @@ const optionalString = z.string().trim().min(1).optional();
 export const createSupplierSchema = z.object({
   name: z.string().trim().min(1),
   contactPerson: optionalString,
-  mobile: optionalString,
+  mobile: mobileSchema.optional(),
   email: z.string().trim().email().optional(),
   address: optionalString,
   notes: optionalString,

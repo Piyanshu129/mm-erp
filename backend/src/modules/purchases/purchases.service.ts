@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
@@ -8,12 +9,19 @@ import { PageParams, toSkipTake } from "../../lib/pagination";
 export const INVENTORY_ITEM_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
 export const EXPENSE_ITEM_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
 export const PURCHASE_ITEM_TYPES = [...INVENTORY_ITEM_TYPES, ...EXPENSE_ITEM_TYPES] as const;
+export const PURCHASE_CATEGORIES = ["INVENTORY", "EXPENSE"] as const;
+
+export type PurchaseItemType = (typeof PURCHASE_ITEM_TYPES)[number];
+export type PurchaseCategory = (typeof PURCHASE_CATEGORIES)[number];
 
 export interface NewItemInput {
   name: string;
   category: string;
   uom: string;
   minStock?: number;
+  vehicleMake?: string;
+  vehicleModel?: string;
+  variant?: string;
   photoUrl?: string;
 }
 
@@ -31,7 +39,7 @@ export interface PurchaseLineInput {
 }
 
 export interface PurchaseEntryInput {
-  supplierId: number;
+  supplierId?: number;
   purchaseDate?: string;
   billUrl?: string;
   remarks?: string;
@@ -50,18 +58,89 @@ function isInventoryType(itemType: string): boolean {
   return (INVENTORY_ITEM_TYPES as readonly string[]).includes(itemType);
 }
 
-export async function listPurchases(page: PageParams, itemId?: number) {
-  const where = itemId ? { itemId } : {};
-  const [total, purchases] = await Promise.all([
+export function categoryOf(itemType: string): PurchaseCategory {
+  return isInventoryType(itemType) ? "INVENTORY" : "EXPENSE";
+}
+
+export interface PurchaseFilters {
+  itemId?: number;
+  month?: string; // YYYY-MM
+  category?: PurchaseCategory;
+  itemType?: PurchaseItemType;
+}
+
+export interface DateRange {
+  start: Date;
+  end: Date; // exclusive
+}
+
+// Calendar month in the server's own timezone (the workshop PC, IST), so a
+// purchase dated the 1st lands in that month rather than the previous one.
+export function monthRange(month: string): DateRange {
+  const [year, m] = month.split("-").map(Number);
+  return { start: new Date(year, m - 1, 1), end: new Date(year, m, 1) };
+}
+
+export interface PurchaseTotals {
+  byType: Record<string, { count: number; total: number }>;
+  inventoryTotal: number;
+  expenseTotal: number;
+  total: number;
+}
+
+// What was spent in a period, broken down by purchase type — a line's value
+// is quantity × per-unit cost. Summed in the database, so it covers every
+// purchase in the period, not just the page of rows being shown.
+export async function purchaseTotals(range?: DateRange, itemId?: number): Promise<PurchaseTotals> {
+  const conditions: Prisma.Sql[] = [];
+  if (range) conditions.push(Prisma.sql`purchase_date >= ${range.start} AND purchase_date < ${range.end}`);
+  if (itemId) conditions.push(Prisma.sql`item_id = ${itemId}`);
+  const where = conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}` : Prisma.empty;
+
+  const rows = await prisma.$queryRaw<{ item_type: string; count: bigint; total: Prisma.Decimal }[]>`
+    SELECT item_type, COUNT(*) AS count, COALESCE(SUM(quantity * purchase_cost), 0) AS total
+    FROM purchases
+    ${where}
+    GROUP BY item_type
+  `;
+
+  const totals: PurchaseTotals = { byType: {}, inventoryTotal: 0, expenseTotal: 0, total: 0 };
+  for (const row of rows) {
+    const total = Number(row.total);
+    totals.byType[row.item_type] = { count: Number(row.count), total };
+    if (isInventoryType(row.item_type)) totals.inventoryTotal += total;
+    else totals.expenseTotal += total;
+    totals.total += total;
+  }
+  return totals;
+}
+
+// The list is filtered by month, category and type, and paged. The summary
+// covers the whole month for every type (not just the filtered rows), so
+// the page can show the month's totals whichever filter is active.
+export async function listPurchases(page: PageParams, filters: PurchaseFilters = {}) {
+  const range = filters.month ? monthRange(filters.month) : undefined;
+
+  const where: Prisma.PurchaseWhereInput = {};
+  if (filters.itemId) where.itemId = filters.itemId;
+  if (range) where.purchaseDate = { gte: range.start, lt: range.end };
+  if (filters.itemType) {
+    where.itemType = filters.itemType;
+  } else if (filters.category) {
+    where.itemType = { in: [...(filters.category === "INVENTORY" ? INVENTORY_ITEM_TYPES : EXPENSE_ITEM_TYPES)] };
+  }
+
+  const [total, purchases, summary] = await Promise.all([
     prisma.purchase.count({ where }),
     prisma.purchase.findMany({
       where,
       include: purchaseInclude,
-      orderBy: { id: "desc" },
+      orderBy: [{ purchaseDate: "desc" }, { id: "desc" }],
       ...toSkipTake(page),
     }),
+    purchaseTotals(range, filters.itemId),
   ]);
-  return { total, purchases };
+  return { total, purchases, summary };
 }
 
 // Every problem with a line is reported against its position in the form
@@ -101,11 +180,19 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
   }
   input.lines.forEach((line, i) => validateLine(line, `Item ${i + 1}`));
 
+  // Parts, paint and tools are bought from a supplier and go on their
+  // account; an expense-only entry doesn't need one.
+  if (!input.supplierId && input.lines.some((line) => isInventoryType(line.itemType))) {
+    throw new ConflictError("Choose a supplier — spare parts, paint and tools must come from a supplier");
+  }
+
   const purchaseDate = input.purchaseDate ? new Date(input.purchaseDate) : new Date();
 
   return prisma.$transaction(async (tx) => {
-    const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
-    if (!supplier) throw new NotFoundError("Supplier not found");
+    if (input.supplierId) {
+      const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
+      if (!supplier) throw new NotFoundError("Supplier not found");
+    }
 
     const createdIds: number[] = [];
 
@@ -121,6 +208,9 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
             category: line.newItem.category,
             uom: line.newItem.uom,
             minStock: line.newItem.minStock,
+            vehicleMake: line.newItem.vehicleMake,
+            vehicleModel: line.newItem.vehicleModel,
+            variant: line.newItem.variant,
             photoUrl: line.newItem.photoUrl,
             itemCode: "PENDING",
           },

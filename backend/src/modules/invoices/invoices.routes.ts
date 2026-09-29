@@ -7,12 +7,16 @@ import { asyncHandler } from "../../middleware/errorHandler";
 
 export const invoicesRouter = Router();
 
-invoicesRouter.use(authenticate, requirePermission("INVOICES"));
+invoicesRouter.use(authenticate);
 
-invoicesRouter.get("/", asyncHandler(invoicesController.list));
-invoicesRouter.get("/:id", asyncHandler(invoicesController.get));
-invoicesRouter.patch(
-  "/:id/payment",
+invoicesRouter.get("/", requirePermission("INVOICES"), asyncHandler(invoicesController.list));
+invoicesRouter.get("/:id", requirePermission("INVOICES"), asyncHandler(invoicesController.get));
+// Payments can also be taken from the Customers and Vehicles pages, against
+// one of that customer's/vehicle's invoices — so any of the three
+// permissions is enough to record one.
+invoicesRouter.post(
+  "/:id/payments",
+  requirePermission("INVOICES", "CUSTOMERS", "VEHICLES"),
   validateBody(invoicesController.recordPaymentSchema),
   asyncHandler(invoicesController.recordPayment)
 );

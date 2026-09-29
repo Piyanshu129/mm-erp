@@ -7,6 +7,7 @@ import { Plus, UserCog, Pencil, KeyRound, ExternalLink } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { MobileInput } from "@/components/ui/MobileInput";
 import { Input, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -202,7 +203,7 @@ function EmployeesPageContent() {
                   </div>
                   <div>
                     <Label>Mobile (optional)</Label>
-                    <Input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+                    <MobileInput value={form.mobile} onChange={(mobile) => setForm({ ...form, mobile })} />
                   </div>
                   <div>
                     <Label>{editingId ? "New portal password (leave blank to keep current)" : "Portal password"}</Label>

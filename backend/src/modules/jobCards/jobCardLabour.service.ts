@@ -16,7 +16,11 @@ async function assertJobCardEditable(jobCardId: number) {
   const jobCard = await prisma.jobCard.findUnique({ where: { id: jobCardId } });
   if (!jobCard) throw new NotFoundError("Job card not found");
   if (isLocked(jobCard.status)) {
-    throw new ConflictError("This job card is invoiced/closed and can no longer be edited");
+    throw new ConflictError(
+      jobCard.status === "CANCELLED"
+        ? "This job card is cancelled — reopen it to make changes"
+        : "This job card is invoiced and can no longer be edited"
+    );
   }
   const invoice = await prisma.invoice.findUnique({ where: { jobCardId } });
   if (invoice) {

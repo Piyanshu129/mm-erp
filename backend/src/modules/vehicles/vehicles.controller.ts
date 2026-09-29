@@ -58,3 +58,8 @@ export async function serviceHistory(req: Request, res: Response) {
   const result = await vehiclesService.getVehicleServiceHistory(Number(req.params.id));
   res.json(result);
 }
+
+export async function account(req: Request, res: Response) {
+  const result = await vehiclesService.getVehicleAccount(Number(req.params.id));
+  res.json(result);
+}

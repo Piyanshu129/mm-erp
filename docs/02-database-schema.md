@@ -23,6 +23,7 @@ Customer ──< Vehicle
 ```
 
 - **`Customer`** — `mobile` is globally unique (the app's primary lookup key for a customer).
+- **Mobile numbers** (customer mobile/WhatsApp, supplier, employee) are exactly 10 digits, validated by the shared `mobileSchema` in `lib/phone.ts`. Input is cleaned first: spaces, dashes and a leading `+91`/`91`/`0` are dropped. The frontend's `MobileInput` component applies the same clean-up as you type. The rule only applies to new writes; numbers stored before 2026-09-30 are left as they were.
 - **`Vehicle`** — `registrationNumber` is globally unique; the service layer normalizes it (uppercase, no spaces) before the uniqueness check so `"hr06 ab 1234"` and `"HR06AB1234"` collide as the same vehicle.
 - **`Item`** — the parts/consumables catalog. `itemCode` (`ITM-000123`) is generated server-side from the row's own `id` right after insert — never typed by a user, so it can never collide (same pattern used for `Vehicle`/`JobCard`/`Invoice` numbers). `currentStock` is a **denormalized counter**: it's not computed live from `ItemUnit` rows on every read: it's incremented/decremented transactionally alongside every purchase and every parts issue/removal ([`purchases.service.ts`](../backend/src/modules/purchases/purchases.service.ts), [`jobCardParts.service.ts`](../backend/src/modules/jobCards/jobCardParts.service.ts)), so it's always in sync.
 - **`Supplier`** — master for Purchases, and the account that supplier payments are made against (see `SupplierPayment` below).
@@ -39,6 +40,8 @@ This is the part of the schema that changed shape most dramatically. The **origi
 - **`Purchase`** — one row per purchased line. A single purchase entry in the UI (one supplier, one bill) can contain several items; each becomes its own `Purchase` row sharing `supplierId`, `purchaseDate`, `billUrl` and `remarks`, all created in one transaction. `itemType` is one of:
   - Inventory types: `SPARE_PART`, `PAINT`, `TOOL` — these reference an `Item` and generate `ItemUnit` rows.
   - Expense types: `TRAVEL`, `PETROL`, `FOOD`, `OTHERS` — no `Item`, just a `description` and a cost; no stock implications at all.
+
+  `supplierId` is **optional** (since 2026-09-30). The service requires it for inventory types, and expenses are recorded without one, because petrol or food isn't bought on a supplier's account. Expenses recorded before then may still have a supplier, and those keep counting toward that supplier's balance. The foreign key stays `ON DELETE RESTRICT`.
 
   `purchaseCost` is the **per-unit** rate for inventory lines (the line total is `quantity × purchaseCost`) and the total for expense lines (quantity is always 1). `sellingPrice` is labelled **MRP** in the UI, and can't be below `purchaseCost`. Purchases carry **no payment fields** — payment is tracked per supplier, below.
 
@@ -58,14 +61,7 @@ Vehicle ──< JobCard ──< JobCardMedia
 Employee ──< JobCard   (assignedEmployee, optional)
 ```
 
-- **`JobCard`** — the central sales-side workflow record. `jobCardNumber` (`JC-000123`) follows the same derive-from-own-id pattern as `Item`. `status` is a plain string (same reasoning as `Role`), one of eleven values defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts):
-
-  ```
-  DRAFT → VEHICLE_RECEIVED → WORK_STARTED → WAITING_FOR_PARTS → WORK_IN_PROGRESS
-        → COMPLETED → INVOICED → READY_FOR_DELIVERY → DELIVERED → CLOSED
-  (CANCELLED can happen from most states)
-  ```
-  The last five (`INVOICED`, `READY_FOR_DELIVERY`, `DELIVERED`, `CLOSED`, `CANCELLED`) are `LOCKED_STATUSES` — once a job card reaches one of these, parts and labour can no longer be added or removed. See [05-workflows.md](05-workflows.md) for the full state-machine rules (mandatory photos, estimate approval, invoice-forward-only).
+- **`JobCard`** — the central sales-side workflow record. `jobCardNumber` (`JC-000123`) follows the same derive-from-own-id pattern as `Item`. `status` is a plain string (same reasoning as `Role`), one of `OPEN`, `INVOICED` or `CANCELLED`, defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts). These replaced an eleven-step workflow on 2026-09-30. `INVOICED` and `CANCELLED` are `LOCKED_STATUSES`: while in either, parts and labour can't be added or removed. Invoiced is reached only by generating the invoice, and it's final. See [05-workflows.md](05-workflows.md) for the rules.
 
   The September 2026 rework added: `jobType`, `expectedDelivery`, `inspectionFindings` (initial inspection), an optional estimate/approval step (`estimateAmount`, `estimateApproved`, `estimateApprovedAt`), work assignment (`assignedEmployeeId` → `Employee`), a final inspection sign-off (`finalInspectionStatus`, `finalInspectionBy`, `finalInspectionAt`), and `deliveredAt`.
 
@@ -77,7 +73,7 @@ Employee ──< JobCard   (assignedEmployee, optional)
 
 ## Invoices (Phase 5)
 
-- **`Invoice`** — 1:1 with `JobCard` (`jobCardId @unique`, DB-enforced — a job card can only be invoiced once). Deliberately **has no line-item tables of its own**: parts and labour are read live from the job card's own (already-locked) records at invoice-generation time, so an invoice can never show numbers different from the job card it came from. `invoiceNumber` follows the `INV-000123` pattern. `taxRate`/`taxAmount` exist, unused, so GST support can be added later without a schema migration touching this table's shape. Payment is a single evolving snapshot on the row itself (`paymentAmount`, `paymentMode`, `paymentReference`, `paymentReceivedBy`, `paymentDate`), with `Pending`/`Partial`/`Paid` computed from `paymentAmount` vs. `totalAmount`, never stored. `SalaryPayment` below uses the same pattern.
+- **`Invoice`** — 1:1 with `JobCard` (`jobCardId @unique`, DB-enforced — a job card can only be invoiced once). Deliberately **has no line-item tables of its own**: parts and labour are read live from the job card's own (already-locked) records at invoice-generation time, so an invoice can never show numbers different from the job card it came from. `invoiceNumber` follows the `INV-000123` pattern. `taxRate`/`taxAmount` exist, unused, so GST support can be added later without a schema migration touching this table's shape. Each customer payment is its own **`InvoicePayment`** row (added 2026-09-30): `amount`, `paymentDate`, `paymentMode`, `reference`, `receivedBy`, `notes`, `createdById`. That keeps the full history. `Invoice.paymentAmount` is their running total, updated in the same transaction as every payment, with the invoice row locked. `Pending`/`Partial`/`Paid` is computed from `paymentAmount` vs. `totalAmount` and never stored. Before this, each invoice held only its running total plus the last payment's details. The migration `20260930120000_invoice_payment_history` turned each paid invoice into one payment row, noted "Recorded before payment history was kept", and dropped those columns. A customer's or vehicle's account (invoiced / paid / due) is computed from its invoices.
 
 ## HR: Attendance → Salary (Phase 6, expanded with the Employee Portal)
 
@@ -91,11 +87,13 @@ Employee ──< Attendance
 
 - **`Attendance`** — `@@unique([employeeId, date])`: one row per employee per calendar day, whether it came from an admin marking it or the employee self-punching. `markedBy` (`ADMIN`/`SELF`) distinguishes the two, but **both write the same row** — an admin correction always overwrites `status`/`markedBy` but *keeps* the original punch's `punchedAt`/`latitude`/`longitude`/`selfieUrl` as an audit trail of what actually happened before the override.
 
-- **`SalaryPayment`** — `@@unique([employeeId, periodMonth, periodYear])`: one row per employee per month. `grossSalary`/`netSalary` are **computed once and stored**, not a live view over `Attendance` — so a later attendance correction can't silently change an already-calculated (or already-paid) salary. Recalculating is an explicit action, and is blocked entirely once `paymentAmount > 0` for that month (see [`salary.service.ts`](../backend/src/modules/attendance/salary.service.ts)).
+- **`EmployeeAdvance`** (added 2026-09-30): money paid to an employee ahead of salary, entered from the attendance sheet. There's one row per advance (`amount`, `date` given, `createdById`), so the history is kept. `salaryMonth`/`salaryYear` record which month's salary it comes out of. That's normally the month it was given, but it's the next unpaid month if that month's salary was already being paid. The advances charged to a month can't total more than the employee's monthly salary.
+
+- **`SalaryPayment`** — `@@unique([employeeId, periodMonth, periodYear])`: one row per employee per month. `advanceDeduction` stores the advances charged to that month at calculation time. `grossSalary`/`netSalary` are **computed once and stored**, not a live view over `Attendance` — so a later attendance correction can't silently change an already-calculated (or already-paid) salary. Recalculating is an explicit action, and is blocked entirely once `paymentAmount > 0` for that month (see [`salary.service.ts`](../backend/src/modules/attendance/salary.service.ts)).
 
 ## What's deliberately *not* in the schema
 
 - **No `stock_ledger` table** — replaced by `ItemUnit`'s own relations (see above).
 - **No line items on `Invoice`** — reads live from `JobCard.parts`/`JobCard.labour`.
-- **No payment fields on `Purchase`** — supplier payments are their own table (`SupplierPayment`), against the supplier's account. `Invoice` and `SalaryPayment`, by contrast, each still carry a single evolving payment snapshot on the row itself.
+- **No payment fields on `Purchase`** — supplier payments are their own table (`SupplierPayment`), against the supplier's account. Invoice payments likewise have their own history table (`InvoicePayment`). Only `SalaryPayment` still carries a single evolving payment snapshot on the row itself.
 - **GST/tax fields exist but are unused** (`Invoice.taxRate`/`taxAmount`) — reserved for a future feature, not yet wired into any calculation.

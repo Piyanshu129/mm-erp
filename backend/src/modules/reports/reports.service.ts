@@ -1,5 +1,5 @@
 import { prisma } from "../../lib/prisma";
-import { LOCKED_STATUSES } from "../../lib/jobCardStatus";
+import { purchaseTotals } from "../purchases/purchases.service";
 
 function startOfToday(): Date {
   const d = new Date();
@@ -20,23 +20,24 @@ function parseRange(from?: string, to?: string) {
 // queries — nothing here is cached or precomputed.
 export async function getDashboardSummary() {
   const todayStart = startOfToday();
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+  const nextMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth() + 1, 1);
 
   const [
     todaysJobCards,
     openJobCards,
-    completedJobs,
-    waitingForParts,
+    cancelledThisMonth,
     todaysInvoices,
     todaysPurchases,
     items,
+    monthPurchases,
   ] = await Promise.all([
     prisma.jobCard.findMany({
       where: { createdAt: { gte: todayStart } },
       select: { vehicleId: true },
     }),
-    prisma.jobCard.count({ where: { status: { notIn: [...LOCKED_STATUSES] } } }),
-    prisma.jobCard.count({ where: { status: "COMPLETED" } }),
-    prisma.jobCard.count({ where: { status: "WAITING_FOR_PARTS" } }),
+    prisma.jobCard.count({ where: { status: "OPEN" } }),
+    prisma.jobCard.count({ where: { status: "CANCELLED", updatedAt: { gte: monthStart } } }),
     prisma.invoice.findMany({
       where: { invoiceDate: { gte: todayStart } },
       select: { totalAmount: true },
@@ -49,6 +50,7 @@ export async function getDashboardSummary() {
       where: { isActive: true },
       select: { currentStock: true, minStock: true },
     }),
+    purchaseTotals({ start: monthStart, end: nextMonthStart }),
   ]);
 
   const todaysSales = todaysInvoices.reduce((sum, inv) => sum + Number(inv.totalAmount), 0);
@@ -62,12 +64,15 @@ export async function getDashboardSummary() {
   return {
     todaysVehicles: new Set(todaysJobCards.map((jc) => jc.vehicleId)).size,
     openJobCards,
-    completedJobs,
-    pendingJobs: waitingForParts,
+    invoicedToday: todaysInvoices.length,
+    cancelledThisMonth,
     todaysSales,
     todaysPurchaseValue,
     lowStockCount,
     outOfStockCount,
+    monthPurchaseValue: monthPurchases.total,
+    monthInventoryPurchaseValue: monthPurchases.inventoryTotal,
+    monthExpenseValue: monthPurchases.expenseTotal,
   };
 }
 
@@ -116,10 +121,11 @@ export async function getPurchasesReport(from?: string, to?: string) {
     dayRow.total += value;
     byDay.set(dayKey, dayRow);
 
-    const supplierRow = bySupplier.get(p.supplier.name) ?? { count: 0, total: 0 };
+    const supplierName = p.supplier?.name ?? "No supplier (expenses)";
+    const supplierRow = bySupplier.get(supplierName) ?? { count: 0, total: 0 };
     supplierRow.count += 1;
     supplierRow.total += value;
-    bySupplier.set(p.supplier.name, supplierRow);
+    bySupplier.set(supplierName, supplierRow);
   }
 
   const grandTotal = purchases.reduce((sum, p) => sum + p.quantity * Number(p.purchaseCost), 0);

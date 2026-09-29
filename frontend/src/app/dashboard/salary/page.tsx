@@ -37,6 +37,7 @@ interface SalaryPayment {
   absentDays: number;
   leaveDays: number;
   grossSalary: string;
+  advanceDeduction: string;
   netSalary: string;
   paymentAmount: string;
   paymentDate: string | null;
@@ -123,7 +124,10 @@ function SalaryPageContent() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Salary" description="Calculate monthly salary from attendance, then record payment." />
+      <PageHeader
+        title="Salary"
+        description="Calculate monthly salary from attendance, minus any advances paid (recorded on the Attendance page), then record payment."
+      />
 
       <div className="flex gap-3">
         <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-auto">
@@ -186,11 +190,11 @@ function SalaryPageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={7} />
+        <TableSkeleton cols={8} />
       ) : employees.length === 0 ? (
         <EmptyState icon={Banknote} title="No active employees" description="Add employees on the Employees page first." />
       ) : (
-        <Table minWidth={850}>
+        <Table minWidth={950}>
           <thead>
             <tr>
               <Th>Employee</Th>
@@ -198,6 +202,7 @@ function SalaryPageContent() {
               <Th>Absent</Th>
               <Th>Leave</Th>
               <Th>Gross</Th>
+              <Th>Advance</Th>
               <Th>Net</Th>
               <Th>Payment</Th>
               <Th />
@@ -213,6 +218,9 @@ function SalaryPageContent() {
                   <Td>{p?.absentDays ?? "-"}</Td>
                   <Td>{p?.leaveDays ?? "-"}</Td>
                   <Td>{p ? `₹${p.grossSalary}` : "-"}</Td>
+                  <Td className={p && Number(p.advanceDeduction) > 0 ? "text-red-700" : ""}>
+                    {p ? (Number(p.advanceDeduction) > 0 ? `− ₹${p.advanceDeduction}` : "-") : "-"}
+                  </Td>
                   <Td>{p ? `₹${p.netSalary}` : "-"}</Td>
                   <Td>
                     {p ? (
@@ -231,9 +239,22 @@ function SalaryPageContent() {
                   </Td>
                   <Td>
                     {p ? (
-                      <button onClick={() => openPayment(p)} className="text-xs text-blue-600 hover:underline">
-                        Payment
-                      </button>
+                      <div className="flex items-center gap-3 whitespace-nowrap">
+                        <button onClick={() => openPayment(p)} className="text-xs text-blue-600 hover:underline">
+                          Payment
+                        </button>
+                        {/* Picks up attendance corrections made since it was
+                            calculated; the backend refuses once payment starts. */}
+                        {Number(p.paymentAmount) === 0 && (
+                          <button
+                            onClick={() => calculate(emp.id)}
+                            disabled={calculatingId === emp.id}
+                            className="text-xs text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50"
+                          >
+                            {calculatingId === emp.id ? "Recalculating..." : "Recalculate"}
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <Button size="sm" variant="secondary" disabled={calculatingId === emp.id} onClick={() => calculate(emp.id)}>
                         {calculatingId === emp.id ? "Calculating..." : "Calculate"}

@@ -36,7 +36,7 @@ interface UnitRow {
   purchase: {
     id: number;
     purchaseCost: string;
-    supplier: { name: string };
+    supplier: { name: string } | null;
   };
   jobCardPart: {
     jobCard: { jobCardNumber: string; vehicle: { registrationNumber: string } };
@@ -145,7 +145,7 @@ function ItemDetailPageContent() {
                     )}
                   </Td>
                   <Td>
-                    {u.purchase.supplier.name}{" "}
+                    {u.purchase.supplier?.name ?? "-"}{" "}
                     <span className="text-gray-400">(Purchase #{u.purchase.id})</span>
                   </Td>
                   <Td>{new Date(u.createdAt).toLocaleDateString()}</Td>

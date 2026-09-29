@@ -10,22 +10,48 @@ function daysInMonth(month: number, year: number): number {
 // regardless of attendance. Net pay deducts one day's pay (monthlySalary /
 // days-in-month) for every absent day and for every leave day taken beyond
 // the employee's monthlyLeaveAllowance — present days and leave within the
-// allowance are fully paid.
+// allowance are fully paid — and then any advances already given against
+// this month's salary.
 export function calculateSalary(
   monthlySalary: number,
   monthlyLeaveAllowance: number,
   month: number,
   year: number,
   absentDays: number,
-  leaveDays: number
+  leaveDays: number,
+  advances = 0
 ) {
   const totalDays = daysInMonth(month, year);
   const perDayRate = monthlySalary / totalDays;
   const unpaidLeaveDays = Math.max(0, leaveDays - monthlyLeaveAllowance);
   const deductionDays = absentDays + unpaidLeaveDays;
   const grossSalary = monthlySalary;
-  const netSalary = Math.max(0, grossSalary - deductionDays * perDayRate);
+  const netSalary = Math.max(0, round2(grossSalary - deductionDays * perDayRate - advances));
   return { grossSalary, netSalary, perDayRate, deductionDays };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export async function advancesForSalaryMonth(employeeId: number, month: number, year: number): Promise<number> {
+  const result = await prisma.employeeAdvance.aggregate({
+    where: { employeeId, salaryMonth: month, salaryYear: year },
+    _sum: { amount: true },
+  });
+  return Number(result._sum.amount ?? 0);
+}
+
+// Keeps an already-calculated salary in step with a change that affects it
+// (an advance added or removed) — but only while nothing has been paid;
+// after that the stored figures are what was actually agreed and paid.
+export async function recalculateIfUnpaid(employeeId: number, month: number, year: number) {
+  const existing = await prisma.salaryPayment.findUnique({
+    where: { employeeId_periodMonth_periodYear: { employeeId, periodMonth: month, periodYear: year } },
+  });
+  if (existing && Number(existing.paymentAmount) === 0) {
+    await calculateMonthlySalary(employeeId, month, year);
+  }
 }
 
 export async function listSalaryPayments(month?: number, year?: number) {
@@ -56,14 +82,18 @@ export async function calculateMonthlySalary(employeeId: number, month: number, 
     throw new ConflictError("This month's salary already has a payment recorded — cannot recalculate");
   }
 
-  const { presentDays, absentDays, leaveDays } = await getMonthlySummary(employeeId, month, year);
+  const [{ presentDays, absentDays, leaveDays }, advanceDeduction] = await Promise.all([
+    getMonthlySummary(employeeId, month, year),
+    advancesForSalaryMonth(employeeId, month, year),
+  ]);
   const { grossSalary, netSalary } = calculateSalary(
     Number(employee.monthlySalary),
     employee.monthlyLeaveAllowance,
     month,
     year,
     absentDays,
-    leaveDays
+    leaveDays,
+    advanceDeduction
   );
 
   return prisma.salaryPayment.upsert({
@@ -76,9 +106,10 @@ export async function calculateMonthlySalary(employeeId: number, month: number, 
       absentDays,
       leaveDays,
       grossSalary,
+      advanceDeduction,
       netSalary,
     },
-    update: { presentDays, absentDays, leaveDays, grossSalary, netSalary },
+    update: { presentDays, absentDays, leaveDays, grossSalary, advanceDeduction, netSalary },
     include: { employee: { select: { id: true, name: true, role: true } } },
   });
 }

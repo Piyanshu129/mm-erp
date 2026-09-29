@@ -20,16 +20,8 @@ export function Badge({ tone = "gray", children }: { tone?: BadgeTone; children:
 }
 
 const JOB_CARD_STATUS_TONE: Record<string, BadgeTone> = {
-  DRAFT: "gray",
-  VEHICLE_RECEIVED: "blue",
-  WORK_STARTED: "blue",
-  WAITING_FOR_PARTS: "amber",
-  WORK_IN_PROGRESS: "blue",
-  COMPLETED: "green",
-  INVOICED: "purple",
-  READY_FOR_DELIVERY: "purple",
-  DELIVERED: "green",
-  CLOSED: "gray",
+  OPEN: "blue",
+  INVOICED: "green",
   CANCELLED: "red",
 };
 

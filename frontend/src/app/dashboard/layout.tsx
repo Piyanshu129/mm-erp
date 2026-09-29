@@ -23,6 +23,7 @@ import {
   UserCog,
   CalendarCheck,
   Banknote,
+  Wallet,
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/context/AuthContext";
@@ -57,6 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/dashboard/vehicles", label: "Vehicles", icon: Car, permission: "VEHICLES" },
       { href: "/dashboard/items", label: "Items", icon: Package, permission: "ITEMS" },
       { href: "/dashboard/suppliers", label: "Suppliers", icon: Truck, permission: "SUPPLIERS" },
+      { href: "/dashboard/expenses", label: "Expenses", icon: Wallet, permission: "PURCHASES" },
     ],
   },
   {

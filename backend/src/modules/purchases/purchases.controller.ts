@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import * as purchasesService from "./purchases.service";
-import { PURCHASE_ITEM_TYPES } from "./purchases.service";
+import { PURCHASE_ITEM_TYPES, PURCHASE_CATEGORIES } from "./purchases.service";
 import { ITEM_CATEGORIES } from "../items/items.controller";
 import { parsePageParams } from "../../lib/pagination";
 import { publicUrlFor, PURCHASE_BILL_FIELD, ITEM_PHOTO_FIELD } from "../../middleware/upload";
@@ -19,6 +19,9 @@ const lineSchema = z.object({
       category: z.enum(ITEM_CATEGORIES),
       uom: z.string().trim().min(1),
       minStock: z.coerce.number().int().min(0).optional(),
+      vehicleMake: optionalString,
+      vehicleModel: optionalString,
+      variant: optionalString,
     })
     .optional(),
   description: optionalString,
@@ -30,7 +33,9 @@ const lineSchema = z.object({
 // Multipart form fields all arrive as strings — the lines themselves come as
 // one JSON-encoded field so each can carry nested new-item details.
 export const createPurchaseSchema = z.object({
-  supplierId: z.coerce.number().int().positive(),
+  // Required for spare parts/paint/tools, omitted for expenses — the service
+  // enforces which.
+  supplierId: z.coerce.number().int().positive().optional(),
   purchaseDate: optionalString,
   remarks: optionalString,
   lines: z
@@ -46,11 +51,21 @@ export const createPurchaseSchema = z.object({
     .pipe(z.array(lineSchema).min(1, "Add at least one item").max(MAX_LINES, `At most ${MAX_LINES} items per purchase`)),
 });
 
+const listQuerySchema = z.object({
+  itemId: z.coerce.number().int().positive().optional(),
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM")
+    .optional(),
+  category: z.enum(PURCHASE_CATEGORIES).optional(),
+  itemType: z.enum(PURCHASE_ITEM_TYPES).optional(),
+});
+
 export async function list(req: Request, res: Response) {
   const page = parsePageParams(req.query);
-  const itemId = req.query.itemId ? Number(req.query.itemId) : undefined;
-  const { total, purchases } = await purchasesService.listPurchases(page, itemId);
-  res.json({ purchases, total, page: page.page, pageSize: page.pageSize });
+  const filters = listQuerySchema.parse(req.query);
+  const { total, purchases, summary } = await purchasesService.listPurchases(page, filters);
+  res.json({ purchases, total, page: page.page, pageSize: page.pageSize, summary });
 }
 
 export async function create(req: Request, res: Response) {

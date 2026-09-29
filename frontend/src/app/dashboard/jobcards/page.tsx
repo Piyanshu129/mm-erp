@@ -14,6 +14,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { JobCardStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 
 interface VehicleOption {
   id: number;
@@ -31,19 +32,7 @@ interface JobCardRow {
   vehicle: { registrationNumber: string; make: string; model: string; customer: { name: string } };
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: "Draft",
-  VEHICLE_RECEIVED: "Vehicle Received",
-  WORK_STARTED: "Work Started",
-  WAITING_FOR_PARTS: "Waiting for Parts",
-  WORK_IN_PROGRESS: "Work in Progress",
-  COMPLETED: "Completed",
-  INVOICED: "Invoiced",
-  READY_FOR_DELIVERY: "Ready for Delivery",
-  DELIVERED: "Delivered",
-  CLOSED: "Closed",
-  CANCELLED: "Cancelled",
-};
+const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   GENERAL_SERVICE: "General Service",
@@ -72,6 +61,7 @@ function JobCardsPageContent() {
   const [expectedDelivery, setExpectedDelivery] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [created, setCreated] = useState<{ id: number; jobCardNumber: string; registrationNumber: string } | null>(null);
 
   async function load(status: string, query: string) {
     setLoading(true);
@@ -104,6 +94,7 @@ function JobCardsPageContent() {
       return;
     }
     setSubmitting(true);
+    setCreated(null);
     try {
       const body = await apiFetch("/job-cards", {
         method: "POST",
@@ -116,9 +107,27 @@ function JobCardsPageContent() {
           expectedDelivery: expectedDelivery || undefined,
         }),
       });
-      router.push(`/dashboard/jobcards/${body.jobCard.id}`);
+      // Back to the plain list, with the new job card at the top and a link
+      // to open it. The vehicleId is dropped from the URL so a reload doesn't
+      // reopen the form.
+      setCreated({
+        id: body.jobCard.id,
+        jobCardNumber: body.jobCard.jobCardNumber,
+        registrationNumber: selectedVehicle.registrationNumber,
+      });
+      setSelectedVehicle(null);
+      setJobType("");
+      setKm("");
+      setComplaint("");
+      setRequiredWork("");
+      setExpectedDelivery("");
+      router.replace("/dashboard/jobcards");
+      setStatusFilter("");
+      setQ("");
+      await load("", "");
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Could not create job card");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -136,6 +145,17 @@ function JobCardsPageContent() {
           </Link>
         }
       />
+
+      {created && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
+          <span>
+            Job card <strong>{created.jobCardNumber}</strong> created for {created.registrationNumber}.
+          </span>
+          <Link href={`/dashboard/jobcards/${created.id}`} className="font-medium text-green-900 hover:underline">
+            Open job card →
+          </Link>
+        </div>
+      )}
 
       {selectedVehicle && (
         <Card className="max-w-lg">

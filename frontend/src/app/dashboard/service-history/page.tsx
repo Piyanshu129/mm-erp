@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/Input";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { JobCardStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 
 interface VehicleOption {
   id: number;
@@ -35,17 +36,7 @@ interface HistoryEntry {
   invoice: { id: number; invoiceNumber: string; totalAmount: string } | null;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: "Draft",
-  VEHICLE_RECEIVED: "Vehicle Received",
-  WORK_STARTED: "Work Started",
-  WAITING_FOR_PARTS: "Waiting for Parts",
-  WORK_IN_PROGRESS: "Work in Progress",
-  COMPLETED: "Completed",
-  INVOICED: "Invoiced",
-  CLOSED: "Closed",
-  CANCELLED: "Cancelled",
-};
+const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
 function ServiceHistoryPageContent() {
   const [q, setQ] = useState("");
