@@ -171,7 +171,15 @@ function CustomerDetailPageContent() {
                   <Input placeholder="Make (e.g. Maruti)" required value={make} onChange={(e) => setMake(e.target.value)} />
                   <Input placeholder="Model (e.g. Swift)" required value={model} onChange={(e) => setModel(e.target.value)} />
                   <Input placeholder="Variant (optional)" value={variant} onChange={(e) => setVariant(e.target.value)} />
-                  <Input type="number" placeholder="Year (optional)" value={year} onChange={(e) => setYear(e.target.value)} />
+                  <Input
+                    type="number"
+                    placeholder="Year (optional)"
+                    min={1980}
+                    max={2100}
+                    step={1}
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                  />
                   <Select value={fuelType} onChange={(e) => setFuelType(e.target.value)}>
                     <option value="">Fuel type (optional)...</option>
                     {FUEL_TYPES.map((f) => (
@@ -191,6 +199,8 @@ function CustomerDetailPageContent() {
                   <Input
                     type="number"
                     placeholder="Current KM (optional)"
+                    min={0}
+                    step={1}
                     value={currentKm}
                     onChange={(e) => setCurrentKm(e.target.value)}
                   />

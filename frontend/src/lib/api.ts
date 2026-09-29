@@ -83,9 +83,26 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
 
   const body = await parseJson(res);
   if (!res.ok) {
-    throw new ApiError(res.status, body?.error ?? "Request failed");
+    throw new ApiError(res.status, formatErrorMessage(body));
   }
   return body;
+}
+
+// The backend's validateBody middleware replies with a generic
+// {"error":"Validation failed", details: ZodError.flatten()} for any bad
+// field — surface which field(s) and why instead of the bare "Validation
+// failed" so the user (and whoever's debugging) isn't left guessing.
+function formatErrorMessage(body: any): string {
+  const fieldErrors = body?.details?.fieldErrors as Record<string, string[]> | undefined;
+  if (fieldErrors) {
+    const messages = Object.entries(fieldErrors)
+      .filter(([, msgs]) => msgs && msgs.length > 0)
+      .map(([field, msgs]) => `${field}: ${msgs[0]}`);
+    if (messages.length > 0) {
+      return messages.join("; ");
+    }
+  }
+  return body?.error ?? "Request failed";
 }
 
 // For endpoints that return a raw file (e.g. the Excel export) rather than

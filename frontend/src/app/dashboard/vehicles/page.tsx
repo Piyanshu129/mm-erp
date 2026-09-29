@@ -272,6 +272,9 @@ function VehiclesPageContent() {
                   <Input
                     type="number"
                     placeholder="Year (optional)"
+                    min={1980}
+                    max={2100}
+                    step={1}
                     value={year}
                     onChange={(e) => setYear(e.target.value)}
                   />
@@ -294,6 +297,8 @@ function VehiclesPageContent() {
                   <Input
                     type="number"
                     placeholder="Current KM (optional)"
+                    min={0}
+                    step={1}
                     value={currentKm}
                     onChange={(e) => setCurrentKm(e.target.value)}
                   />
