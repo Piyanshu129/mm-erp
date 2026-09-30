@@ -64,12 +64,14 @@ export interface AdvanceInput {
   notes?: string;
 }
 
-// Records one advance. The employee row is locked while the total is
-// checked, so two advances entered at the same moment can't together push
-// a month's advances past the monthly salary.
+// Records one advance. Going over the month's salary is allowed, but comes
+// back with a warning to show — salary can't go below ₹0, so the excess
+// isn't recovered from that month's pay. The employee row is locked while
+// the total is worked out, so two advances entered at once see each other.
 export async function recordAdvance(input: AdvanceInput, createdById: number) {
   if (input.amount <= 0) throw new ConflictError("Advance amount must be greater than zero");
   const day = dateOnly(input.date);
+  let warning: string | null = null;
 
   const advance = await prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`
@@ -88,9 +90,9 @@ export async function recordAdvance(input: AdvanceInput, createdById: number) {
     const alreadyTotal = Number(already._sum.amount ?? 0);
     const monthlySalary = Number(employee.monthlySalary);
     if (alreadyTotal + input.amount > monthlySalary + 0.005) {
-      throw new ConflictError(
-        `Advances against ${employee.name}'s ${monthName(month, year)} salary would total ₹${(alreadyTotal + input.amount).toFixed(2)} — more than the monthly salary of ₹${monthlySalary.toFixed(2)}`
-      );
+      warning =
+        `Advances against ${employee.name}'s ${monthName(month, year)} salary now total ₹${(alreadyTotal + input.amount).toFixed(2)} — ` +
+        `more than the monthly salary of ₹${monthlySalary.toFixed(2)}. The salary will come to ₹0; the extra is not deducted automatically.`;
     }
 
     return tx.employeeAdvance.create({
@@ -108,7 +110,7 @@ export async function recordAdvance(input: AdvanceInput, createdById: number) {
   });
 
   await recalculateIfUnpaid(advance.employeeId, advance.salaryMonth, advance.salaryYear);
-  return advance;
+  return { advance, warning };
 }
 
 // Only for correcting a mistake, and only while the salary it was charged

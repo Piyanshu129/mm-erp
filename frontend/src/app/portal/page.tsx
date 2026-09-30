@@ -5,6 +5,7 @@ import { Camera, LogOut, MapPin, CheckCircle2, UserCog, X } from "lucide-react";
 import { RequireEmployeeAuth } from "@/components/RequireEmployeeAuth";
 import { useEmployeePortalAuth } from "@/context/EmployeePortalAuthContext";
 import { employeeApiFetch } from "@/lib/employeePortalApi";
+import { compressImage } from "@/lib/compressImage";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
@@ -86,7 +87,7 @@ function PortalContent() {
       const formData = new FormData();
       formData.set("latitude", String(position.coords.latitude));
       formData.set("longitude", String(position.coords.longitude));
-      if (selfieFile) formData.set("selfie", selfieFile);
+      if (selfieFile) formData.set("selfie", await compressImage(selfieFile));
       await employeeApiFetch("/employee-portal/attendance/punch", { method: "POST", body: formData });
       chooseSelfie(null);
       await load();

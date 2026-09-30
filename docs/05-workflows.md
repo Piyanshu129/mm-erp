@@ -35,6 +35,14 @@ A payment can't exceed the current balance due, which catches a mistyped extra z
 
 Payment routes follow the Suppliers page's own permission (`SUPPLIERS`). Searching and adding suppliers also accepts `PURCHASES`, because the purchase form's supplier box can add a missing supplier inline.
 
+## 2c. Starting a job card: find or add the vehicle
+
+Dashboard → **New Job Card** → `/dashboard/vehicles?for=jobcard`. Search the vehicle number first; capitals are forced as you type. **New vehicle** is offered only when no vehicle has exactly that number, and the searched number carries into the form, so it isn't typed twice. An RC photo is required. A vehicle added this way continues straight to the job card form, `/dashboard/jobcards?vehicleId=…`. That form keeps a draft on the device per vehicle until the job card is created. Once created, the job card's detail page **auto-saves** its details, findings and estimate about a second after typing stops. Blank fields clear on the server, since the update schema turns `""` into `null`.
+
+## 2d. Service schedule
+
+`/dashboard/service-schedule` (`GET /service-schedule`, permission `JOB_CARDS` or `VEHICLES`) lists every active vehicle with its last general service (date, KM, job card), updated KM, and next service due date and KM. Each vehicle is flagged Passed, Due soon (within 30 days or 1,000 km), On track, or Not scheduled. `refreshVehicleService()` in `lib/serviceSchedule.ts` runs whenever a job card is created or its type, KM or status changes. It raises `currentKm` to the highest KM seen, and the latest non-cancelled General Service visit sets the next service to +6 months / +10,000 km from that visit. Cancelling that visit falls back to the previous one.
+
 ## 3. The Job Card lifecycle
 
 This is the central workflow — `/dashboard/jobcards/[id]` is the most complex page in the app because it's driving all of the following through one status field plus several sub-resources.
@@ -52,6 +60,7 @@ CANCELLED
 - **Invoiced is reached only by generating the invoice.** `PATCH` with `status: "INVOICED"` is refused. In the UI, choosing *Invoiced* in the status dropdown opens a confirmation (totals plus an optional discount), which calls `POST /job-cards/:id/invoice`; that sets the status in the same transaction. A job card therefore can't say Invoiced without an invoice behind it.
 - **Invoiced is final.** Once an invoice exists, the status can't be changed back to Open or to Cancelled, and the dropdown is disabled.
 - **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be invoiced.
+- **At least one labour / service line** is required to invoice.
 - **Mandatory before/after photos** are checked at invoicing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`. Before the simplification it guarded the old in-progress/Completed statuses; invoicing was only possible from Completed, so the rule's effect is unchanged.
 - **Assignment validation**: `assignedEmployeeId` must reference an active employee.
 - Side effects: setting `estimateApproved` stamps `estimateApprovedAt`, and setting `finalInspectionStatus` stamps `finalInspectionAt`. (`deliveredAt` remains in the schema but is no longer set, since there is no Delivered status.)

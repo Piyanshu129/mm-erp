@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { JOB_CARD_STATUSES } from "../../lib/jobCardStatus";
+import { refreshVehicleService } from "../../lib/serviceSchedule";
 
 export const JOB_TYPES = ["GENERAL_SERVICE", "ACCIDENTAL_CLAIM", "AC", "DENT_PAINT", "MECHANICAL"] as const;
 
@@ -80,7 +81,7 @@ export async function createJobCard(input: JobCardInput, createdById: number) {
     throw new ConflictError(`Invalid job type: ${input.jobType}`);
   }
 
-  return prisma.$transaction(async (tx) => {
+  const jobCard = await prisma.$transaction(async (tx) => {
     const created = await tx.jobCard.create({
       data: { ...input, jobCardNumber: "PENDING", createdById },
     });
@@ -91,16 +92,27 @@ export async function createJobCard(input: JobCardInput, createdById: number) {
       include: { vehicle: { include: { customer: true } } },
     });
   });
+  // A visit updates the vehicle's KM, and a general service resets its
+  // next-service date/KM.
+  await refreshVehicleService(jobCard.vehicleId);
+  return jobCard;
 }
 
-export interface JobCardUpdateInput extends Partial<JobCardInput> {
+// null clears a field (the job card page auto-saves, including clearing).
+export interface JobCardUpdateInput {
+  jobType?: string | null;
+  kmAtService?: number | null;
+  complaint?: string | null;
+  requiredWork?: string | null;
+  expectedDelivery?: Date | null;
+  notes?: string | null;
   status?: string;
-  inspectionFindings?: string;
-  estimateAmount?: number;
+  inspectionFindings?: string | null;
+  estimateAmount?: number | null;
   estimateApproved?: boolean;
   assignedEmployeeId?: number;
   finalInspectionStatus?: string;
-  finalInspectionBy?: string;
+  finalInspectionBy?: string | null;
 }
 
 // Every photo taken for a phase must cover all four mandatory angles — this
@@ -163,9 +175,13 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
     data.finalInspectionAt = new Date();
   }
 
-  return prisma.jobCard.update({
+  const updated = await prisma.jobCard.update({
     where: { id },
     data: data as Prisma.JobCardUpdateInput,
     include: { vehicle: { include: { customer: true } }, assignedEmployee: { select: { id: true, name: true, role: true } } },
   });
+  if (input.jobType !== undefined || input.kmAtService !== undefined || input.status !== undefined) {
+    await refreshVehicleService(updated.vehicleId);
+  }
+  return updated;
 }

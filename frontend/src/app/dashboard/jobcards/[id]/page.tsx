@@ -2,7 +2,7 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -30,8 +30,33 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { JobCardStatusBadge, Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
+import { compressImage } from "@/lib/compressImage";
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
+
+// What the job card page auto-saves — blanks become null so clearing a
+// field clears it on the server too.
+function autoSavePayload(f: {
+  jobType: string;
+  km: string;
+  complaint: string;
+  requiredWork: string;
+  expectedDelivery: string;
+  notes: string;
+  findings: string;
+  estimateAmount: string;
+}) {
+  return {
+    jobType: f.jobType || null,
+    kmAtService: f.km.trim() === "" ? null : Number(f.km),
+    complaint: f.complaint.trim() || null,
+    requiredWork: f.requiredWork.trim() || null,
+    expectedDelivery: f.expectedDelivery || null,
+    notes: f.notes.trim() || null,
+    inspectionFindings: f.findings.trim() || null,
+    estimateAmount: f.estimateAmount.trim() === "" ? null : Number(f.estimateAmount),
+  };
+}
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -137,7 +162,6 @@ function JobCardDetailPageContent() {
   // label — marking a job card Invoiced means generating its invoice.
   const [showInvoicePrompt, setShowInvoicePrompt] = useState(false);
 
-  const [editingDetails, setEditingDetails] = useState(false);
   const [jobType, setJobType] = useState("");
   const [km, setKm] = useState("");
   const [complaint, setComplaint] = useState("");
@@ -146,7 +170,6 @@ function JobCardDetailPageContent() {
   const [notes, setNotes] = useState("");
 
   const [findings, setFindings] = useState("");
-  const [savingFindings, setSavingFindings] = useState(false);
 
   const [estimateAmount, setEstimateAmount] = useState("");
   const [savingEstimate, setSavingEstimate] = useState(false);
@@ -175,23 +198,79 @@ function JobCardDetailPageContent() {
   const [uploadPhase, setUploadPhase] = useState<"BEFORE" | "AFTER">("BEFORE");
   const [uploadingAngle, setUploadingAngle] = useState<string | null>(null);
 
+  // The auto-saved text fields are filled from the server only on the first
+  // load — later reloads (after adding a part, a photo, ...) leave what's
+  // being typed alone; auto-save keeps the server in step with it.
+  const formInitialised = useRef(false);
+
   async function load() {
-    setLoading(true);
+    if (!formInitialised.current) setLoading(true);
     const body = await apiFetch(`/job-cards/${id}`);
-    setJobCard(body.jobCard);
-    setJobType(body.jobCard.jobType ?? "");
-    setKm(body.jobCard.kmAtService?.toString() ?? "");
-    setComplaint(body.jobCard.complaint ?? "");
-    setRequiredWork(body.jobCard.requiredWork ?? "");
-    setExpectedDelivery(body.jobCard.expectedDelivery ? body.jobCard.expectedDelivery.slice(0, 10) : "");
-    setNotes(body.jobCard.notes ?? "");
-    setFindings(body.jobCard.inspectionFindings ?? "");
-    setEstimateAmount(body.jobCard.estimateAmount ?? "");
-    setAssignEmployeeId(body.jobCard.assignedEmployeeId?.toString() ?? "");
-    setFinalStatus(body.jobCard.finalInspectionStatus ?? "");
-    setFinalBy(body.jobCard.finalInspectionBy ?? "");
+    const jc = body.jobCard;
+    setJobCard(jc);
+    if (!formInitialised.current) {
+      const fields = {
+        jobType: jc.jobType ?? "",
+        km: jc.kmAtService?.toString() ?? "",
+        complaint: jc.complaint ?? "",
+        requiredWork: jc.requiredWork ?? "",
+        expectedDelivery: jc.expectedDelivery ? jc.expectedDelivery.slice(0, 10) : "",
+        notes: jc.notes ?? "",
+        findings: jc.inspectionFindings ?? "",
+        estimateAmount: jc.estimateAmount != null ? String(Number(jc.estimateAmount)) : "",
+      };
+      setJobType(fields.jobType);
+      setKm(fields.km);
+      setComplaint(fields.complaint);
+      setRequiredWork(fields.requiredWork);
+      setExpectedDelivery(fields.expectedDelivery);
+      setNotes(fields.notes);
+      setFindings(fields.findings);
+      setEstimateAmount(fields.estimateAmount);
+      lastSavedRef.current = JSON.stringify(autoSavePayload(fields));
+      formInitialised.current = true;
+    }
+    setAssignEmployeeId(jc.assignedEmployeeId?.toString() ?? "");
+    setFinalStatus(jc.finalInspectionStatus ?? "");
+    setFinalBy(jc.finalInspectionBy ?? "");
     setLoading(false);
   }
+
+  // ---- Auto-save --------------------------------------------------------
+  const lastSavedRef = useRef("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const currentPayload = autoSavePayload({ jobType, km, complaint, requiredWork, expectedDelivery, notes, findings, estimateAmount });
+  const currentPayloadJson = JSON.stringify(currentPayload);
+
+  useEffect(() => {
+    if (!formInitialised.current || currentPayloadJson === lastSavedRef.current) return;
+    const timer = setTimeout(async () => {
+      setSaveState("saving");
+      setSaveError(null);
+      try {
+        await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: currentPayloadJson });
+        lastSavedRef.current = currentPayloadJson;
+        setSaveState("saved");
+        // Keep the header (job type badge, delivery date) in step.
+        setJobCard((prev) =>
+          prev
+            ? {
+                ...prev,
+                jobType: currentPayload.jobType,
+                kmAtService: currentPayload.kmAtService,
+                expectedDelivery: currentPayload.expectedDelivery,
+              }
+            : prev
+        );
+      } catch (err) {
+        setSaveState("error");
+        setSaveError(err instanceof ApiError ? err.message : "Could not save");
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPayloadJson, id]);
 
   useEffect(() => {
     load();
@@ -216,34 +295,6 @@ function JobCardDetailPageContent() {
     }
   }
 
-  async function handleSaveDetails(e: FormEvent) {
-    e.preventDefault();
-    await apiFetch(`/job-cards/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        jobType: jobType || undefined,
-        kmAtService: km || undefined,
-        complaint: complaint || undefined,
-        requiredWork: requiredWork || undefined,
-        expectedDelivery: expectedDelivery || undefined,
-        notes: notes || undefined,
-      }),
-    });
-    setEditingDetails(false);
-    await load();
-  }
-
-  async function handleSaveFindings(e: FormEvent) {
-    e.preventDefault();
-    setSavingFindings(true);
-    try {
-      await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ inspectionFindings: findings }) });
-      await load();
-    } finally {
-      setSavingFindings(false);
-    }
-  }
-
   async function handleEstimateApproval(approved: boolean) {
     setSavingEstimate(true);
     setActionError(null);
@@ -255,20 +306,6 @@ function JobCardDetailPageContent() {
       await load();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Could not save estimate");
-    } finally {
-      setSavingEstimate(false);
-    }
-  }
-
-  async function handleSaveEstimateAmount(e: FormEvent) {
-    e.preventDefault();
-    setSavingEstimate(true);
-    try {
-      await apiFetch(`/job-cards/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ estimateAmount: Number(estimateAmount) }),
-      });
-      await load();
     } finally {
       setSavingEstimate(false);
     }
@@ -400,7 +437,8 @@ function JobCardDetailPageContent() {
       formData.set("mediaType", mediaType);
       formData.set("angle", angle);
       formData.set("phase", uploadPhase);
-      formData.set("file", file);
+      // Photos are shrunk before upload (videos go as they are).
+      formData.set("file", mediaType === "PHOTO" ? await compressImage(file) : file);
       await apiFetch(`/job-cards/${id}/media`, { method: "POST", body: formData });
       await load();
     } catch (err) {
@@ -409,6 +447,37 @@ function JobCardDetailPageContent() {
       setUploadingAngle(null);
     }
   }
+
+  // Sticker serial typed in → look up the piece so its item shows before
+  // it's added.
+  const [serialPreview, setSerialPreview] = useState<
+    | { state: "idle" | "loading" | "notfound" }
+    | { state: "found"; status: string; itemCode: string; name: string; mrp: string }
+  >({ state: "idle" });
+
+  useEffect(() => {
+    const serial = serialInput.trim();
+    if (!/^\d+$/.test(serial)) {
+      setSerialPreview({ state: "idle" });
+      return;
+    }
+    setSerialPreview({ state: "loading" });
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const body = await apiFetch(`/item-units/${serial}`);
+        if (cancelled) return;
+        const u = body.unit;
+        setSerialPreview({ state: "found", status: u.status, itemCode: u.item.itemCode, name: u.item.name, mrp: u.item.sellingPrice });
+      } catch {
+        if (!cancelled) setSerialPreview({ state: "notfound" });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [serialInput]);
 
   async function handleRemoveMedia(mediaId: number) {
     await apiFetch(`/job-cards/${id}/media/${mediaId}`, { method: "DELETE" });
@@ -444,6 +513,19 @@ function JobCardDetailPageContent() {
   const coveredAngles = new Set(
     jobCard.media.filter((m) => m.phase === uploadPhase && m.mediaType === "PHOTO").map((m) => m.angle)
   );
+
+  // What invoicing needs (the backend checks the same): at least one labour
+  // line, and the four mandatory photos both before and after the work.
+  const missingPhotos = (phase: "BEFORE" | "AFTER") => {
+    const have = new Set(jobCard.media.filter((m) => m.phase === phase && m.mediaType === "PHOTO").map((m) => m.angle));
+    return MANDATORY_ANGLES.filter((a) => !have.has(a)).map((a) => a.charAt(0) + a.slice(1).toLowerCase());
+  };
+  const invoiceChecks = [
+    { label: "At least one labour / service line", ok: jobCard.labour.length > 0, missing: "" },
+    { label: "Before-work photos (Front, Rear, Left, Right)", ok: missingPhotos("BEFORE").length === 0, missing: missingPhotos("BEFORE").join(", ") },
+    { label: "After-work photos (Front, Rear, Left, Right)", ok: missingPhotos("AFTER").length === 0, missing: missingPhotos("AFTER").join(", ") },
+  ];
+  const invoiceReady = invoiceChecks.every((c) => c.ok);
 
   return (
     <div className="space-y-8">
@@ -502,6 +584,17 @@ function JobCardDetailPageContent() {
                 This generates the invoice for {jobCard.jobCardNumber}. It will appear in the Invoices tab, and parts and
                 labour can no longer be changed.
               </p>
+              <ul className="space-y-1 text-sm">
+                {invoiceChecks.map((c) => (
+                  <li key={c.label} className={`flex items-start gap-2 ${c.ok ? "text-green-700" : "text-red-700"}`}>
+                    <span className="font-semibold">{c.ok ? "✓" : "✗"}</span>
+                    <span>
+                      {c.label}
+                      {!c.ok && c.missing && <span className="block text-xs">Missing: {c.missing}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
               <div className="rounded-md bg-gray-50 px-3 py-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Parts</span>
@@ -525,7 +618,7 @@ function JobCardDetailPageContent() {
                 <Input type="number" step="0.01" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" disabled={generatingInvoice}>
+                <Button type="submit" disabled={generatingInvoice || !invoiceReady}>
                   <Receipt className="h-4 w-4" /> {generatingInvoice ? "Generating..." : "Generate invoice"}
                 </Button>
                 <Button type="button" variant="secondary" onClick={() => setShowInvoicePrompt(false)}>
@@ -539,16 +632,26 @@ function JobCardDetailPageContent() {
 
       {/* Details */}
       <div>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex max-w-lg items-center justify-between">
           <SectionHeading icon={FileText}>Details</SectionHeading>
-          <Button size="sm" variant="ghost" onClick={() => setEditingDetails((v) => !v)}>
-            <Pencil className="h-3.5 w-3.5" /> {editingDetails ? "Cancel" : "Edit"}
-          </Button>
+          <span
+            className={`text-xs ${
+              saveState === "error" ? "text-red-600" : saveState === "saving" ? "text-gray-500" : "text-green-700"
+            }`}
+            aria-live="polite"
+          >
+            {saveState === "saving"
+              ? "Saving..."
+              : saveState === "saved"
+                ? "All changes saved"
+                : saveState === "error"
+                  ? `Not saved — ${saveError}`
+                  : "Saves automatically"}
+          </span>
         </div>
         <Card className="max-w-lg">
           <CardBody>
-            {editingDetails ? (
-              <form onSubmit={handleSaveDetails} className="space-y-3">
+              <div className="space-y-3">
                 <div>
                   <Label>Job type</Label>
                   <Select value={jobType} onChange={(e) => setJobType(e.target.value)}>
@@ -580,26 +683,7 @@ function JobCardDetailPageContent() {
                   <Label>Notes</Label>
                   <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
                 </div>
-                <Button type="submit">Save</Button>
-              </form>
-            ) : (
-              <dl className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
-                <dt className="text-gray-500">Job type</dt>
-                <dd className="col-span-2 text-gray-900">{jobCard.jobType ? JOB_TYPE_LABELS[jobCard.jobType] : "-"}</dd>
-                <dt className="text-gray-500">KM</dt>
-                <dd className="col-span-2 text-gray-900">{jobCard.kmAtService ?? "-"}</dd>
-                <dt className="text-gray-500">Complaint</dt>
-                <dd className="col-span-2 text-gray-900">{jobCard.complaint ?? "-"}</dd>
-                <dt className="text-gray-500">Required work</dt>
-                <dd className="col-span-2 text-gray-900">{jobCard.requiredWork ?? "-"}</dd>
-                <dt className="text-gray-500">Expected delivery</dt>
-                <dd className="col-span-2 text-gray-900">
-                  {jobCard.expectedDelivery ? new Date(jobCard.expectedDelivery).toLocaleDateString() : "-"}
-                </dd>
-                <dt className="text-gray-500">Notes</dt>
-                <dd className="col-span-2 text-gray-900">{jobCard.notes ?? "-"}</dd>
-              </dl>
-            )}
+              </div>
           </CardBody>
         </Card>
       </div>
@@ -609,17 +693,12 @@ function JobCardDetailPageContent() {
         <SectionHeading icon={ClipboardList}>Initial Inspection</SectionHeading>
         <Card className="max-w-lg">
           <CardBody>
-            <form onSubmit={handleSaveFindings} className="space-y-2">
-              <Textarea
-                placeholder="Findings from the initial inspection..."
-                rows={3}
-                value={findings}
-                onChange={(e) => setFindings(e.target.value)}
-              />
-              <Button type="submit" size="sm" disabled={savingFindings}>
-                {savingFindings ? "Saving..." : "Save findings"}
-              </Button>
-            </form>
+            <Textarea
+              placeholder="Findings from the initial inspection... (saves automatically)"
+              rows={3}
+              value={findings}
+              onChange={(e) => setFindings(e.target.value)}
+            />
           </CardBody>
         </Card>
       </div>
@@ -630,19 +709,15 @@ function JobCardDetailPageContent() {
         <Card className="max-w-lg">
           <CardBody>
             <div className="flex flex-wrap items-center gap-3">
-              <form onSubmit={handleSaveEstimateAmount} className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="Estimate amount"
-                  value={estimateAmount}
-                  onChange={(e) => setEstimateAmount(e.target.value)}
-                  className="w-40"
-                />
-                <Button type="submit" size="sm" variant="secondary" disabled={savingEstimate}>
-                  Save
-                </Button>
-              </form>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                placeholder="Estimate amount"
+                value={estimateAmount}
+                onChange={(e) => setEstimateAmount(e.target.value)}
+                className="w-40"
+              />
               {jobCard.estimateApproved === true ? (
                 <Badge tone="green">Approved</Badge>
               ) : jobCard.estimateApproved === false ? (
@@ -727,7 +802,7 @@ function JobCardDetailPageContent() {
                 {mandatory && !covered && <span className="text-red-500">*</span>}
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -787,7 +862,7 @@ function JobCardDetailPageContent() {
               <div className="mb-2 flex gap-4 text-sm text-gray-700">
                 <label className="flex items-center gap-1.5">
                   <input type="radio" checked={partMode === "serial"} onChange={() => setPartMode("serial")} />
-                  Enter serial number
+                  Sticker serial no.
                 </label>
                 <label className="flex items-center gap-1.5">
                   <input type="radio" checked={partMode === "browse"} onChange={() => setPartMode("browse")} />
@@ -796,17 +871,38 @@ function JobCardDetailPageContent() {
               </div>
               <form onSubmit={handleAddPart} className="space-y-2">
                 {partMode === "serial" ? (
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="Serial number (from the part's sticker)"
-                      value={serialInput}
-                      onChange={(e) => setSerialInput(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Button type="submit" disabled={addingPart}>
-                      Add part
-                    </Button>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="Number written on the part's sticker"
+                        value={serialInput}
+                        onChange={(e) => setSerialInput(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        type="submit"
+                        disabled={addingPart || serialPreview.state !== "found" || serialPreview.status !== "IN_STOCK"}
+                      >
+                        Add part
+                      </Button>
+                    </div>
+                    {serialPreview.state === "loading" && <p className="text-xs text-gray-500">Looking up #{serialInput}...</p>}
+                    {serialPreview.state === "notfound" && (
+                      <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">No part with sticker serial #{serialInput}.</p>
+                    )}
+                    {serialPreview.state === "found" && (
+                      <p
+                        className={`rounded-md px-3 py-2 text-sm ${
+                          serialPreview.status === "IN_STOCK" ? "bg-blue-50 text-blue-800" : "bg-amber-50 text-amber-800"
+                        }`}
+                      >
+                        <strong>#{serialInput}</strong> — {serialPreview.name} ({serialPreview.itemCode}) · MRP ₹
+                        {Number(serialPreview.mrp).toFixed(2)}
+                        {serialPreview.status === "IN_STOCK" ? " · in stock" : " · already used on a job card"}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <>

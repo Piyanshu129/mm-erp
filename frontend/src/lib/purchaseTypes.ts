@@ -16,7 +16,7 @@ export const TYPE_LABELS: Record<string, string> = {
 
 export const CATEGORY_LABELS: Record<PurchaseCategory, string> = {
   INVENTORY: "Inventory",
-  EXPENSE: "Expense",
+  EXPENSE: "Miscellaneous",
 };
 
 export function isInventoryType(t: string): boolean {

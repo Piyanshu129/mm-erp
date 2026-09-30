@@ -51,7 +51,8 @@ const purchaseInclude = {
   supplier: true,
   item: true,
   createdBy: { select: { id: true, name: true } },
-  units: { select: { id: true } },
+  // Each unit's id is the serial number written on its sticker.
+  units: { select: { id: true }, orderBy: { id: "asc" } },
 } as const;
 
 function isInventoryType(itemType: string): boolean {

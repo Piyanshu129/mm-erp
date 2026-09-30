@@ -15,6 +15,7 @@ export interface VehicleInput {
   chassisNumber?: string;
   engineNumber?: string;
   nextServiceDue?: string;
+  nextServiceKm?: number;
   customerId: number;
 }
 
@@ -79,7 +80,7 @@ async function assertCustomerExists(customerId: number) {
   if (!customer) throw new NotFoundError("Customer not found");
 }
 
-export async function createVehicle(input: VehicleInput) {
+export async function createVehicle(input: VehicleInput, rcPhotoUrl: string) {
   await assertCustomerExists(input.customerId);
 
   const registrationNumber = normalizeRegistration(input.registrationNumber);
@@ -89,6 +90,7 @@ export async function createVehicle(input: VehicleInput) {
   return prisma.vehicle.create({
     data: {
       ...input,
+      rcPhotoUrl,
       registrationNumber,
       nextServiceDue: input.nextServiceDue ? new Date(input.nextServiceDue) : undefined,
     },

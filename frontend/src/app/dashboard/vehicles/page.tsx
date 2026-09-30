@@ -2,7 +2,8 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { compressImage } from "@/lib/compressImage";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Car, ClipboardPlus, Plus } from "lucide-react";
@@ -42,19 +43,29 @@ interface CustomerOption {
 const FUEL_TYPES = ["Petrol", "Diesel", "CNG", "Electric", "Hybrid"];
 const TRANSMISSIONS = ["Manual", "Automatic"];
 
+// Vehicle numbers are always capitals with no spaces — the same form the
+// backend stores, so "hr 26 ab 1234" and "HR26AB1234" are one vehicle.
+function normalizeRegistration(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function VehiclesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // ?for=jobcard — arrived from the dashboard's "New Job Card": open the new
-  // vehicle form straight away, and once it's saved carry on to the job card
-  // form for that vehicle.
+  // ?for=jobcard — arrived from the dashboard's "New Job Card": search the
+  // vehicle first; a new vehicle, once saved, carries on to the job card form.
   const forJobCard = searchParams.get("for") === "jobcard";
 
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  // The vehicle number last searched for (normalised) — New Vehicle is only
+  // offered once a search has come back without that exact vehicle.
+  const [searchedFor, setSearchedFor] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const [showForm, setShowForm] = useState(forJobCard);
+  const [showForm, setShowForm] = useState(false);
+  const [rcPhoto, setRcPhoto] = useState<File | null>(null);
   const [customerMode, setCustomerMode] = useState<"existing" | "new">("existing");
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerOption[]>([]);
@@ -89,11 +100,30 @@ function VehiclesPageContent() {
 
   useEffect(() => {
     load("");
+    if (forJobCard) searchInputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
-    await load(q);
+    setShowForm(false);
+    await load(q.trim());
+    setSearchedFor(normalizeRegistration(q));
+  }
+
+  const exactMatch = searchedFor !== "" && vehicles.some((v) => v.registrationNumber === searchedFor);
+  const offerNewVehicle = searchedFor.length >= 4 && !exactMatch && !loading;
+
+  function openNewVehicle() {
+    resetForm();
+    setRegistrationNumber(searchedFor);
+    setShowForm(true);
+  }
+
+  function changeVehicleNumber() {
+    setShowForm(false);
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
   }
 
   async function searchCustomers() {
@@ -120,6 +150,7 @@ function VehiclesPageContent() {
     setChassisNumber("");
     setEngineNumber("");
     setNextServiceDue("");
+    setRcPhoto(null);
     setFormError(null);
   }
 
@@ -145,6 +176,10 @@ function VehiclesPageContent() {
       }
       customerId = -1; // resolved below once we create the customer
     }
+    if (!rcPhoto) {
+      setFormError("Take a photo of the RC (registration certificate)");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -156,23 +191,27 @@ function VehiclesPageContent() {
         customerId = customerBody.customer.id;
       }
 
-      const vehicleBody = await apiFetch("/vehicles", {
-        method: "POST",
-        body: JSON.stringify({
-          registrationNumber,
-          make,
-          model,
-          variant: variant || undefined,
-          year: year || undefined,
-          fuelType: fuelType || undefined,
-          transmission: transmission || undefined,
-          currentKm: currentKm || undefined,
-          chassisNumber: chassisNumber || undefined,
-          engineNumber: engineNumber || undefined,
-          nextServiceDue: nextServiceDue || undefined,
-          customerId,
-        }),
-      });
+      // Multipart — carries the RC photo, shrunk first for a quick upload.
+      const form = new FormData();
+      const fields: Record<string, string> = {
+        registrationNumber,
+        make,
+        model,
+        variant,
+        year,
+        fuelType,
+        transmission,
+        currentKm,
+        chassisNumber,
+        engineNumber,
+        nextServiceDue,
+        customerId: String(customerId),
+      };
+      for (const [key, value] of Object.entries(fields)) {
+        if (value.trim()) form.set(key, value.trim());
+      }
+      form.set("rcPhoto", await compressImage(rcPhoto));
+      const vehicleBody = await apiFetch("/vehicles", { method: "POST", body: form });
 
       if (forJobCard) {
         router.push(`/dashboard/jobcards?vehicleId=${vehicleBody.vehicle.id}`);
@@ -193,31 +232,54 @@ function VehiclesPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Vehicles"
-        description="Search by registration number, make or model. If a vehicle isn't found, add it below."
-        action={
-          <Button onClick={() => setShowForm((s) => !s)}>
-            <Plus className="h-4 w-4" /> New vehicle
-          </Button>
-        }
+        description="Search the vehicle number first. If it isn't on file, you can add it as a new vehicle."
       />
 
+      {forJobCard && !showForm && (
+        <p className="max-w-2xl rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          <strong>New job card:</strong> search the vehicle number. If it&apos;s on file, use its &ldquo;New job card&rdquo;
+          link; if not, add it as a new vehicle and you&apos;ll go straight on to the job card.
+        </p>
+      )}
+
       <form onSubmit={handleSearch} className="flex max-w-md gap-2">
-        <Input placeholder="e.g. HR06AB1234 or Swift" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input
+          ref={searchInputRef}
+          placeholder="Vehicle number, e.g. HR26AB1234"
+          value={q}
+          onChange={(e) => setQ(e.target.value.toUpperCase())}
+          className="uppercase"
+          autoComplete="off"
+        />
         <Button type="submit" variant="secondary">
           <Search className="h-4 w-4" /> Search
         </Button>
       </form>
 
+      {offerNewVehicle && !showForm && (
+        <div className="flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
+          <p className="text-sm text-gray-700">
+            No vehicle <span className="font-mono font-semibold text-gray-900">{searchedFor}</span> on file.
+          </p>
+          <Button type="button" onClick={openNewVehicle}>
+            <Plus className="h-4 w-4" /> New vehicle {searchedFor}
+          </Button>
+        </div>
+      )}
+
       {showForm && (
         <Card className="max-w-lg">
           <CardBody>
             <form onSubmit={handleAddVehicle} className="space-y-4">
-              {forJobCard && (
-                <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                  New job card — add the vehicle first. After saving you&apos;ll go straight to the job card form. Vehicle
-                  already on file? Search for it below and use its &ldquo;New job card&rdquo; link.
-                </p>
-              )}
+              <div className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-3 py-2">
+                <div>
+                  <p className="text-xs text-gray-500">New vehicle</p>
+                  <p className="font-mono text-lg font-semibold text-gray-900">{registrationNumber}</p>
+                </div>
+                <button type="button" onClick={changeVehicleNumber} className="text-xs font-medium text-blue-600 hover:underline">
+                  Change number
+                </button>
+              </div>
               <div>
                 <Label>Owner</Label>
                 <div className="mb-2 flex gap-4 text-sm text-gray-700">
@@ -294,12 +356,6 @@ function VehiclesPageContent() {
               <div className="border-t border-gray-100 pt-3">
                 <Label>Vehicle details</Label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Input
-                    placeholder="Registration number"
-                    required
-                    value={registrationNumber}
-                    onChange={(e) => setRegistrationNumber(e.target.value)}
-                  />
                   <Input placeholder="Make (e.g. Maruti)" required value={make} onChange={(e) => setMake(e.target.value)} />
                   <Input placeholder="Model (e.g. Swift)" required value={model} onChange={(e) => setModel(e.target.value)} />
                   <Input placeholder="Variant (optional)" value={variant} onChange={(e) => setVariant(e.target.value)} />
@@ -349,6 +405,16 @@ function VehiclesPageContent() {
                   <div className="sm:col-span-2">
                     <label className="mb-1 block text-xs text-gray-500">Next service due (optional)</label>
                     <Input type="date" value={nextServiceDue} onChange={(e) => setNextServiceDue(e.target.value)} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>RC photo (required)</Label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setRcPhoto(e.target.files?.[0] ?? null)}
+                      className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">A photo of the registration certificate.</p>
                   </div>
                 </div>
               </div>

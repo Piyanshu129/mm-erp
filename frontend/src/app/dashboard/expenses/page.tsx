@@ -83,7 +83,7 @@ function ExpensesPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Expenses"
-        description="Travel, petrol, food and other business costs — no supplier, no stock."
+        description="Miscellaneous purchases — travel, petrol, food and other business costs. No supplier, no stock."
         action={
           <LinkButton href={`/dashboard/purchases?new=${typeFilter || EXPENSE_TYPES[0]}`}>
             <Plus className="h-4 w-4" /> New expense

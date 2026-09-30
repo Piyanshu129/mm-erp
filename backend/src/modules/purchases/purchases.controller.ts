@@ -4,6 +4,7 @@ import * as purchasesService from "./purchases.service";
 import { PURCHASE_ITEM_TYPES, PURCHASE_CATEGORIES } from "./purchases.service";
 import { ITEM_CATEGORIES } from "../items/items.controller";
 import { parsePageParams } from "../../lib/pagination";
+import { AppError } from "../../lib/errors";
 import { publicUrlFor, PURCHASE_BILL_FIELD, ITEM_PHOTO_FIELD } from "../../middleware/upload";
 
 const optionalString = z.string().trim().min(1).optional();
@@ -82,6 +83,15 @@ export async function create(req: Request, res: Response) {
     const match = ITEM_PHOTO_FIELD.exec(file.fieldname);
     if (match) itemPhotoUrls.set(Number(match[1]), publicUrlFor("items", file.filename));
   }
+
+  // Photos are mandatory: the bill for every purchase, and a photo of every
+  // new item (existing items already have theirs).
+  if (!billUrl) throw new AppError(400, "A photo of the bill / receipt is required");
+  input.lines.forEach((line, i) => {
+    if (line.newItem && !itemPhotoUrls.has(i)) {
+      throw new AppError(400, `Item ${i + 1}: a photo of the new item is required`);
+    }
+  });
 
   const purchases = await purchasesService.createPurchaseEntry({
     supplierId: input.supplierId,

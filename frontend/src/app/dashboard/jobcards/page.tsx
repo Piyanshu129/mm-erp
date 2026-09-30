@@ -42,6 +42,27 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   MECHANICAL: "Mechanical",
 };
 
+interface JobCardDraft {
+  jobType: string;
+  km: string;
+  complaint: string;
+  requiredWork: string;
+  expectedDelivery: string;
+}
+
+function draftKey(vehicleId: number): string {
+  return `mm_jobcard_draft_${vehicleId}`;
+}
+
+function readDraft(vehicleId: number): JobCardDraft | null {
+  try {
+    const raw = window.localStorage.getItem(draftKey(vehicleId));
+    return raw ? (JSON.parse(raw) as JobCardDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
 function JobCardsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -76,10 +97,38 @@ function JobCardsPageContent() {
   useEffect(() => {
     load(prefillStatus, "");
     if (prefillVehicleId) {
-      apiFetch(`/vehicles/${prefillVehicleId}`).then((body) => setSelectedVehicle(body.vehicle));
+      apiFetch(`/vehicles/${prefillVehicleId}`).then((body) => {
+        setSelectedVehicle(body.vehicle);
+        // Bring back anything typed for this vehicle before (see below).
+        const draft = readDraft(body.vehicle.id);
+        if (draft) {
+          setJobType(draft.jobType);
+          setKm(draft.km);
+          setComplaint(draft.complaint);
+          setRequiredWork(draft.requiredWork);
+          setExpectedDelivery(draft.expectedDelivery);
+          setDraftRestored(true);
+        }
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-save the new job card form as it's filled: kept on this device per
+  // vehicle until the job card is created, so nothing typed is lost if the
+  // page is left or reloaded.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!selectedVehicle) return;
+    const draft = { jobType, km, complaint, requiredWork, expectedDelivery };
+    const empty = Object.values(draft).every((v) => v === "");
+    try {
+      if (empty) window.localStorage.removeItem(draftKey(selectedVehicle.id));
+      else window.localStorage.setItem(draftKey(selectedVehicle.id), JSON.stringify(draft));
+    } catch {
+      // Storage unavailable (private mode) — the form still works, just unsaved.
+    }
+  }, [selectedVehicle, jobType, km, complaint, requiredWork, expectedDelivery]);
 
   async function handleFilter(e: FormEvent) {
     e.preventDefault();
@@ -115,6 +164,12 @@ function JobCardsPageContent() {
         jobCardNumber: body.jobCard.jobCardNumber,
         registrationNumber: selectedVehicle.registrationNumber,
       });
+      try {
+        window.localStorage.removeItem(draftKey(selectedVehicle.id));
+      } catch {
+        // ignore
+      }
+      setDraftRestored(false);
       setSelectedVehicle(null);
       setJobType("");
       setKm("");
@@ -165,6 +220,10 @@ function JobCardsPageContent() {
                 New job card for <strong>{selectedVehicle.registrationNumber}</strong> — {selectedVehicle.make}{" "}
                 {selectedVehicle.model} ({selectedVehicle.customer.name})
               </p>
+              <p className="text-xs text-gray-500">
+                {draftRestored ? "Restored what you'd already typed. " : ""}Saves automatically as you type, until you create the
+                job card.
+              </p>
 
               <Select value={jobType} onChange={(e) => setJobType(e.target.value)}>
                 <option value="">Job type (optional)...</option>
@@ -195,7 +254,7 @@ function JobCardsPageContent() {
         <Input
           placeholder="Search by job card # or vehicle number"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setQ(e.target.value.toUpperCase())}
           className="min-w-[220px] flex-1"
         />
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-auto">

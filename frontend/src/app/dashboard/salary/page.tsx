@@ -246,13 +246,9 @@ function SalaryPageContent() {
                         {/* Picks up attendance corrections made since it was
                             calculated; the backend refuses once payment starts. */}
                         {Number(p.paymentAmount) === 0 && (
-                          <button
-                            onClick={() => calculate(emp.id)}
-                            disabled={calculatingId === emp.id}
-                            className="text-xs text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50"
-                          >
+                          <Button size="sm" onClick={() => calculate(emp.id)} disabled={calculatingId === emp.id}>
                             {calculatingId === emp.id ? "Recalculating..." : "Recalculate"}
-                          </button>
+                          </Button>
                         )}
                       </div>
                     ) : (

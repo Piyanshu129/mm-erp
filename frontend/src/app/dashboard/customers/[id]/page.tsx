@@ -15,6 +15,7 @@ import { ActiveBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { InvoiceAccountPanel } from "@/components/InvoiceAccountPanel";
+import { compressImage } from "@/lib/compressImage";
 
 interface Vehicle {
   id: number;
@@ -56,11 +57,13 @@ function CustomerDetailPageContent() {
   const [chassisNumber, setChassisNumber] = useState("");
   const [engineNumber, setEngineNumber] = useState("");
   const [nextServiceDue, setNextServiceDue] = useState("");
+  const [rcPhoto, setRcPhoto] = useState<File | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function resetVehicleForm() {
     setRegNumber("");
+    setRcPhoto(null);
     setMake("");
     setModel("");
     setVariant("");
@@ -88,25 +91,33 @@ function CustomerDetailPageContent() {
   async function handleAddVehicle(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (!rcPhoto) {
+      setFormError("Take a photo of the RC (registration certificate)");
+      return;
+    }
     setSubmitting(true);
     try {
-      await apiFetch("/vehicles", {
-        method: "POST",
-        body: JSON.stringify({
-          registrationNumber: regNumber,
-          make,
-          model,
-          variant: variant || undefined,
-          year: year || undefined,
-          fuelType: fuelType || undefined,
-          transmission: transmission || undefined,
-          currentKm: currentKm || undefined,
-          chassisNumber: chassisNumber || undefined,
-          engineNumber: engineNumber || undefined,
-          nextServiceDue: nextServiceDue || undefined,
-          customerId: Number(id),
-        }),
-      });
+      // Multipart — carries the RC photo, shrunk first for a quick upload.
+      const form = new FormData();
+      const fields: Record<string, string> = {
+        registrationNumber: regNumber,
+        make,
+        model,
+        variant,
+        year,
+        fuelType,
+        transmission,
+        currentKm,
+        chassisNumber,
+        engineNumber,
+        nextServiceDue,
+        customerId: String(id),
+      };
+      for (const [key, value] of Object.entries(fields)) {
+        if (value.trim()) form.set(key, value.trim());
+      }
+      form.set("rcPhoto", await compressImage(rcPhoto));
+      await apiFetch("/vehicles", { method: "POST", body: form });
       resetVehicleForm();
       setShowVehicleForm(false);
       await load();
@@ -164,10 +175,11 @@ function CustomerDetailPageContent() {
               <form onSubmit={handleAddVehicle} className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Input
-                    placeholder="Registration number"
+                    placeholder="Vehicle number, e.g. HR26AB1234"
                     required
                     value={regNumber}
-                    onChange={(e) => setRegNumber(e.target.value)}
+                    onChange={(e) => setRegNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                    className="font-mono uppercase"
                   />
                   <Input placeholder="Make (e.g. Maruti)" required value={make} onChange={(e) => setMake(e.target.value)} />
                   <Input placeholder="Model (e.g. Swift)" required value={model} onChange={(e) => setModel(e.target.value)} />
@@ -218,6 +230,15 @@ function CustomerDetailPageContent() {
                   <div className="sm:col-span-2">
                     <label className="mb-1 block text-xs text-gray-500">Next service due (optional)</label>
                     <Input type="date" value={nextServiceDue} onChange={(e) => setNextServiceDue(e.target.value)} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-gray-700">RC photo (required)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setRcPhoto(e.target.files?.[0] ?? null)}
+                      className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+                    />
                   </div>
                 </div>
                 {formError && <p className="text-sm text-red-600">{formError}</p>}

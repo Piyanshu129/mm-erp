@@ -65,6 +65,9 @@ Every page under `app/dashboard/` is a `"use client"` component that fetches its
 | `/dashboard/jobcards`, `/jobcards/[id]` | `jobCards` + parts/labour/media/invoice sub-resources | The most complex page — status transitions, mandatory before/after photo upload, parts issue by serial lookup, labour lines, invoice generation. See [05-workflows.md](05-workflows.md) for the rules it's enforcing |
 | `/dashboard/invoices`, `/invoices/[id]` | `invoices` | The list shows Total / Paid / Due / status with **View** and **Download**. The detail page has *Print* and *Download PDF* (named `<car number>_<date>.pdf`), plus customer payments: totals, a payment form, and the full payment history |
 | `/dashboard/service-history` | `vehicles` (`/:id/service-history`) | Search by registration, customer mobile, or customer name |
+| `/dashboard/service-schedule` | `service-schedule` | When each vehicle's next general service is due, flagged Passed / Due soon / On track, with filters |
+
+All photo uploads are shrunk in the browser first (`lib/compressImage.ts`: at most 1600px, JPEG). Full-size phone photos over the tunnel had made saving look stuck.
 | `/dashboard/employees` | `employees` | Includes setting/clearing the Employee Portal password |
 | `/dashboard/attendance` | `attendance`, `advances` | Daily grid for all active employees with admin corrections. Each row has an **Advance paid** box and an advance history column for the month; advances are deducted from salary |
 | `/dashboard/salary` | `attendance/salary` (`salary` router) | Calculate (and **Recalculate** while unpaid) + record payments. An Advance column shows what was deducted |

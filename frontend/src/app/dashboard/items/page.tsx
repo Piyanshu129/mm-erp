@@ -15,6 +15,9 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { StockStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import { UOM_OPTIONS } from "@/lib/uom";
+import { formatSerialRanges } from "@/lib/serials";
+import { compressImage } from "@/lib/compressImage";
 
 interface ItemRow {
   id: number;
@@ -28,6 +31,7 @@ interface ItemRow {
   currentStock: number;
   photoUrl: string | null;
   isActive: boolean;
+  inStockSerials: number[];
 }
 
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
@@ -80,7 +84,7 @@ function ItemsPageContent() {
       if (purchaseCost) formData.set("purchaseCost", purchaseCost);
       if (sellingPrice) formData.set("sellingPrice", sellingPrice);
       if (minStock) formData.set("minStock", minStock);
-      if (photo) formData.set("photo", photo);
+      if (photo) formData.set("photo", await compressImage(photo));
 
       await apiFetch("/items", { method: "POST", body: formData });
 
@@ -130,8 +134,14 @@ function ItemsPageContent() {
                 </Select>
               </div>
               <div>
-                <Label>UOM</Label>
-                <Input placeholder="e.g. PCS, LTR, SET" required value={uom} onChange={(e) => setUom(e.target.value)} />
+                <Label>Unit of measure</Label>
+                <Select value={uom} onChange={(e) => setUom(e.target.value)}>
+                  {UOM_OPTIONS.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Purchase cost</Label>
@@ -149,7 +159,7 @@ function ItemsPageContent() {
                 <Label>Photo (optional)</Label>
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
                   className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
                 />
@@ -190,7 +200,7 @@ function ItemsPageContent() {
       ) : items.length === 0 ? (
         <EmptyState icon={Package} title="No items found" description="Try a different search, or add a new item." />
       ) : (
-        <Table minWidth={750}>
+        <Table minWidth={950}>
           <thead>
             <tr>
               <Th></Th>
@@ -200,6 +210,7 @@ function ItemsPageContent() {
               <Th>UOM</Th>
               <Th>MRP</Th>
               <Th>Stock</Th>
+              <Th>Serial Nos. in stock (stickers)</Th>
             </tr>
           </thead>
           <tbody>
@@ -226,6 +237,9 @@ function ItemsPageContent() {
                     <span>{item.currentStock}</span>
                     <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
                   </div>
+                </Td>
+                <Td className="font-mono text-sm text-gray-900">
+                  {item.inStockSerials.length > 0 ? formatSerialRanges(item.inStockSerials) : <span className="text-gray-400">-</span>}
                 </Td>
               </Tr>
             ))}

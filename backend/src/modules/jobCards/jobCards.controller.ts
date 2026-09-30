@@ -17,14 +17,29 @@ export const createJobCardSchema = z.object({
   notes: optionalString,
 });
 
-export const updateJobCardSchema = createJobCardSchema.partial().extend({
+// The job card page auto-saves as it's filled, so an update can also clear
+// a field: an empty string or null sets it back to empty.
+const clearableString = z
+  .string()
+  .trim()
+  .nullable()
+  .optional()
+  .transform((s) => (s === "" ? null : s));
+
+export const updateJobCardSchema = z.object({
+  jobType: z.enum(JOB_TYPES).nullable().optional(),
+  kmAtService: z.coerce.number().int().min(0).nullable().optional(),
+  complaint: clearableString,
+  requiredWork: clearableString,
+  expectedDelivery: z.coerce.date().nullable().optional(),
+  notes: clearableString,
   status: z.enum(JOB_CARD_STATUSES).optional(),
-  inspectionFindings: optionalString,
-  estimateAmount: z.coerce.number().min(0).optional(),
+  inspectionFindings: clearableString,
+  estimateAmount: z.coerce.number().min(0).nullable().optional(),
   estimateApproved: z.coerce.boolean().optional(),
   assignedEmployeeId: z.coerce.number().int().positive().optional(),
   finalInspectionStatus: z.enum(["DONE", "NOT_DONE"]).optional(),
-  finalInspectionBy: optionalString,
+  finalInspectionBy: clearableString,
 });
 
 export async function list(req: Request, res: Response) {

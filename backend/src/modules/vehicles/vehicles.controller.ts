@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import * as vehiclesService from "./vehicles.service";
 import { parsePageParams } from "../../lib/pagination";
+import { AppError } from "../../lib/errors";
+import { publicUrlFor } from "../../middleware/upload";
 
 const optionalString = z.string().trim().min(1).optional();
 
@@ -17,6 +19,7 @@ export const createVehicleSchema = z.object({
   chassisNumber: optionalString,
   engineNumber: optionalString,
   nextServiceDue: z.string().trim().min(1).optional(),
+  nextServiceKm: z.coerce.number().int().min(0).optional(),
   customerId: z.coerce.number().int().positive(),
 });
 
@@ -37,8 +40,10 @@ export async function get(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const input = req.body as z.infer<typeof createVehicleSchema>;
-  const vehicle = await vehiclesService.createVehicle(input);
+  // Multipart form (fields arrive as strings; the schema coerces numbers).
+  const input = createVehicleSchema.parse(req.body);
+  if (!req.file) throw new AppError(400, "RC photo is required");
+  const vehicle = await vehiclesService.createVehicle(input, publicUrlFor("vehicle-rc", req.file.filename));
   res.status(201).json({ vehicle });
 }
 

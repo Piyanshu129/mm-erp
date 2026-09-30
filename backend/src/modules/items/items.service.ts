@@ -40,7 +40,17 @@ export async function listItems(
     prisma.item.findMany({ where, orderBy: { createdAt: "desc" }, ...toSkipTake(page) }),
   ]);
 
-  return { total, items };
+  // The sticker serial numbers of each item's pieces still on the shelf, so
+  // the list shows which physical parts are in stock.
+  const units = await prisma.itemUnit.findMany({
+    where: { itemId: { in: items.map((i) => i.id) }, status: "IN_STOCK" },
+    select: { id: true, itemId: true },
+    orderBy: { id: "asc" },
+  });
+  const serialsByItem = new Map<number, number[]>();
+  for (const u of units) serialsByItem.set(u.itemId, [...(serialsByItem.get(u.itemId) ?? []), u.id]);
+
+  return { total, items: items.map((i) => ({ ...i, inStockSerials: serialsByItem.get(i.id) ?? [] })) };
 }
 
 export async function getItem(id: number) {

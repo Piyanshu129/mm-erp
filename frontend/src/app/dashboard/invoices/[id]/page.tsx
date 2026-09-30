@@ -49,6 +49,21 @@ interface InvoiceDetail {
   };
 }
 
+// PAID / PARTLY PAID / UNPAID, printed on the invoice itself so it shows on
+// the PDF too.
+function PaymentStatusStamp({ total, paid }: { total: number; paid: number }) {
+  const status = paid <= 0 ? "UNPAID" : paid >= total ? "PAID" : "PARTLY PAID";
+  const tone =
+    status === "PAID"
+      ? "border-green-600 text-green-700"
+      : status === "PARTLY PAID"
+        ? "border-amber-500 text-amber-700"
+        : "border-red-600 text-red-700";
+  return (
+    <span className={`inline-block rounded border-2 px-3 py-1 text-sm font-bold tracking-wider ${tone}`}>{status}</span>
+  );
+}
+
 function InvoiceDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -259,6 +274,15 @@ function InvoiceDetailPageContent() {
               <span>₹{invoice.paymentAmount}</span>
             </div>
           )}
+          {Number(invoice.totalAmount) - Number(invoice.paymentAmount) > 0 && (
+            <div className="flex justify-between py-1 font-semibold text-red-700">
+              <span>Balance due</span>
+              <span>₹{(Number(invoice.totalAmount) - Number(invoice.paymentAmount)).toFixed(2)}</span>
+            </div>
+          )}
+          <div className="mt-2 text-right">
+            <PaymentStatusStamp total={Number(invoice.totalAmount)} paid={Number(invoice.paymentAmount)} />
+          </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">Thank you for choosing Motors Mitra.</p>

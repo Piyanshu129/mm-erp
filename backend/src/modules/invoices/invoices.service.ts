@@ -65,6 +65,12 @@ export async function createInvoice(jobCardId: number, discount: number, created
     throw new ConflictError("Only an open job card can be invoiced — reopen it first if it was cancelled");
   }
 
+  // Every invoice bills at least one labour/service line.
+  const labourLines = await prisma.jobCardLabour.count({ where: { jobCardId } });
+  if (labourLines === 0) {
+    throw new ConflictError("Add at least one labour / service line before generating the invoice");
+  }
+
   // The workshop's before/after comparison photos must be done before the
   // customer is billed.
   await assertMandatoryPhotos(jobCardId, "BEFORE");

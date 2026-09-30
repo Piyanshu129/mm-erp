@@ -100,7 +100,14 @@ model Vehicle {
   currentKm          Int?      @map("current_km")
   chassisNumber      String?   @map("chassis_number")
   engineNumber       String?   @map("engine_number")
+  // Next general service: set when the vehicle is added, then moved on
+  // automatically by each General Service job card (see
+  // lib/serviceSchedule.ts) — whichever of the date or the km comes first.
   nextServiceDue     DateTime? @map("next_service_due")
+  nextServiceKm      Int?      @map("next_service_km")
+  // Photo of the registration certificate — required when a vehicle is
+  // added (vehicles added before 2026-09-30 may not have one).
+  rcPhotoUrl         String?   @map("rc_photo_url")
   customerId         Int       @map("customer_id")
   customer           Customer  @relation(fields: [customerId], references: [id])
   isActive           Boolean   @default(true) @map("is_active")

@@ -4,7 +4,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ShoppingCart, Paperclip, Trash2 } from "lucide-react";
+import { Plus, ShoppingCart, Paperclip, Trash2, Printer } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 import { formatINR, todayISO } from "@/lib/format";
 import {
@@ -19,6 +19,9 @@ import {
   typesIn,
 } from "@/lib/purchaseTypes";
 import { MonthNav, TotalTile, CategoryBadge, FilterHeaderSelect, currentMonth, monthLabel } from "@/components/PurchaseListControls";
+import { compressImage } from "@/lib/compressImage";
+import { UOM_OPTIONS } from "@/lib/uom";
+import { formatSerialRanges } from "@/lib/serials";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -73,10 +76,51 @@ interface PurchaseRow {
   } | null;
   description: string | null;
   remarks: string | null;
+  units: { id: number }[];
   createdBy: { name: string };
 }
 
 const PAGE_SIZE = 100;
+
+interface SavedPurchase {
+  item: { itemCode: string; name: string } | null;
+  units: { id: number }[];
+}
+
+interface StickerLine {
+  itemCode: string;
+  itemName: string;
+  serials: number[];
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+}
+
+// One label per physical piece — the serial large, with the item under it —
+// laid out to print on A4 and cut, or just to copy onto the stickers.
+function printStickers(lines: StickerLine[]) {
+  const labels = lines
+    .flatMap((l) =>
+      l.serials.map(
+        (s) =>
+          `<div class="label"><div class="serial">#${s}</div><div class="item">${escapeHtml(l.itemName)}</div><div class="code">${escapeHtml(l.itemCode)}</div></div>`
+      )
+    )
+    .join("");
+  const w = window.open("", "_blank", "width=800,height=900");
+  if (!w) return;
+  w.document.write(`<!doctype html><html><head><title>Sticker serial numbers</title><style>
+    body { font-family: system-ui, sans-serif; margin: 12px; }
+    .sheet { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .label { border: 1px dashed #999; border-radius: 6px; padding: 10px 6px; text-align: center; break-inside: avoid; }
+    .serial { font-size: 28px; font-weight: 700; }
+    .item { font-size: 12px; margin-top: 2px; }
+    .code { font-size: 10px; color: #666; }
+  </style></head><body><div class="sheet">${labels}</div>
+  <script>window.onload = () => window.print();<\/script></body></html>`);
+  w.document.close();
+}
 
 // One item row of the purchase form, before it's sent.
 interface LineDraft {
@@ -345,8 +389,14 @@ function LineEditor({
                   ))}
                 </Select>
               </Field>
-              <Field label="Unit of measure" hint="e.g. PCS, LTR, SET">
-                <Input value={line.newItemUom} onChange={(e) => onChange({ newItemUom: e.target.value })} />
+              <Field label="Unit of measure">
+                <Select value={line.newItemUom} onChange={(e) => onChange({ newItemUom: e.target.value })}>
+                  {UOM_OPTIONS.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Minimum stock (optional)">
                 <Input
@@ -357,10 +407,10 @@ function LineEditor({
                   onChange={(e) => onChange({ newItemMinStock: e.target.value })}
                 />
               </Field>
-              <Field label="Item photo (optional)">
+              <Field label="Item photo" hint="Required — take a photo of the part">
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   onChange={(e) => onChange({ newItemPhoto: e.target.files?.[0] ?? null })}
                   className={FILE_INPUT_CLASS}
                 />
@@ -420,7 +470,8 @@ function lineProblem(line: LineDraft): string | null {
     if (line.itemMode === "existing" && !line.selectedItem) return "search and select an existing item";
     if (line.itemMode === "new") {
       if (!line.newItemName.trim()) return "enter the item name";
-      if (!line.newItemUom.trim()) return "enter the unit of measure";
+      if (!line.newItemUom.trim()) return "choose the unit of measure";
+      if (!line.newItemPhoto) return "take a photo of the new item";
     }
     if (!Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1) return "quantity must be a whole number, at least 1";
     if (line.sellingPrice !== "" && Number(line.sellingPrice) < Number(line.purchaseCost)) {
@@ -471,7 +522,10 @@ function PurchasesPageContent() {
   const [fileInputsKey, setFileInputsKey] = useState(0);
 
   const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<false | "photos" | "saving">(false);
+  // After an inventory purchase is saved: the serial numbers to write on
+  // each piece's sticker.
+  const [stickerList, setStickerList] = useState<StickerLine[] | null>(null);
 
   function listQuery(page: number): string {
     const params = new URLSearchParams({ month, page: String(page), pageSize: String(PAGE_SIZE) });
@@ -613,19 +667,42 @@ function PurchasesPageContent() {
       }
     }
 
+    if (!bill) {
+      setFormError("Take a photo of the bill / receipt");
+      return;
+    }
+
+    // Shrink the photos first — full-size phone photos made saving crawl.
+    setSubmitting("photos");
+    let compressedBill: File;
+    const compressedItemPhotos = new Map<number, File>();
+    try {
+      compressedBill = await compressImage(bill);
+      for (const [i, line] of lines.entries()) {
+        if (isInventoryType(line.itemType) && line.itemMode === "new" && line.newItemPhoto) {
+          compressedItemPhotos.set(i, await compressImage(line.newItemPhoto));
+        }
+      }
+    } catch {
+      setSubmitting(false);
+      setFormError("Could not prepare the photos — please try again");
+      return;
+    }
+
     const formData = new FormData();
     // Expenses aren't bought on a supplier's account, so none is sent.
     if (inventory && selectedSupplier) formData.set("supplierId", String(selectedSupplier.id));
     formData.set("purchaseDate", purchaseDate);
     if (remarks.trim()) formData.set("remarks", remarks.trim());
-    if (bill) formData.set("bill", bill);
+    formData.set("bill", compressedBill);
 
     const payload = lines.map((line, i) => {
       const cost = Number(line.purchaseCost);
       if (!isInventoryType(line.itemType)) {
         return { itemType: line.itemType, description: line.description.trim(), quantity: 1, purchaseCost: cost };
       }
-      if (line.itemMode === "new" && line.newItemPhoto) formData.set(`itemPhoto_${i}`, line.newItemPhoto);
+      const photo = compressedItemPhotos.get(i);
+      if (photo) formData.set(`itemPhoto_${i}`, photo);
       return {
         itemType: line.itemType,
         ...(line.itemMode === "existing"
@@ -648,9 +725,14 @@ function PurchasesPageContent() {
     });
     formData.set("lines", JSON.stringify(payload));
 
-    setSubmitting(true);
+    setSubmitting("saving");
     try {
-      await apiFetch("/purchases", { method: "POST", body: formData });
+      const body = await apiFetch("/purchases", { method: "POST", body: formData });
+      const saved = body.purchases as SavedPurchase[];
+      const stickers = saved
+        .filter((p) => p.item && p.units.length > 0)
+        .map((p) => ({ itemCode: p.item!.itemCode, itemName: p.item!.name, serials: p.units.map((u) => u.id) }));
+      setStickerList(stickers.length > 0 ? stickers : null);
       resetEntry();
       setShowForm(false);
       await loadPurchases();
@@ -689,6 +771,45 @@ function PurchasesPageContent() {
         }
       />
 
+      {stickerList && (
+        <Card className="max-w-3xl border-green-200">
+          <CardBody className="space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-base font-semibold text-gray-900">Purchase saved — write these serial numbers on the stickers</p>
+                <p className="text-sm text-gray-600">
+                  One sticker per piece. The same number is what you type on a job card when using the part.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={() => printStickers(stickerList)}>
+                  <Printer className="h-4 w-4" /> Print stickers
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setStickerList(null)}>
+                  Done
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {stickerList.map((l) => (
+                <div key={l.itemCode + l.serials[0]} className="rounded-md bg-green-50 px-3 py-2">
+                  <p className="text-sm font-medium text-gray-900">
+                    {l.itemName} <span className="font-normal text-gray-500">({l.itemCode})</span>
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {l.serials.map((s) => (
+                      <span key={s} className="rounded border border-green-300 bg-white px-2 py-0.5 font-mono text-base font-semibold text-gray-900">
+                        #{s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       {showForm && (
         <Card className="max-w-3xl">
           <CardBody>
@@ -698,25 +819,18 @@ function PurchasesPageContent() {
                   label="Purchase type"
                   hint={
                     category === "INVENTORY"
-                      ? "Bought from a supplier — each unit gets its own serial number."
-                      : "A business expense — no supplier and no stock."
+                      ? "Spare parts, paint and tools from a supplier — each piece gets its own sticker serial number."
+                      : "Travel, petrol, food and other costs — no supplier and no stock."
                   }
                 >
-                  <Select value={purchaseType} onChange={(e) => changePurchaseType(e.target.value)}>
-                    <optgroup label="Inventory (from a supplier)">
-                      {INVENTORY_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Expense (no supplier)">
-                      {EXPENSE_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </optgroup>
+                  <Select
+                    value={category}
+                    onChange={(e) =>
+                      changePurchaseType(e.target.value === "INVENTORY" ? INVENTORY_TYPES[0] : EXPENSE_TYPES[0])
+                    }
+                  >
+                    <option value="INVENTORY">{CATEGORY_LABELS.INVENTORY}</option>
+                    <option value="EXPENSE">{CATEGORY_LABELS.EXPENSE}</option>
                   </Select>
                 </Field>
                 <Field label={category === "INVENTORY" ? "Purchase date" : "Expense date"}>
@@ -837,11 +951,11 @@ function PurchasesPageContent() {
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Bill / receipt photo (optional)">
+                <Field label="Bill / receipt photo" hint="Required">
                   <input
                     key={fileInputsKey}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     onChange={(e) => setBill(e.target.files?.[0] ?? null)}
                     className={FILE_INPUT_CLASS}
                   />
@@ -852,10 +966,12 @@ function PurchasesPageContent() {
               </div>
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
-              <Button type="submit" disabled={submitting}>
-                {submitting
-                  ? "Saving..."
-                  : `Save ${category === "INVENTORY" ? "purchase" : "expense"} (${lines.length} ${lines.length === 1 ? noun : nounPlural})`}
+              <Button type="submit" disabled={submitting !== false}>
+                {submitting === "photos"
+                  ? "Preparing photos..."
+                  : submitting === "saving"
+                    ? "Uploading and saving..."
+                    : `Save ${category === "INVENTORY" ? "purchase" : "expense"} (${lines.length} ${lines.length === 1 ? noun : nounPlural})`}
               </Button>
             </form>
           </CardBody>
@@ -890,7 +1006,7 @@ function PurchasesPageContent() {
               .join(" · ")}
           />
           <TotalTile
-            label="Expenses"
+            label="Miscellaneous (travel, petrol, food...)"
             value={summary.expenseTotal}
             tone="amber"
             sub={EXPENSE_TYPES.filter((t) => summary.byType[t])
@@ -901,12 +1017,12 @@ function PurchasesPageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={10} />
+        <TableSkeleton cols={11} />
       ) : (
         <Table minWidth={1000}>
           <thead>
             <tr>
-              <Th>Serial No.</Th>
+              <Th>Purchase #</Th>
               <Th>Date</Th>
               <Th>
                 <FilterHeaderSelect
@@ -929,6 +1045,7 @@ function PurchasesPageContent() {
               <Th>Item / Expense</Th>
               <Th>Supplier</Th>
               <Th className="text-right">Qty</Th>
+              <Th>Sticker serials</Th>
               <Th className="text-right">Rate</Th>
               <Th className="text-right">MRP</Th>
               <Th className="text-right">Total</Th>
@@ -937,7 +1054,7 @@ function PurchasesPageContent() {
           <tbody>
             {purchases.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-10">
+                <td colSpan={11} className="px-4 py-10">
                   <EmptyState
                     icon={ShoppingCart}
                     title={categoryFilter || typeFilter ? "No purchases match these filters" : "No purchases this month"}
@@ -977,6 +1094,7 @@ function PurchasesPageContent() {
                 <Td className="text-right">
                   {p.quantity} {p.item?.uom ?? ""}
                 </Td>
+                <Td className="font-mono text-xs text-gray-700">{p.units.length > 0 ? formatSerialRanges(p.units.map((u) => u.id)) : "-"}</Td>
                 <Td className="text-right">{formatINR(p.purchaseCost)}</Td>
                 <Td className="text-right">{p.sellingPrice != null ? formatINR(p.sellingPrice) : "-"}</Td>
                 <Td className="text-right font-medium text-gray-900">{formatINR(p.quantity * Number(p.purchaseCost))}</Td>
@@ -986,7 +1104,7 @@ function PurchasesPageContent() {
           {purchases.length > 0 && (
             <tfoot>
               <tr className="bg-gray-50">
-                <td colSpan={9} className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-medium text-gray-700">
+                <td colSpan={10} className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-medium text-gray-700">
                   {typeFilter
                     ? `${TYPE_LABELS[typeFilter]} total`
                     : categoryFilter

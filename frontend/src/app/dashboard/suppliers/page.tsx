@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, Truck, IndianRupee, History, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { compressImage } from "@/lib/compressImage";
 import { formatINR, todayISO } from "@/lib/format";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -135,7 +136,7 @@ function RecordPaymentCard({
     if (reference.trim()) formData.set("reference", reference.trim());
     if (paidBy.trim()) formData.set("paidBy", paidBy.trim());
     if (notes.trim()) formData.set("notes", notes.trim());
-    if (proof) formData.set("proof", proof);
+    if (proof) formData.set("proof", await compressImage(proof));
 
     setSubmitting(true);
     try {
@@ -186,7 +187,7 @@ function RecordPaymentCard({
             <Field label="Photo of transaction (optional)" hint="Screenshot or photo of the receipt — JPEG, PNG or WEBP, up to 5MB">
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/*"
                 onChange={(e) => setProof(e.target.files?.[0] ?? null)}
                 className={FILE_INPUT_CLASS}
               />

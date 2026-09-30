@@ -22,8 +22,8 @@ export async function list(req: Request, res: Response) {
 
 export async function create(req: Request, res: Response) {
   const input = req.body as z.infer<typeof recordAdvanceSchema>;
-  const advance = await advancesService.recordAdvance(input, req.user!.id);
-  res.status(201).json({ advance });
+  const { advance, warning } = await advancesService.recordAdvance(input, req.user!.id);
+  res.status(201).json({ advance, warning });
 }
 
 export async function remove(req: Request, res: Response) {

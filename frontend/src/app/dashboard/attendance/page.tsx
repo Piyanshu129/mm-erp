@@ -91,6 +91,7 @@ function AttendancePageContent() {
   const [savingAdvanceId, setSavingAdvanceId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const month = date.slice(0, 7);
 
@@ -141,6 +142,8 @@ function AttendancePageContent() {
           `${formatINR(amount)} advance to ${employee.name} recorded — it will be deducted from the ${SHORT_MONTHS[a.salaryMonth - 1]} ${a.salaryYear} salary, because this month's salary is already being paid.`
         );
       }
+      // Saved, but more than the month's salary — tell them so.
+      setWarning(body.warning ?? null);
       await loadAdvances(month);
       return true;
     } catch (err) {
@@ -182,6 +185,16 @@ function AttendancePageContent() {
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {notice && <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">{notice}</p>}
+      {warning && (
+        <div className="flex items-start justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>
+            <strong>Warning:</strong> {warning}
+          </span>
+          <button type="button" onClick={() => setWarning(null)} className="text-xs font-medium text-amber-800 hover:underline">
+            OK
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <TableSkeleton cols={6} />

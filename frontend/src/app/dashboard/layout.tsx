@@ -24,6 +24,7 @@ import {
   CalendarCheck,
   Banknote,
   Wallet,
+  CalendarClock,
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/context/AuthContext";
@@ -49,6 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/dashboard/jobcards", label: "Job Cards", icon: ClipboardList, permission: "JOB_CARDS" },
       { href: "/dashboard/service-history", label: "Service History", icon: History, permission: "JOB_CARDS" },
+      { href: "/dashboard/service-schedule", label: "Service Schedule", icon: CalendarClock, permission: "JOB_CARDS" },
     ],
   },
   {
