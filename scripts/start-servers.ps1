@@ -29,6 +29,9 @@ if (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyC
   Write-Host "Database already running."
 } else {
   Write-Host "Starting the database..."
+  # Not answering, so any lock file is left over from a crash or power cut —
+  # it would make the start fail.
+  Remove-Item "$PgDir\data\postmaster.pid" -Force -ErrorAction SilentlyContinue
   & "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" -l "$PgDir\server.log" -o "-p $DbPort" -w start
   if ($LASTEXITCODE -ne 0) { throw "The database didn't start - see $PgDir\server.log" }
 }

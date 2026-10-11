@@ -126,6 +126,8 @@ if (-not (Test-Path "$PgData\PG_VERSION")) {
 # Running = its port is answering (pg_ctl's own status check can miss it).
 if (-not (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyContinue)) {
   Step "Starting the database server on port $DbPort"
+  # Not answering, so any lock file is left over from a crash - it would block the start.
+  Remove-Item "$PgData\postmaster.pid" -Force -ErrorAction SilentlyContinue
   & "$PgDir\bin\pg_ctl.exe" -D $PgData -l "$PgDir\server.log" -o "-p $DbPort" -w start; Check "Starting PostgreSQL"
 }
 
