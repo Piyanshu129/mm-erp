@@ -31,3 +31,8 @@ backend/backups/
 
 # auto-regenerated Excel export (contains real business data, never committed)
 backend/exports/
+
+# portable Node/PostgreSQL/ngrok installed by setup.bat, and the carried-over
+# tunnel login (prepare-transfer.bat)
+tools/
+transfer/

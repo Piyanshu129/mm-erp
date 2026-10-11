@@ -60,6 +60,16 @@ This one script: starts Postgres if it isn't already running, builds the backend
 
 **Both windows need to stay open** — closing either takes the live site down for everyone. `scripts/db-start.ps1`/`db-stop.ps1`/`db-status.ps1` are separate, smaller scripts for just the database.
 
+## Moving to another Windows PC
+
+Three double-click files in the repo root do the whole move. Nothing needs to be installed on the new PC beforehand, and no admin rights are needed (except possibly once, for the Microsoft Visual C++ runtime that PostgreSQL uses):
+
+1. **`prepare-transfer.bat`** (old PC, [`scripts/prepare-transfer.ps1`](../scripts/prepare-transfer.ps1)): builds `Desktop\MM-transfer\MM` with the code (no `node_modules` or builds), `backend/.env`, `backend/uploads`, a fresh data backup as `backend/backups/transfer-data.json`, and the ngrok login as `transfer/ngrok.yml`. Run it right before moving: anything entered later isn't in it. The folder holds secrets and customer data.
+2. **`setup.bat`** (new PC, once, [`scripts/setup.ps1`](../scripts/setup.ps1)): downloads portable Node.js 22, PostgreSQL 18 (the `@embedded-postgres/windows-x64` npm package) and ngrok into `tools/`; creates the database server (random superuser password in `tools/pgsql/superuser-password.txt`) and the app's login and database from `DATABASE_URL` ([`scripts/setup-db.js`](../scripts/setup-db.js)); runs `npm ci`, migrations, generate and build; then restores `transfer-data.json` (or seeds an empty system if there isn't one). Each step skips itself if already done, so it can simply be re-run after a failure.
+3. **`start-servers.bat`** (new PC, every time, [`scripts/start-servers.ps1`](../scripts/start-servers.ps1)): starts PostgreSQL if needed, then the backend (production mode) and the ngrok tunnel on the same static domain, each in its own window — so the Vercel frontend needs no change.
+
+Only one PC can hold the ngrok domain at a time: close the old PC's backend and tunnel windows before starting the new one.
+
 ## Environment variables
 
 ### Backend (`backend/.env`, see `.env.example` for the full annotated template)
