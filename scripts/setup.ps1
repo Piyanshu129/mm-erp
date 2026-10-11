@@ -128,7 +128,10 @@ if (-not (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction Sil
   Step "Starting the database server on port $DbPort"
   # Not answering, so any lock file is left over from a crash - it would block the start.
   Remove-Item "$PgData\postmaster.pid" -Force -ErrorAction SilentlyContinue
-  & "$PgDir\bin\pg_ctl.exe" -D $PgData -l "$PgDir\server.log" -o "-p $DbPort" -w start; Check "Starting PostgreSQL"
+  # A new log file per start: an old one can stay locked after a crash.
+  New-Item -ItemType Directory -Force "$PgDir\logs" | Out-Null
+  $PgLog = "$PgDir\logs\server-$(Get-Date -Format yyyyMMdd-HHmmss).log"
+  & "$PgDir\bin\pg_ctl.exe" -D $PgData -l $PgLog -o "-p $DbPort" -w start; Check "Starting PostgreSQL (log: $PgLog)"
 }
 
 # ---- 3. Backend packages, database and app login ---------------------------

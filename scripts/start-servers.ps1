@@ -32,8 +32,11 @@ if (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyC
   # Not answering, so any lock file is left over from a crash or power cut —
   # it would make the start fail.
   Remove-Item "$PgDir\data\postmaster.pid" -Force -ErrorAction SilentlyContinue
-  & "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" -l "$PgDir\server.log" -o "-p $DbPort" -w start
-  if ($LASTEXITCODE -ne 0) { throw "The database didn't start - see $PgDir\server.log" }
+  # A new log file per start: an old one can stay locked after a crash.
+  New-Item -ItemType Directory -Force "$PgDir\logs" | Out-Null
+  $PgLog = "$PgDir\logs\server-$(Get-Date -Format yyyyMMdd-HHmmss).log"
+  & "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" -l $PgLog -o "-p $DbPort" -w start
+  if ($LASTEXITCODE -ne 0) { throw "The database didn't start - see $PgLog" }
 }
 
 # Double-clicking again while it's running must not start second copies (a
