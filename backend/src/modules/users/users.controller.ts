@@ -44,6 +44,11 @@ export async function updatePermissions(req: Request, res: Response) {
   res.json({ user });
 }
 
+export async function remove(req: Request, res: Response) {
+  await usersService.deleteUser(Number(req.params.id), req.user!.id);
+  res.status(204).send();
+}
+
 export async function roles(_req: Request, res: Response) {
   const list = await usersService.listRoles();
   res.json({ roles: list });

@@ -129,6 +129,7 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | GET | `/` | list all staff users |
 | POST | `/` | create Admin or Store User |
 | PATCH | `/:id/status` | enable/disable |
+| DELETE | `/:id` | delete a login (not your own, not the last active admin). Erased if they never created anything; otherwise marked `deletedAt` — hidden, can't log in, email freed — so their records keep their name |
 | PATCH | `/:id/permissions` | set the grantable-modules list |
 | GET | `/roles` | lookup for the create form |
 | GET | `/permissions` | the `PERMISSIONS` constant, for the create form's checklist |

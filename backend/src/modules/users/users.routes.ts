@@ -26,5 +26,6 @@ usersRouter.patch(
   validateBody(usersController.updateUserPermissionsSchema),
   asyncHandler(usersController.updatePermissions)
 );
+usersRouter.delete("/:id", asyncHandler(usersController.remove));
 usersRouter.get("/roles", asyncHandler(usersController.roles));
 usersRouter.get("/permissions", asyncHandler(usersController.permissions));

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Eye, EyeOff, Shield, Pencil } from "lucide-react";
+import { Eye, EyeOff, Shield, Pencil, Trash2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { apiFetch, ApiError } from "@/lib/api";
 import { PERMISSIONS, PERMISSION_LABELS, Permission } from "@/lib/permissions";
@@ -116,6 +116,26 @@ function UsersPageContent() {
     await loadUsers();
   }
 
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete(user: UserRow) {
+    if (
+      !window.confirm(
+        `Delete ${user.name} (${user.email})? They won't be able to log in any more. Records they entered keep their name.`
+      )
+    ) {
+      return;
+    }
+    setDeleteError(null);
+    try {
+      await apiFetch(`/users/${user.id}`, { method: "DELETE" });
+      if (editingUser?.id === user.id) setEditingUser(null);
+      await loadUsers();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Could not delete user");
+    }
+  }
+
   function openEditPermissions(user: UserRow) {
     setEditingUser(user);
     setEditPermissions(user.permissions);
@@ -144,6 +164,8 @@ function UsersPageContent() {
   return (
     <div className="space-y-8">
       <PageHeader title="Users" description="Admin and Store User accounts that can sign in." />
+
+      {deleteError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p>}
 
       {loading ? (
         <TableSkeleton />
@@ -196,6 +218,13 @@ function UsersPageContent() {
                     <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
                       {u.isActive ? "Disable" : "Enable"}
                     </Button>
+                    <button
+                      onClick={() => handleDelete(u)}
+                      className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
+                      title="Delete user"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete
+                    </button>
                   </div>
                 </Td>
               </Tr>

@@ -17,6 +17,7 @@ function shape(u: { id: number; name: string; email: string; isActive: boolean; 
 
 export async function listUsers() {
   const users = await prisma.user.findMany({
+    where: { deletedAt: null },
     include: { role: true },
     orderBy: { createdAt: "asc" },
   });
@@ -59,7 +60,7 @@ export async function createUser(input: {
 
 export async function updateUserPermissions(userId: number, permissions: string[]) {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
-  if (!user) throw new NotFoundError("User not found");
+  if (!user || user.deletedAt) throw new NotFoundError("User not found");
   if (user.role.name !== "STORE_USER") {
     throw new ConflictError("Only Store User accounts have editable permissions — Admin already has full access");
   }
@@ -74,7 +75,7 @@ export async function updateUserPermissions(userId: number, permissions: string[
 
 export async function updateUserStatus(userId: number, isActive: boolean) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
+  if (!user || user.deletedAt) {
     throw new NotFoundError("User not found");
   }
 
@@ -93,6 +94,56 @@ export async function updateUserStatus(userId: number, isActive: boolean) {
   }
 
   return shape(updated);
+}
+
+// Deletes a login. A user who never created anything is removed outright.
+// One who has (job cards, purchases, invoices, ...) can't be, without those
+// records losing who made them — so they're marked deleted instead: hidden
+// from the list, unable to log in, sessions ended, and their email freed so
+// it can be given to a new user.
+export async function deleteUser(userId: number, actingUserId: number) {
+  if (userId === actingUserId) throw new ConflictError("You can't delete your own login");
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      role: true,
+      _count: {
+        select: {
+          purchases: true,
+          supplierPayments: true,
+          employeeAdvances: true,
+          invoicePayments: true,
+          estimates: true,
+          jobCards: true,
+          jobCardParts: true,
+          invoices: true,
+          attendanceEdits: true,
+        },
+      },
+    },
+  });
+  if (!user || user.deletedAt) throw new NotFoundError("User not found");
+
+  if (user.role.name === "ADMIN") {
+    const otherAdmins = await prisma.user.count({
+      where: { id: { not: userId }, deletedAt: null, isActive: true, role: { name: "ADMIN" } },
+    });
+    if (otherAdmins === 0) throw new ConflictError("This is the only active admin — it can't be deleted");
+  }
+
+  const hasRecords = Object.values(user._count).some((n) => n > 0);
+  await prisma.$transaction(async (tx) => {
+    await tx.refreshToken.deleteMany({ where: { userId } });
+    if (hasRecords) {
+      await tx.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date(), isActive: false, email: `deleted-${userId}-${Date.now()}@deleted.invalid` },
+      });
+    } else {
+      await tx.user.delete({ where: { id: userId } });
+    }
+  });
 }
 
 export async function listRoles() {
