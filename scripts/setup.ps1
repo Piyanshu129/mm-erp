@@ -5,6 +5,9 @@
 # Everything is installed inside this folder (tools\), with no admin rights
 # needed: Node.js, PostgreSQL, and ngrok. Then it creates the database,
 # loads the data brought over by prepare-transfer.bat, and builds the backend.
+# Without that data (e.g. a copy of the code from GitHub) it starts a fresh,
+# empty system instead: it writes backend\.env with new passwords and asks
+# for the admin login.
 # Failures are caught explicitly: Check() after each program, -ErrorAction
 # Stop on downloads. ("Stop" globally would also trip on harmless warnings
 # that npm and PostgreSQL print.)
@@ -25,13 +28,51 @@ function Download($url, $file) {
 }
 # Native programs report failure by exit code, not by throwing.
 function Check($what) { if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)" } }
+function RandomText($length) {
+  -join ((48..57) + (65..90) + (97..122) | Get-Random -Count $length | ForEach-Object { [char]$_ })
+}
+
+# Any failure ends here, with a clear message before the window waits.
+trap {
+  Write-Host ""
+  Write-Host "SETUP FAILED: $_" -ForegroundColor Red
+  Write-Host "Fix the problem above (often: no internet), then run setup.bat again - it continues where it stopped." -ForegroundColor Yellow
+  exit 1
+}
 
 New-Item -ItemType Directory -Force $Tools | Out-Null
 $Temp = Join-Path $Tools "_downloads"
 New-Item -ItemType Directory -Force $Temp | Out-Null
 
+# A fresh system (no settings carried over): write backend\.env.
 if (-not (Test-Path "$Backend\.env")) {
-  throw "backend\.env is missing. Copy the whole folder made by prepare-transfer.bat, not just the code."
+  Step "Creating the settings for a new, empty system"
+  $adminEmail = Read-Host "Admin login email (press Enter for admin@mm.com)"
+  if (-not $adminEmail) { $adminEmail = "admin@mm.com" }
+  do {
+    $adminPassword = Read-Host "Admin password (at least 6 characters)"
+  } while ($adminPassword.Length -lt 6)
+  $settings = @"
+DATABASE_URL="postgresql://mm_erp:$(RandomText 20)@localhost:5432/mm_erp?schema=public"
+
+PORT=4000
+NODE_ENV=development
+
+CORS_ORIGIN="http://localhost:3000,https://mm-erp-git-master-piyanshu-sainis-projects.vercel.app,https://mm-erp-nine.vercel.app"
+
+JWT_ACCESS_SECRET="$(RandomText 48)"
+JWT_ACCESS_EXPIRES_IN="15m"
+REFRESH_TOKEN_EXPIRES_IN_DAYS=7
+
+REFRESH_COOKIE_NAME="mm_erp_refresh"
+
+ADMIN_NAME="Admin"
+ADMIN_EMAIL="$adminEmail"
+ADMIN_PASSWORD="$adminPassword"
+"@
+  # UTF-8 without a byte-order mark, so the settings loader reads the first line.
+  [IO.File]::WriteAllText("$Backend\.env", $settings, (New-Object Text.UTF8Encoding $false))
+  Write-Host "    saved backend\.env"
 }
 $envText = Get-Content "$Backend\.env" -Raw
 if ($envText -notmatch 'DATABASE_URL="?postgresql://([^:]+):([^@]+)@([^:/]+):(\d+)/([^?"\s]+)') {
@@ -77,7 +118,7 @@ $PgData = Join-Path $PgDir "data"
 $SuperPasswordFile = Join-Path $PgDir "superuser-password.txt"
 if (-not (Test-Path "$PgData\PG_VERSION")) {
   Step "Creating the database server"
-  $superPassword = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+  $superPassword = RandomText 24
   Set-Content -Path $SuperPasswordFile -Value $superPassword -NoNewline -Encoding ascii
   & "$PgDir\bin\initdb.exe" -D $PgData -U postgres --pwfile=$SuperPasswordFile -A scram-sha-256 -E UTF8; Check "initdb"
 }
@@ -113,7 +154,7 @@ try {
     & npx ts-node --transpile-only scripts/restore.ts $dataFile --yes; Check "Loading data"
     Set-Content $marker "Loaded from $dataFile on $(Get-Date)"
   } else {
-    Step "No transferred data found - creating an empty system with the admin login from backend\.env"
+    Step "No transferred data - creating a fresh, empty system with the admin login"
     & npx prisma db seed; Check "Seeding"
     Set-Content $marker "Empty system created on $(Get-Date)"
   }

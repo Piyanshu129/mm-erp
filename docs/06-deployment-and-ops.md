@@ -68,6 +68,8 @@ Three double-click files in the repo root do the whole move. Nothing needs to be
 2. **`setup.bat`** (new PC, once, [`scripts/setup.ps1`](../scripts/setup.ps1)): downloads portable Node.js 22, PostgreSQL 18 (the `@embedded-postgres/windows-x64` npm package) and ngrok into `tools/`; creates the database server (random superuser password in `tools/pgsql/superuser-password.txt`) and the app's login and database from `DATABASE_URL` ([`scripts/setup-db.js`](../scripts/setup-db.js)); runs `npm ci`, migrations, generate and build; then restores `transfer-data.json` (or seeds an empty system if there isn't one). Each step skips itself if already done, so it can simply be re-run after a failure.
 3. **`start-servers.bat`** (new PC, every time, [`scripts/start-servers.ps1`](../scripts/start-servers.ps1)): starts PostgreSQL if needed, then the backend (production mode) and the ngrok tunnel on the same static domain, each in its own window — so the Vercel frontend needs no change.
 
+**Starting fresh instead** (no data carried over): unzip the code from GitHub to `Desktop\MM` and run `setup.bat`. With no `backend/.env` it writes one with new random database and token secrets, asks for the admin email and password, creates the roles and that admin, and asks for the ngrok authtoken.
+
 Only one PC can hold the ngrok domain at a time: close the old PC's backend and tunnel windows before starting the new one.
 
 ## Environment variables
