@@ -23,7 +23,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   SUPPLIERS: "Suppliers",
   PURCHASES: "Purchases",
   JOB_CARDS: "Job Cards",
-  INVOICES: "Invoices",
+  INVOICES: "Draft Invoices",
   REPORTS: "Reports",
   EMPLOYEES: "Employees",
   ATTENDANCE: "Attendance",

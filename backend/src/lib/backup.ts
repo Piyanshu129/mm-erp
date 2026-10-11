@@ -1,8 +1,8 @@
 import { prisma } from "./prisma";
 
 // Dependency order matters twice over: this is the order tables are restored
-// in (each table's foreign keys must already exist). itemUnit needs both
-// item and purchase; jobCardPart needs jobCard, itemUnit, and item.
+// in (each table's foreign keys must already exist). jobCardPart needs
+// jobCard and item; estimateLine needs estimate and item.
 // refresh_tokens is deliberately excluded — sessions are meant to be
 // re-issued, not restored.
 export const BACKUP_TABLES = [
@@ -16,10 +16,11 @@ export const BACKUP_TABLES = [
   "jobCard",
   "purchase",
   "supplierPayment",
-  "itemUnit",
   "jobCardPart",
   "jobCardLabour",
   "jobCardMedia",
+  "estimate",
+  "estimateLine",
   "invoice",
   "invoicePayment",
   "attendance",
@@ -58,7 +59,7 @@ const LEGACY_PURCHASE_PAYMENT_FIELDS = [
 // of them the same way the matching database migration did, so a backup of
 // any age still restores cleanly into the current schema.
 function upgradeLegacyBundle(bundle: BackupBundle): BackupBundle {
-  return upgradeInvoicePayments(upgradeSupplierPayments(bundle));
+  return upgradeQuantityStock(upgradeInvoicePayments(upgradeSupplierPayments(bundle)));
 }
 
 // Before supplier-level payments (2026-09-29) there was no supplierPayment
@@ -124,6 +125,45 @@ function upgradeInvoicePayments(bundle: BackupBundle): BackupBundle {
   return { ...bundle, tables: { ...bundle.tables, invoice, invoicePayment } };
 }
 
+// Before quantity-based stock (2026-10-11) every physical piece had its own
+// itemUnit row and each job card part was one piece. Same conversion as the
+// migration: parts become quantity 1 at the price they were issued at,
+// inventory purchases get their sticker ranges (numbered per item in
+// purchase order), and item codes become 4-digit numbers.
+function upgradeQuantityStock(bundle: BackupBundle): BackupBundle {
+  const purchases = (bundle.tables.purchase ?? []) as Record<string, any>[];
+  const legacy = "itemUnit" in bundle.tables || purchases.some((p) => !("stickerFrom" in p));
+  if (!legacy) return bundle;
+
+  const tables = { ...bundle.tables } as Record<string, unknown[]>;
+  delete tables.itemUnit;
+
+  tables.jobCardPart = ((bundle.tables.jobCardPart ?? []) as Record<string, any>[]).map((p) => {
+    const { itemUnitId: _unused, ...rest } = p;
+    const quantity = rest.quantity ?? 1;
+    return { ...rest, quantity, rate: rest.rate ?? Number(rest.amount) / quantity };
+  });
+
+  const issuedSoFar = new Map<number, number>();
+  tables.purchase = [...purchases]
+    .sort((a, b) => a.id - b.id)
+    .map((p) => {
+      const { units: _units, ...rest } = p;
+      if (rest.itemId == null) return { ...rest, stickerFrom: null, stickerTo: null };
+      const from = (issuedSoFar.get(rest.itemId) ?? 0) + 1;
+      const to = from + rest.quantity - 1;
+      issuedSoFar.set(rest.itemId, to);
+      return { ...rest, stickerFrom: from, stickerTo: to };
+    });
+
+  tables.item = ((bundle.tables.item ?? []) as Record<string, any>[]).map((i) => ({
+    ...i,
+    itemCode: String(i.id).padStart(4, "0"),
+  }));
+
+  return { ...bundle, tables: tables as Record<BackupTable, unknown[]> };
+}
+
 export async function restoreFromBundle(original: BackupBundle): Promise<Record<BackupTable, number>> {
   const bundle = upgradeLegacyBundle(original);
   const counts = {} as Record<BackupTable, number>;
@@ -183,10 +223,11 @@ function tableNameFor(table: BackupTable): string {
     jobCard: "job_cards",
     purchase: "purchases",
     supplierPayment: "supplier_payments",
-    itemUnit: "item_units",
     jobCardPart: "job_card_parts",
     jobCardLabour: "job_card_labour",
     jobCardMedia: "job_card_media",
+    estimate: "estimates",
+    estimateLine: "estimate_lines",
     invoice: "invoices",
     invoicePayment: "invoice_payments",
     attendance: "attendance",

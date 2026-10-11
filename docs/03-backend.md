@@ -76,7 +76,7 @@ Cookie flags differ by environment ([`refreshCookieOptions()`](../backend/src/mo
 Two independent gates, both throwing `UnauthorizedError`/`ForbiddenError` (→ 401/403):
 
 - **`authorize(...roles)`** — hard role check. Used only for the Users and Backup routers (`authorize("ADMIN")`) — these stay Admin-only forever, never grantable.
-- **`requirePermission(...modules)`** — checks `req.user.permissions` unless `req.user.role === "ADMIN"`, in which case it always passes. Most module routers use this: `vehiclesRouter.use(authenticate, requirePermission("VEHICLES"))`. Passing more than one module means "any of these" (e.g. `item-units` is shared by the Items and Job Cards workflows: `requirePermission("ITEMS", "JOB_CARDS")`).
+- **`requirePermission(...modules)`** — checks `req.user.permissions` unless `req.user.role === "ADMIN"`, in which case it always passes. Most module routers use this: `vehiclesRouter.use(authenticate, requirePermission("VEHICLES"))`. Passing more than one module means "any of these" (e.g. `item-lookup` is shared by the Items and Job Cards workflows: `requirePermission("ITEMS", "JOB_CARDS")`).
 
 Because `permissions` is embedded in the JWT rather than looked up per-request, a permission change made via `/dashboard/users` takes effect on that user's *next token refresh* — worst case ~15 minutes — not instantly.
 
@@ -140,10 +140,10 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 `GET /` (search by reg/make/model), `GET /:id`, `GET /:id/service-history`, `POST /`, `PATCH /:id`, `PATCH /:id/status`.
 
 ### Items — `/items` (permission `ITEMS`, [routes](../backend/src/modules/items/items.routes.ts)) — multipart (`photo` field)
-`GET /`, `GET /:id`, `GET /:id/stock-history` (all `ItemUnit`s ever created for this item), `GET /:id/available-units` (only `IN_STOCK` units — feeds Parts Issue's serial picker), `POST /`, `PATCH /:id`, `PATCH /:id/status`.
+`GET /` (each item includes `purchasedQty`; `currentStock` is the available qty), `GET /:id`, `GET /:id/stock-history` (`purchases` with sticker ranges, and `issues` — job card parts that used it), `POST /`, `PATCH /:id`, `PATCH /:id/status`.
 
-### Item Units — `/item-units` (permission `ITEMS` **or** `JOB_CARDS`, [routes](../backend/src/modules/itemUnits/itemUnits.routes.ts))
-`GET /:id` — look up one serial number directly (the "scan/type the sticker" lookup used by Parts Issue).
+### Item lookup — `/item-lookup` (permission `ITEMS` **or** `JOB_CARDS`, [routes](../backend/src/modules/items/itemLookup.routes.ts))
+`GET /:code` — one item by its item code (`2`, `02` or `0002`), with its available quantity — the lookup behind the job card's parts entry and the estimate.
 
 ### Suppliers — `/suppliers` ([routes](../backend/src/modules/suppliers/suppliers.routes.ts))
 | Method | Path | Permission | Notes |
@@ -155,7 +155,7 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | POST | `/:id/payments` | `SUPPLIERS` | multipart: `amount`, `paymentDate`, `paymentMode`, `reference`, `paidBy`, `notes`, optional `proof` photo; rejects paying more than the balance due |
 
 ### Purchases — `/purchases` (permission `PURCHASES`, [routes](../backend/src/modules/purchases/purchases.routes.ts))
-`GET /` accepts optional filters: `month` (`YYYY-MM`, the server's local calendar month), `category` (`INVENTORY`/`EXPENSE`), `itemType`, and `itemId`. It is paged and newest first. Alongside the rows it returns a `summary` of per-type counts and totals (`byType`, `inventoryTotal`, `expenseTotal`, `total`). The summary covers the whole month for every type, whatever the category/type filter, and is summed in the database so it covers rows not on the current page. The same `purchaseTotals()` function feeds the dashboard's month total. `POST /` creates a multi-item purchase entry in one transaction. `supplierId` is required when any line is an inventory type, and omitted for expense-only entries. It's multipart: `supplierId`, `purchaseDate`, `remarks`, a JSON `lines` array, an optional `bill` photo and optional `itemPhoto_<n>` photos for new items. For inventory types it creates one `ItemUnit` per unit of quantity (see [05-workflows.md](05-workflows.md)). There's no payment route here; payments are made per supplier.
+`GET /` accepts optional filters: `month` (`YYYY-MM`, the server's local calendar month), `category` (`INVENTORY`/`EXPENSE`), `itemType`, and `itemId`. It is paged and newest first. Alongside the rows it returns a `summary` of per-type counts and totals (`byType`, `inventoryTotal`, `expenseTotal`, `total`). The summary covers the whole month for every type, whatever the category/type filter, and is summed in the database so it covers rows not on the current page. The same `purchaseTotals()` function feeds the dashboard's month total. `POST /` creates a multi-item purchase entry in one transaction. `supplierId` is required when any line is an inventory type, and omitted for expense-only entries. It's multipart: `supplierId`, `purchaseDate`, `remarks`, a JSON `lines` array, an optional `bill` photo and optional `itemPhoto_<n>` photos for new items. For inventory types it adds the quantity to the item's stock and gives the purchase its sticker range (`stickerFrom`/`stickerTo`, see [05-workflows.md](05-workflows.md)). There's no payment route here; payments are made per supplier.
 
 ### Job Cards — `/job-cards` (permission `JOB_CARDS`, [routes](../backend/src/modules/jobCards/jobCards.routes.ts))
 | Method | Path | Notes |
@@ -164,13 +164,25 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | GET | `/:id` | full detail incl. parts/labour/media totals |
 | POST | `/` | create (requires an existing `vehicleId`) |
 | PATCH | `/:id` | the workhorse endpoint — status changes, inspection findings, estimate, assignment, final inspection all go through here; see [05-workflows.md](05-workflows.md) for the validation rules it enforces |
-| POST | `/:jobCardId/parts` | issue one `ItemUnit` by serial (`{itemUnitId}`) |
-| DELETE | `/:jobCardId/parts/:partId` | un-issue, returns the unit to `IN_STOCK` |
+| POST | `/:jobCardId/parts` | use an item: `{itemId, quantity}` — deducted from stock, refused if not enough |
+| DELETE | `/:jobCardId/parts/:partId` | remove it, putting the quantity back into stock |
 | POST | `/:jobCardId/labour` | add a labour line |
 | DELETE | `/:jobCardId/labour/:labourId` | remove one |
 | POST | `/:jobCardId/media` | upload one photo/video (multipart, `file` field) with `angle`/`phase` |
 | DELETE | `/:jobCardId/media/:mediaId` | remove one |
-| POST | `/:jobCardId/invoice` | generate the invoice (delegates to the Invoices controller — see below) |
+| POST | `/:jobCardId/invoice` | generate the draft invoice, or update it for a reopened job card (delegates to the Invoices controller — see below) |
+| POST | `/:jobCardId/estimate` | create the job card's estimate (pre-filled from its parts and labour), or return the existing one |
+
+### Estimates — `/estimates` (permission `JOB_CARDS`, [routes](../backend/src/modules/estimates/estimates.routes.ts))
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/:id` | the estimate with its lines, job card, vehicle, customer and computed totals (`partsTotal`, `labourTotal`, `subtotal`, `taxAmount`, `totalAmount`) |
+| PATCH | `/:id` | `taxRate`, `notes`, `estimateDate` |
+| POST | `/:id/lines` | `{lineType: PART|LABOUR, itemId?, description?, quantity, rate?}` — an inventory part (by `itemId`), a part not in inventory, or labour |
+| DELETE | `/:id/lines/:lineId` | remove a line |
+| POST | `/:id/approval` | multipart `photo` of the customer-signed estimate → `APPROVED` (locked) |
+
+Everything except the approval photo is refused once the estimate is approved.
 
 All of the parts/labour/media mutations are blocked once the job card is locked (see [02-database-schema.md](02-database-schema.md#job-cards-phase-4-reworked-september-2026) and [05-workflows.md](05-workflows.md)).
 

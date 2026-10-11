@@ -22,7 +22,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { AuthedImage, AuthedVideo } from "@/components/AuthedMedia";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Textarea, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -44,7 +44,6 @@ function autoSavePayload(f: {
   expectedDelivery: string;
   notes: string;
   findings: string;
-  estimateAmount: string;
 }) {
   return {
     jobType: f.jobType || null,
@@ -54,7 +53,6 @@ function autoSavePayload(f: {
     expectedDelivery: f.expectedDelivery || null,
     notes: f.notes.trim() || null,
     inspectionFindings: f.findings.trim() || null,
-    estimateAmount: f.estimateAmount.trim() === "" ? null : Number(f.estimateAmount),
   };
 }
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
@@ -92,8 +90,6 @@ interface JobCardDetail {
   expectedDelivery: string | null;
   notes: string | null;
   inspectionFindings: string | null;
-  estimateAmount: string | null;
-  estimateApproved: boolean | null;
   assignedEmployeeId: number | null;
   assignedEmployee: { id: number; name: string } | null;
   finalInspectionStatus: string | null;
@@ -109,7 +105,8 @@ interface JobCardDetail {
   media: { id: number; mediaType: string; angle: string | null; phase: string; url: string }[];
   parts: {
     id: number;
-    itemUnitId: number;
+    quantity: number;
+    rate: string;
     amount: string;
     item: { itemCode: string; name: string; uom: string };
   }[];
@@ -117,7 +114,14 @@ interface JobCardDetail {
   partsTotal: number;
   labourTotal: number;
   grandTotal: number;
-  invoice: { id: number; invoiceNumber: string } | null;
+  invoice: { id: number; invoiceNumber: string; discount: string; paymentAmount: string } | null;
+  estimate: {
+    id: number;
+    estimateNumber: string;
+    status: "DRAFT" | "APPROVED";
+    approvalPhotoUrl: string | null;
+    approvedAt: string | null;
+  } | null;
 }
 
 interface ItemOption {
@@ -125,12 +129,8 @@ interface ItemOption {
   itemCode: string;
   name: string;
   uom: string;
+  sellingPrice: string;
   currentStock: number;
-}
-
-interface UnitOption {
-  id: number;
-  status: string;
 }
 
 interface Employee {
@@ -159,7 +159,7 @@ function JobCardDetailPageContent() {
   const [discount, setDiscount] = useState("0");
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   // Choosing "Invoiced" opens this confirmation instead of just changing a
-  // label — marking a job card Invoiced means generating its invoice.
+  // label — marking a job card Invoiced means generating its draft invoice.
   const [showInvoicePrompt, setShowInvoicePrompt] = useState(false);
 
   const [jobType, setJobType] = useState("");
@@ -171,8 +171,7 @@ function JobCardDetailPageContent() {
 
   const [findings, setFindings] = useState("");
 
-  const [estimateAmount, setEstimateAmount] = useState("");
-  const [savingEstimate, setSavingEstimate] = useState(false);
+  const [creatingEstimate, setCreatingEstimate] = useState(false);
 
   const [assignEmployeeId, setAssignEmployeeId] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
@@ -181,13 +180,11 @@ function JobCardDetailPageContent() {
   const [finalBy, setFinalBy] = useState("");
   const [savingFinal, setSavingFinal] = useState(false);
 
-  const [partMode, setPartMode] = useState<"serial" | "browse">("serial");
-  const [serialInput, setSerialInput] = useState("");
+  // Parts are added by item code (0001) and the quantity used.
+  const [codeInput, setCodeInput] = useState("");
+  const [partQty, setPartQty] = useState("1");
   const [itemQuery, setItemQuery] = useState("");
   const [itemResults, setItemResults] = useState<ItemOption[]>([]);
-  const [selectedItem, setSelectedItem] = useState<ItemOption | null>(null);
-  const [availableUnits, setAvailableUnits] = useState<UnitOption[]>([]);
-  const [chosenUnitId, setChosenUnitId] = useState("");
   const [addingPart, setAddingPart] = useState(false);
 
   const [labourDesc, setLabourDesc] = useState("");
@@ -217,7 +214,6 @@ function JobCardDetailPageContent() {
         expectedDelivery: jc.expectedDelivery ? jc.expectedDelivery.slice(0, 10) : "",
         notes: jc.notes ?? "",
         findings: jc.inspectionFindings ?? "",
-        estimateAmount: jc.estimateAmount != null ? String(Number(jc.estimateAmount)) : "",
       };
       setJobType(fields.jobType);
       setKm(fields.km);
@@ -226,7 +222,6 @@ function JobCardDetailPageContent() {
       setExpectedDelivery(fields.expectedDelivery);
       setNotes(fields.notes);
       setFindings(fields.findings);
-      setEstimateAmount(fields.estimateAmount);
       lastSavedRef.current = JSON.stringify(autoSavePayload(fields));
       formInitialised.current = true;
     }
@@ -240,7 +235,7 @@ function JobCardDetailPageContent() {
   const lastSavedRef = useRef("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const currentPayload = autoSavePayload({ jobType, km, complaint, requiredWork, expectedDelivery, notes, findings, estimateAmount });
+  const currentPayload = autoSavePayload({ jobType, km, complaint, requiredWork, expectedDelivery, notes, findings });
   const currentPayloadJson = JSON.stringify(currentPayload);
 
   useEffect(() => {
@@ -278,15 +273,27 @@ function JobCardDetailPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const locked = jobCard ? LOCKED_STATUSES.includes(jobCard.status) || !!jobCard.invoice : false;
+  // An invoiced job card can be set back to Open to change it; its draft
+  // invoice is brought up to date when it's invoiced again.
+  const locked = jobCard ? LOCKED_STATUSES.includes(jobCard.status) : false;
 
   async function handleStatusChange(status: string) {
     setActionError(null);
     if (status === "INVOICED") {
+      if (jobCard?.invoice) setDiscount(String(Number(jobCard.invoice.discount)));
       setShowInvoicePrompt(true);
       return;
     }
     setShowInvoicePrompt(false);
+    if (
+      jobCard?.status === "INVOICED" &&
+      status === "OPEN" &&
+      !window.confirm(
+        `Set ${jobCard.jobCardNumber} back to Open to make changes? Its draft invoice ${jobCard.invoice?.invoiceNumber ?? ""} keeps its number and payments, and is updated when you mark the job card Invoiced again.`
+      )
+    ) {
+      return;
+    }
     try {
       await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
       await load();
@@ -295,19 +302,22 @@ function JobCardDetailPageContent() {
     }
   }
 
-  async function handleEstimateApproval(approved: boolean) {
-    setSavingEstimate(true);
+  // Opens the job card's estimate, creating it (pre-filled from the parts
+  // and labour so far) the first time.
+  async function openEstimate() {
+    if (!jobCard) return;
+    if (jobCard.estimate) {
+      router.push(`/dashboard/estimates/${jobCard.estimate.id}`);
+      return;
+    }
+    setCreatingEstimate(true);
     setActionError(null);
     try {
-      await apiFetch(`/job-cards/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ estimateAmount: estimateAmount ? Number(estimateAmount) : undefined, estimateApproved: approved }),
-      });
-      await load();
+      const body = await apiFetch(`/job-cards/${id}/estimate`, { method: "POST" });
+      router.push(`/dashboard/estimates/${body.estimate.id}`);
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Could not save estimate");
-    } finally {
-      setSavingEstimate(false);
+      setActionError(err instanceof ApiError ? err.message : "Could not create estimate");
+      setCreatingEstimate(false);
     }
   }
 
@@ -351,33 +361,28 @@ function JobCardDetailPageContent() {
     setItemResults(body.items);
   }
 
-  async function selectItemForParts(it: ItemOption) {
-    setSelectedItem(it);
-    setItemResults([]);
-    setChosenUnitId("");
-    const body = await apiFetch(`/items/${it.id}/available-units`);
-    setAvailableUnits(body.units);
-  }
-
   async function handleAddPart(e: FormEvent) {
     e.preventDefault();
     setActionError(null);
-    const itemUnitId = partMode === "serial" ? Number(serialInput) : Number(chosenUnitId);
-    if (!itemUnitId) {
-      setActionError(partMode === "serial" ? "Enter a serial number" : "Search for an item and pick a serial");
+    if (codePreview.state !== "found") {
+      setActionError("Enter the item code of an item in inventory");
+      return;
+    }
+    const quantity = Number(partQty);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setActionError("Enter the quantity used — a whole number, at least 1");
       return;
     }
     setAddingPart(true);
     try {
       await apiFetch(`/job-cards/${id}/parts`, {
         method: "POST",
-        body: JSON.stringify({ itemUnitId }),
+        body: JSON.stringify({ itemId: codePreview.item.id, quantity }),
       });
-      setSerialInput("");
-      setSelectedItem(null);
+      setCodeInput("");
+      setPartQty("1");
       setItemQuery("");
-      setAvailableUnits([]);
-      setChosenUnitId("");
+      setItemResults([]);
       await load();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Could not add part");
@@ -448,36 +453,33 @@ function JobCardDetailPageContent() {
     }
   }
 
-  // Sticker serial typed in → look up the piece so its item shows before
-  // it's added.
-  const [serialPreview, setSerialPreview] = useState<
-    | { state: "idle" | "loading" | "notfound" }
-    | { state: "found"; status: string; itemCode: string; name: string; mrp: string }
+  // Item code typed in → look the item up, so its details and available
+  // quantity show before it's added.
+  const [codePreview, setCodePreview] = useState<
+    { state: "idle" | "loading" | "notfound" } | { state: "found"; item: ItemOption }
   >({ state: "idle" });
 
   useEffect(() => {
-    const serial = serialInput.trim();
-    if (!/^\d+$/.test(serial)) {
-      setSerialPreview({ state: "idle" });
+    const code = codeInput.trim();
+    if (!/^\d+$/.test(code) || Number(code) === 0) {
+      setCodePreview({ state: "idle" });
       return;
     }
-    setSerialPreview({ state: "loading" });
+    setCodePreview({ state: "loading" });
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const body = await apiFetch(`/item-units/${serial}`);
-        if (cancelled) return;
-        const u = body.unit;
-        setSerialPreview({ state: "found", status: u.status, itemCode: u.item.itemCode, name: u.item.name, mrp: u.item.sellingPrice });
+        const body = await apiFetch(`/item-lookup/${code}`);
+        if (!cancelled) setCodePreview({ state: "found", item: body.item });
       } catch {
-        if (!cancelled) setSerialPreview({ state: "notfound" });
+        if (!cancelled) setCodePreview({ state: "notfound" });
       }
     }, 300);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [serialInput]);
+  }, [codeInput]);
 
   async function handleRemoveMedia(mediaId: number) {
     await apiFetch(`/job-cards/${id}/media/${mediaId}`, { method: "DELETE" });
@@ -495,7 +497,7 @@ function JobCardDetailPageContent() {
       });
       router.push(`/dashboard/invoices/${body.invoice.id}`);
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Could not generate invoice");
+      setActionError(err instanceof ApiError ? err.message : "Could not generate the draft invoice");
       setGeneratingInvoice(false);
     }
   }
@@ -545,19 +547,20 @@ function JobCardDetailPageContent() {
           </div>
           <div>
             <Label>Status</Label>
-            {/* An invoiced job card's status is final — the backend refuses
-                any change — so the dropdown is locked to match. */}
+            {/* An invoiced job card can go back to Open (to change it), but
+                one with a draft invoice can't be cancelled. */}
             <Select
               value={showInvoicePrompt ? "INVOICED" : jobCard.status}
               onChange={(e) => handleStatusChange(e.target.value)}
-              disabled={!!jobCard.invoice}
               className="w-auto"
             >
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+              {Object.entries(STATUS_LABELS)
+                .filter(([value]) => !(value === "CANCELLED" && jobCard.invoice))
+                .map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
             </Select>
           </div>
         </div>
@@ -569,20 +572,33 @@ function JobCardDetailPageContent() {
               Expected delivery: {new Date(jobCard.expectedDelivery).toLocaleDateString()}
             </span>
           )}
-          {locked && <span className="text-sm text-amber-700">Parts and labour can no longer be changed.</span>}
+          {locked && (
+            <span className="text-sm text-amber-700">
+              {jobCard.status === "INVOICED"
+                ? "Invoiced — set the status back to Open to change parts or labour."
+                : "Cancelled — set the status back to Open to make changes."}
+            </span>
+          )}
         </div>
       </div>
 
       {actionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
-      {showInvoicePrompt && !jobCard.invoice && (
+      {showInvoicePrompt && jobCard.status === "OPEN" && (
         <Card className="max-w-md border-blue-200">
           <CardBody>
             <form onSubmit={handleGenerateInvoice} className="space-y-3">
               <p className="text-base font-semibold text-gray-900">Mark as Invoiced</p>
               <p className="text-sm text-gray-600">
-                This generates the invoice for {jobCard.jobCardNumber}. It will appear in the Invoices tab, and parts and
-                labour can no longer be changed.
+                {jobCard.invoice ? (
+                  <>
+                    This updates draft invoice {jobCard.invoice.invoiceNumber} to match {jobCard.jobCardNumber} as it is now
+                    (same number; payments already received stay on it).
+                  </>
+                ) : (
+                  <>This generates the draft invoice for {jobCard.jobCardNumber}. It will appear in the Draft Invoices tab.</>
+                )}{" "}
+                To change parts or labour afterwards, set the status back to Open.
               </p>
               <ul className="space-y-1 text-sm">
                 {invoiceChecks.map((c) => (
@@ -609,7 +625,7 @@ function JobCardDetailPageContent() {
                   <span>− ₹{(Number(discount) || 0).toFixed(2)}</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-gray-200 pt-1 font-semibold text-gray-900">
-                  <span>Invoice total</span>
+                  <span>Draft invoice total</span>
                   <span>₹{Math.max(0, jobCard.grandTotal - (Number(discount) || 0)).toFixed(2)}</span>
                 </div>
               </div>
@@ -619,7 +635,7 @@ function JobCardDetailPageContent() {
               </div>
               <div className="flex gap-2">
                 <Button type="submit" disabled={generatingInvoice || !invoiceReady}>
-                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Generating..." : "Generate invoice"}
+                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Saving..." : jobCard.invoice ? "Update draft invoice" : "Generate draft invoice"}
                 </Button>
                 <Button type="button" variant="secondary" onClick={() => setShowInvoicePrompt(false)}>
                   Cancel
@@ -707,32 +723,40 @@ function JobCardDetailPageContent() {
       <div>
         <SectionHeading icon={Calculator}>Estimate & Customer Approval</SectionHeading>
         <Card className="max-w-lg">
-          <CardBody>
+          <CardBody className="space-y-3">
+            {jobCard.estimate ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-mono font-semibold text-gray-900">{jobCard.estimate.estimateNumber}</span>
+                {jobCard.estimate.status === "APPROVED" ? (
+                  <Badge tone="green">
+                    Customer approved
+                    {jobCard.estimate.approvedAt ? ` · ${new Date(jobCard.estimate.approvedAt).toLocaleDateString()}` : ""}
+                  </Badge>
+                ) : (
+                  <Badge tone="amber">Awaiting customer approval</Badge>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600">
+                Make an estimate for the customer to sign. It starts with this job card&apos;s parts and labour, and you
+                can add more — including parts that aren&apos;t in inventory.
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-3">
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                placeholder="Estimate amount"
-                value={estimateAmount}
-                onChange={(e) => setEstimateAmount(e.target.value)}
-                className="w-40"
-              />
-              {jobCard.estimateApproved === true ? (
-                <Badge tone="green">Approved</Badge>
-              ) : jobCard.estimateApproved === false ? (
-                <Badge tone="red">Rejected</Badge>
-              ) : (
-                <Badge tone="amber">Pending decision</Badge>
+              <Button size="sm" onClick={openEstimate} disabled={creatingEstimate}>
+                <Calculator className="h-4 w-4" />
+                {creatingEstimate ? "Creating..." : jobCard.estimate ? "Open estimate" : "Create estimate"}
+              </Button>
+              {jobCard.estimate?.approvalPhotoUrl && (
+                <a
+                  href={assetUrl(jobCard.estimate.approvalPhotoUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
+                >
+                  <FileText className="h-4 w-4" /> Signed estimate photo
+                </a>
               )}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" onClick={() => handleEstimateApproval(true)} disabled={savingEstimate}>
-                Customer approved
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => handleEstimateApproval(false)} disabled={savingEstimate}>
-                Customer rejected
-              </Button>
             </div>
           </CardBody>
         </Card>
@@ -784,7 +808,7 @@ function JobCardDetailPageContent() {
           </button>
         </div>
         <p className="mb-2 text-xs text-gray-500">
-          Front, Rear, Left and Right are mandatory for both phases before the job card can be invoiced.
+          Front, Rear, Left and Right are mandatory for both phases before the draft invoice can be generated.
         </p>
         <div className="flex flex-wrap gap-2">
           {MEDIA_ANGLES.map((a) => {
@@ -859,114 +883,101 @@ function JobCardDetailPageContent() {
         {!locked && (
           <Card className="mb-3 max-w-lg">
             <CardBody>
-              <div className="mb-2 flex gap-4 text-sm text-gray-700">
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" checked={partMode === "serial"} onChange={() => setPartMode("serial")} />
-                  Sticker serial no.
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" checked={partMode === "browse"} onChange={() => setPartMode("browse")} />
-                  Browse by item
-                </label>
-              </div>
               <form onSubmit={handleAddPart} className="space-y-2">
-                {partMode === "serial" ? (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <Input
-                        type="number"
-                        min={1}
-                        placeholder="Number written on the part's sticker"
-                        value={serialInput}
-                        onChange={(e) => setSerialInput(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="submit"
-                        disabled={addingPart || serialPreview.state !== "found" || serialPreview.status !== "IN_STOCK"}
-                      >
-                        Add part
-                      </Button>
-                    </div>
-                    {serialPreview.state === "loading" && <p className="text-xs text-gray-500">Looking up #{serialInput}...</p>}
-                    {serialPreview.state === "notfound" && (
-                      <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">No part with sticker serial #{serialInput}.</p>
-                    )}
-                    {serialPreview.state === "found" && (
-                      <p
-                        className={`rounded-md px-3 py-2 text-sm ${
-                          serialPreview.status === "IN_STOCK" ? "bg-blue-50 text-blue-800" : "bg-amber-50 text-amber-800"
-                        }`}
-                      >
-                        <strong>#{serialInput}</strong> — {serialPreview.name} ({serialPreview.itemCode}) · MRP ₹
-                        {Number(serialPreview.mrp).toFixed(2)}
-                        {serialPreview.status === "IN_STOCK" ? " · in stock" : " · already used on a job card"}
-                      </p>
-                    )}
+                <div className="grid grid-cols-[1fr_6rem_auto] items-end gap-2">
+                  <div>
+                    <Label>Item code</Label>
+                    <Input
+                      inputMode="numeric"
+                      placeholder="e.g. 0001"
+                      value={codeInput}
+                      onChange={(e) => setCodeInput(e.target.value.replace(/\D/g, ""))}
+                    />
                   </div>
-                ) : (
-                  <>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Search item code, name or part number"
-                        value={itemQuery}
-                        onChange={(e) => setItemQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            searchItems();
-                          }
-                        }}
-                        className="flex-1"
-                      />
-                      <Button type="button" variant="secondary" onClick={searchItems}>
-                        <Search className="h-4 w-4" /> Search
-                      </Button>
-                    </div>
-                    {selectedItem ? (
-                      <div className="space-y-2">
-                        <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                          Selected: <strong>{selectedItem.itemCode}</strong> — {selectedItem.name} ({availableUnits.length}{" "}
-                          in stock)
-                        </p>
-                        {availableUnits.length > 0 ? (
-                          <div className="flex gap-2">
-                            <Select value={chosenUnitId} onChange={(e) => setChosenUnitId(e.target.value)} className="flex-1">
-                              <option value="">Select a serial...</option>
-                              {availableUnits.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  Serial #{u.id}
-                                </option>
-                              ))}
-                            </Select>
-                            <Button type="submit" disabled={addingPart || !chosenUnitId}>
-                              Add part
-                            </Button>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-500">No units in stock for this item.</p>
-                        )}
-                      </div>
-                    ) : (
-                      itemResults.length > 0 && (
-                        <ul className="max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
-                          {itemResults.map((it) => (
-                            <li key={it.id}>
-                              <button
-                                type="button"
-                                onClick={() => selectItemForParts(it)}
-                                className="block w-full px-3 py-2 text-left hover:bg-gray-50"
-                              >
-                                {it.itemCode} — {it.name} (stock: {it.currentStock})
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )
-                    )}
-                  </>
+                  <div>
+                    <Label>Qty used</Label>
+                    <Input type="number" min={1} step={1} value={partQty} onChange={(e) => setPartQty(e.target.value)} />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={
+                      addingPart ||
+                      codePreview.state !== "found" ||
+                      !(Number(partQty) >= 1) ||
+                      Number(partQty) > codePreview.item.currentStock
+                    }
+                  >
+                    Add part
+                  </Button>
+                </div>
+                {codePreview.state === "loading" && <p className="text-xs text-gray-500">Looking up item {codeInput}...</p>}
+                {codePreview.state === "notfound" && (
+                  <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">No item with code {codeInput}.</p>
+                )}
+                {codePreview.state === "found" && (
+                  <div
+                    className={`rounded-md px-3 py-2 text-sm ${
+                      codePreview.item.currentStock > 0 ? "bg-blue-50 text-blue-900" : "bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    <p>
+                      <strong>{codePreview.item.itemCode}</strong> — {codePreview.item.name} · MRP ₹
+                      {Number(codePreview.item.sellingPrice).toFixed(2)}
+                    </p>
+                    <p className="mt-0.5">
+                      Available: <strong>{codePreview.item.currentStock}</strong> {codePreview.item.uom}
+                      {Number(partQty) >= 1 && Number(partQty) <= codePreview.item.currentStock && (
+                        <>
+                          {" "}
+                          · Used: {Number(partQty)} · Balance: <strong>{codePreview.item.currentStock - Number(partQty)}</strong>
+                        </>
+                      )}
+                      {Number(partQty) > codePreview.item.currentStock && (
+                        <span className="text-red-700"> · only {codePreview.item.currentStock} available</span>
+                      )}
+                    </p>
+                  </div>
                 )}
               </form>
+
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <p className="mb-1 text-xs text-gray-500">Don&apos;t know the code? Find the item:</p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Search by name or part number"
+                    value={itemQuery}
+                    onChange={(e) => setItemQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        searchItems();
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                  <Button type="button" variant="secondary" onClick={searchItems}>
+                    <Search className="h-4 w-4" /> Search
+                  </Button>
+                </div>
+                {itemResults.length > 0 && (
+                  <ul className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 text-sm">
+                    {itemResults.map((it) => (
+                      <li key={it.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCodeInput(it.itemCode);
+                            setItemResults([]);
+                          }}
+                          className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                        >
+                          {it.itemCode} — {it.name} (available: {it.currentStock})
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </CardBody>
           </Card>
         )}
@@ -977,8 +988,10 @@ function JobCardDetailPageContent() {
           <Table minWidth={550}>
             <thead>
               <tr>
+                <Th>Item Code</Th>
                 <Th>Item</Th>
-                <Th>Serial No.</Th>
+                <Th>Qty Used</Th>
+                <Th>Rate</Th>
                 <Th>Amount</Th>
                 {!locked && <Th></Th>}
               </tr>
@@ -986,10 +999,12 @@ function JobCardDetailPageContent() {
             <tbody>
               {jobCard.parts.map((p) => (
                 <Tr key={p.id}>
+                  <Td className="font-mono">{p.item.itemCode}</Td>
+                  <Td>{p.item.name}</Td>
                   <Td>
-                    {p.item.itemCode} — {p.item.name}
+                    {p.quantity} {p.item.uom}
                   </Td>
-                  <Td className="font-mono">#{p.itemUnitId}</Td>
+                  <Td>₹{p.rate}</Td>
                   <Td>₹{p.amount}</Td>
                   {!locked && (
                     <Td>
@@ -1121,13 +1136,13 @@ function JobCardDetailPageContent() {
           </div>
 
           <div className="mt-3 border-t border-gray-200 pt-3">
-            {jobCard.invoice ? (
+            {jobCard.invoice && (
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 <Link
                   href={`/dashboard/invoices/${jobCard.invoice.id}`}
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
                 >
-                  <Receipt className="h-4 w-4" /> View invoice {jobCard.invoice.invoiceNumber}
+                  <Receipt className="h-4 w-4" /> View draft invoice {jobCard.invoice.invoiceNumber}
                 </Link>
                 <Link
                   href={`/dashboard/invoices/${jobCard.invoice.id}?download=1`}
@@ -1136,21 +1151,23 @@ function JobCardDetailPageContent() {
                   Download PDF
                 </Link>
               </div>
-            ) : jobCard.status === "OPEN" ? (
+            )}
+            {jobCard.status === "OPEN" ? (
               <Button
                 type="button"
-                className="w-full"
+                className={jobCard.invoice ? "mt-2 w-full" : "w-full"}
                 onClick={() => {
                   setActionError(null);
+                  if (jobCard.invoice) setDiscount(String(Number(jobCard.invoice.discount)));
                   setShowInvoicePrompt(true);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
               >
-                <Receipt className="h-4 w-4" /> Mark as Invoiced
+                <Receipt className="h-4 w-4" /> {jobCard.invoice ? "Update draft invoice" : "Mark as Invoiced"}
               </Button>
-            ) : (
+            ) : jobCard.status === "CANCELLED" ? (
               <p className="text-xs text-gray-500">This job card is cancelled. Set it back to Open to invoice it.</p>
-            )}
+            ) : null}
           </div>
         </CardBody>
       </Card>

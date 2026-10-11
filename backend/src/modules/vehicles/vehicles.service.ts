@@ -148,6 +148,7 @@ export async function getVehicleServiceHistory(id: number) {
       parts: true,
       labour: true,
       invoice: { select: { id: true, invoiceNumber: true, totalAmount: true } },
+      estimate: { select: { id: true, estimateNumber: true, status: true, approvalPhotoUrl: true } },
     },
     orderBy: { id: "desc" },
   });
@@ -167,6 +168,7 @@ export async function getVehicleServiceHistory(id: number) {
       labourTotal,
       grandTotal: partsTotal + labourTotal,
       invoice: jc.invoice,
+      estimate: jc.estimate,
     };
   });
 

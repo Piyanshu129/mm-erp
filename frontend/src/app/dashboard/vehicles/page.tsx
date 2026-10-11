@@ -117,6 +117,9 @@ function VehiclesPageContent() {
   function openNewVehicle() {
     resetForm();
     setRegistrationNumber(searchedFor);
+    // A vehicle that isn't registered yet usually means a new customer too —
+    // "Existing customer" is one click away if not.
+    setCustomerMode("new");
     setShowForm(true);
   }
 
@@ -432,7 +435,7 @@ function VehiclesPageContent() {
         <InvoiceAccountPanel
           key={`${accountFor.vehicle.id}-${accountFor.focusPay}`}
           accountUrl={`/vehicles/${accountFor.vehicle.id}/account`}
-          title={`${accountFor.vehicle.registrationNumber} (${accountFor.vehicle.customer.name}) — invoices & payments`}
+          title={`${accountFor.vehicle.registrationNumber} (${accountFor.vehicle.customer.name}) — draft invoices & payments`}
           focusPay={accountFor.focusPay}
           onClose={() => setAccountFor(null)}
           onChanged={() => load(q, true)}

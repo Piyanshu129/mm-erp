@@ -41,7 +41,8 @@ interface InvoiceDetail {
     };
     parts: {
       id: number;
-      itemUnitId: number;
+      quantity: number;
+      rate: string;
       amount: string;
       item: { itemCode: string; name: string; uom: string };
     }[];
@@ -143,7 +144,7 @@ function InvoiceDetailPageContent() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between print:hidden">
         <Link href="/dashboard/invoices" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-          <ArrowLeft className="h-4 w-4" /> All invoices
+          <ArrowLeft className="h-4 w-4" /> All draft invoices
         </Link>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => window.print()}>
@@ -168,6 +169,7 @@ function InvoiceDetailPageContent() {
             <p className="text-sm text-gray-500">Multibrand Car Workshop</p>
           </div>
           <div className="text-right text-sm">
+            <p className="text-base font-bold tracking-wide">DRAFT INVOICE</p>
             <p className="font-mono font-semibold">{invoice.invoiceNumber}</p>
             <p className="text-gray-500">{new Date(invoice.invoiceDate).toLocaleDateString()}</p>
           </div>
@@ -204,7 +206,8 @@ function InvoiceDetailPageContent() {
               <thead>
                 <tr className="border-b border-gray-300 text-left">
                   <th className="py-1">Item</th>
-                  <th className="py-1">Serial No.</th>
+                  <th className="py-1">Qty</th>
+                  <th className="py-1 text-right">Rate</th>
                   <th className="py-1 text-right">Amount</th>
                 </tr>
               </thead>
@@ -214,7 +217,10 @@ function InvoiceDetailPageContent() {
                     <td className="py-1">
                       {p.item.itemCode} — {p.item.name}
                     </td>
-                    <td className="py-1 font-mono">#{p.itemUnitId}</td>
+                    <td className="py-1">
+                      {p.quantity} {p.item.uom}
+                    </td>
+                    <td className="py-1 text-right">₹{p.rate}</td>
                     <td className="py-1 text-right">₹{p.amount}</td>
                   </tr>
                 ))}

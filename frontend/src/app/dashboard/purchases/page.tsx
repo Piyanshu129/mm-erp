@@ -21,7 +21,7 @@ import {
 import { MonthNav, TotalTile, CategoryBadge, FilterHeaderSelect, currentMonth, monthLabel } from "@/components/PurchaseListControls";
 import { compressImage } from "@/lib/compressImage";
 import { UOM_OPTIONS } from "@/lib/uom";
-import { formatSerialRanges } from "@/lib/serials";
+import { stickerLabel, stickerRange } from "@/lib/stickers";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -76,7 +76,8 @@ interface PurchaseRow {
   } | null;
   description: string | null;
   remarks: string | null;
-  units: { id: number }[];
+  stickerFrom: number | null;
+  stickerTo: number | null;
   createdBy: { name: string };
 }
 
@@ -84,33 +85,35 @@ const PAGE_SIZE = 100;
 
 interface SavedPurchase {
   item: { itemCode: string; name: string } | null;
-  units: { id: number }[];
+  stickerFrom: number | null;
+  stickerTo: number | null;
 }
 
+// One purchased item's stickers: <item number>.<from> to .<to>.
 interface StickerLine {
   itemCode: string;
   itemName: string;
-  serials: number[];
+  labels: string[];
 }
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 
-// One label per physical piece — the serial large, with the item under it —
+// One label per physical piece — its sticker number large, with the item under it —
 // laid out to print on A4 and cut, or just to copy onto the stickers.
 function printStickers(lines: StickerLine[]) {
   const labels = lines
     .flatMap((l) =>
-      l.serials.map(
+      l.labels.map(
         (s) =>
-          `<div class="label"><div class="serial">#${s}</div><div class="item">${escapeHtml(l.itemName)}</div><div class="code">${escapeHtml(l.itemCode)}</div></div>`
+          `<div class="label"><div class="serial">${s}</div><div class="item">${escapeHtml(l.itemName)}</div><div class="code">${escapeHtml(l.itemCode)}</div></div>`
       )
     )
     .join("");
   const w = window.open("", "_blank", "width=800,height=900");
   if (!w) return;
-  w.document.write(`<!doctype html><html><head><title>Sticker serial numbers</title><style>
+  w.document.write(`<!doctype html><html><head><title>Stickers</title><style>
     body { font-family: system-ui, sans-serif; margin: 12px; }
     .sheet { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .label { border: 1px dashed #999; border-radius: 6px; padding: 10px 6px; text-align: center; break-inside: avoid; }
@@ -523,7 +526,7 @@ function PurchasesPageContent() {
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<false | "photos" | "saving">(false);
-  // After an inventory purchase is saved: the serial numbers to write on
+  // After an inventory purchase is saved: the sticker numbers to write on
   // each piece's sticker.
   const [stickerList, setStickerList] = useState<StickerLine[] | null>(null);
 
@@ -730,8 +733,12 @@ function PurchasesPageContent() {
       const body = await apiFetch("/purchases", { method: "POST", body: formData });
       const saved = body.purchases as SavedPurchase[];
       const stickers = saved
-        .filter((p) => p.item && p.units.length > 0)
-        .map((p) => ({ itemCode: p.item!.itemCode, itemName: p.item!.name, serials: p.units.map((u) => u.id) }));
+        .filter((p) => p.item && p.stickerFrom != null && p.stickerTo != null)
+        .map((p) => {
+          const labels: string[] = [];
+          for (let n = p.stickerFrom!; n <= p.stickerTo!; n++) labels.push(stickerLabel(p.item!.itemCode, n));
+          return { itemCode: p.item!.itemCode, itemName: p.item!.name, labels };
+        });
       setStickerList(stickers.length > 0 ? stickers : null);
       resetEntry();
       setShowForm(false);
@@ -763,7 +770,7 @@ function PurchasesPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Purchases"
-        description="Spare parts, paint and tools generate a permanent serial per unit. Travel, petrol, food and other costs are recorded as plain expenses. Payments to suppliers are recorded on the Suppliers page."
+        description="Spare parts, paint and tools add to the item's stock, with a sticker for each piece. Travel, petrol, food and other costs are recorded as plain expenses. Payments to suppliers are recorded on the Suppliers page."
         action={
           <Button onClick={() => setShowForm((s) => !s)}>
             <Plus className="h-4 w-4" /> New purchase
@@ -776,9 +783,9 @@ function PurchasesPageContent() {
           <CardBody className="space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <p className="text-base font-semibold text-gray-900">Purchase saved — write these serial numbers on the stickers</p>
+                <p className="text-base font-semibold text-gray-900">Purchase saved — write these numbers on the stickers</p>
                 <p className="text-sm text-gray-600">
-                  One sticker per piece. The same number is what you type on a job card when using the part.
+                  One sticker per piece: item number, then the piece number. On a job card, enter the item code and the quantity used.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -792,14 +799,14 @@ function PurchasesPageContent() {
             </div>
             <div className="space-y-2">
               {stickerList.map((l) => (
-                <div key={l.itemCode + l.serials[0]} className="rounded-md bg-green-50 px-3 py-2">
+                <div key={l.itemCode + l.labels[0]} className="rounded-md bg-green-50 px-3 py-2">
                   <p className="text-sm font-medium text-gray-900">
                     {l.itemName} <span className="font-normal text-gray-500">({l.itemCode})</span>
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    {l.serials.map((s) => (
+                    {l.labels.map((s) => (
                       <span key={s} className="rounded border border-green-300 bg-white px-2 py-0.5 font-mono text-base font-semibold text-gray-900">
-                        #{s}
+                        {s}
                       </span>
                     ))}
                   </div>
@@ -819,7 +826,7 @@ function PurchasesPageContent() {
                   label="Purchase type"
                   hint={
                     category === "INVENTORY"
-                      ? "Spare parts, paint and tools from a supplier — each piece gets its own sticker serial number."
+                      ? "Spare parts, paint and tools from a supplier — each piece gets a sticker."
                       : "Travel, petrol, food and other costs — no supplier and no stock."
                   }
                 >
@@ -1045,7 +1052,7 @@ function PurchasesPageContent() {
               <Th>Item / Expense</Th>
               <Th>Supplier</Th>
               <Th className="text-right">Qty</Th>
-              <Th>Sticker serials</Th>
+              <Th>Stickers</Th>
               <Th className="text-right">Rate</Th>
               <Th className="text-right">MRP</Th>
               <Th className="text-right">Total</Th>
@@ -1094,7 +1101,7 @@ function PurchasesPageContent() {
                 <Td className="text-right">
                   {p.quantity} {p.item?.uom ?? ""}
                 </Td>
-                <Td className="font-mono text-xs text-gray-700">{p.units.length > 0 ? formatSerialRanges(p.units.map((u) => u.id)) : "-"}</Td>
+                <Td className="font-mono text-xs text-gray-700">{p.item ? stickerRange(p.item.itemCode, p.stickerFrom, p.stickerTo) || "-" : "-"}</Td>
                 <Td className="text-right">{formatINR(p.purchaseCost)}</Td>
                 <Td className="text-right">{p.sellingPrice != null ? formatINR(p.sellingPrice) : "-"}</Td>
                 <Td className="text-right font-medium text-gray-900">{formatINR(p.quantity * Number(p.purchaseCost))}</Td>

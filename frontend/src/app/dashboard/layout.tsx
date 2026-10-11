@@ -67,7 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Money",
     items: [
       { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart, permission: "PURCHASES" },
-      { href: "/dashboard/invoices", label: "Invoices", icon: Receipt, permission: "INVOICES" },
+      { href: "/dashboard/invoices", label: "Draft Invoices", icon: Receipt, permission: "INVOICES" },
       { href: "/dashboard/reports", label: "Reports", icon: BarChart3, permission: "REPORTS" },
     ],
   },

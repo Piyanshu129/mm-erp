@@ -16,7 +16,6 @@ import { StockStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { UOM_OPTIONS } from "@/lib/uom";
-import { formatSerialRanges } from "@/lib/serials";
 import { compressImage } from "@/lib/compressImage";
 
 interface ItemRow {
@@ -31,7 +30,7 @@ interface ItemRow {
   currentStock: number;
   photoUrl: string | null;
   isActive: boolean;
-  inStockSerials: number[];
+  purchasedQty: number;
 }
 
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
@@ -209,8 +208,8 @@ function ItemsPageContent() {
               <Th>Category</Th>
               <Th>UOM</Th>
               <Th>MRP</Th>
-              <Th>Stock</Th>
-              <Th>Serial Nos. in stock (stickers)</Th>
+              <Th>Purchased Qty</Th>
+              <Th>Available Qty</Th>
             </tr>
           </thead>
           <tbody>
@@ -232,14 +231,12 @@ function ItemsPageContent() {
                 <Td>{item.category}</Td>
                 <Td>{item.uom}</Td>
                 <Td>₹{item.sellingPrice}</Td>
+                <Td>{item.purchasedQty}</Td>
                 <Td>
                   <div className="flex items-center gap-2">
                     <span>{item.currentStock}</span>
                     <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
                   </div>
-                </Td>
-                <Td className="font-mono text-sm text-gray-900">
-                  {item.inStockSerials.length > 0 ? formatSerialRanges(item.inStockSerials) : <span className="text-gray-400">-</span>}
                 </Td>
               </Tr>
             ))}

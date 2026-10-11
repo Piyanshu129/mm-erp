@@ -46,7 +46,7 @@ export async function listInvoices(page: PageParams, q: string | undefined) {
 
 export async function getInvoice(id: number) {
   const invoice = await prisma.invoice.findUnique({ where: { id }, include: detailInclude });
-  if (!invoice) throw new NotFoundError("Invoice not found");
+  if (!invoice) throw new NotFoundError("Draft invoice not found");
   return invoice;
 }
 
@@ -54,21 +54,29 @@ export async function getInvoice(id: number) {
 // live from the job card, which is safe because the job card is locked
 // (status -> INVOICED, set in this same transaction) the moment this runs.
 // This is the only way a job card becomes Invoiced.
+//
+// A job card that was invoiced and then set back to Open (to change it)
+// keeps its draft invoice: invoicing it again brings that same invoice —
+// same number, same payments — up to date with the job card, rather than
+// creating a second one.
 export async function createInvoice(jobCardId: number, discount: number, createdById: number) {
   // Status first, so a cancelled or already-invoiced job card gets that
   // reason rather than a list of missing photos. (Re-checked inside the
   // transaction below.)
-  const current = await prisma.jobCard.findUnique({ where: { id: jobCardId }, include: { invoice: true } });
+  const current = await prisma.jobCard.findUnique({ where: { id: jobCardId } });
   if (!current) throw new NotFoundError("Job card not found");
-  if (current.invoice) throw new ConflictError("This job card already has an invoice");
   if (current.status !== "OPEN") {
-    throw new ConflictError("Only an open job card can be invoiced — reopen it first if it was cancelled");
+    throw new ConflictError(
+      current.status === "INVOICED"
+        ? "This job card is already invoiced"
+        : "Only an open job card can be invoiced — set it back to Open first if it was cancelled"
+    );
   }
 
-  // Every invoice bills at least one labour/service line.
+  // Every draft invoice bills at least one labour/service line.
   const labourLines = await prisma.jobCardLabour.count({ where: { jobCardId } });
   if (labourLines === 0) {
-    throw new ConflictError("Add at least one labour / service line before generating the invoice");
+    throw new ConflictError("Add at least one labour / service line before generating the draft invoice");
   }
 
   // The workshop's before/after comparison photos must be done before the
@@ -82,10 +90,7 @@ export async function createInvoice(jobCardId: number, discount: number, created
       include: { parts: true, labour: true, invoice: true },
     });
     if (!jobCard) throw new NotFoundError("Job card not found");
-    if (jobCard.invoice) throw new ConflictError("This job card already has an invoice");
-    if (jobCard.status !== "OPEN") {
-      throw new ConflictError("Only an open job card can be invoiced — reopen it first if it was cancelled");
-    }
+    if (jobCard.status !== "OPEN") throw new ConflictError("Only an open job card can be invoiced");
 
     const partsTotal = jobCard.parts.reduce((sum, p) => sum + Number(p.amount), 0);
     const labourTotal = jobCard.labour.reduce((sum, l) => sum + Number(l.amount), 0);
@@ -96,25 +101,42 @@ export async function createInvoice(jobCardId: number, discount: number, created
     }
 
     const totalAmount = subtotal - discount;
+    let invoiceId: number;
 
-    const created = await tx.invoice.create({
-      data: {
-        invoiceNumber: "PENDING",
-        jobCardId,
-        partsTotal,
-        labourTotal,
-        discount,
-        totalAmount,
-        createdById,
-      },
-    });
-
-    const invoiceNumber = `INV-${String(created.id).padStart(6, "0")}`;
-    await tx.invoice.update({ where: { id: created.id }, data: { invoiceNumber } });
+    if (jobCard.invoice) {
+      // Re-invoicing after the job card was reopened: update the same draft
+      // invoice. It can't drop below what the customer has already paid.
+      const paid = Number(jobCard.invoice.paymentAmount);
+      if (totalAmount < paid) {
+        throw new ConflictError(
+          `The new total ₹${totalAmount.toFixed(2)} is less than the ₹${paid.toFixed(2)} already paid on ${jobCard.invoice.invoiceNumber}`
+        );
+      }
+      await tx.invoice.update({
+        where: { id: jobCard.invoice.id },
+        data: { partsTotal, labourTotal, discount, totalAmount },
+      });
+      invoiceId = jobCard.invoice.id;
+    } else {
+      const created = await tx.invoice.create({
+        data: {
+          invoiceNumber: `PENDING-${jobCardId}`,
+          jobCardId,
+          partsTotal,
+          labourTotal,
+          discount,
+          totalAmount,
+          createdById,
+        },
+      });
+      const invoiceNumber = `INV-${String(created.id).padStart(6, "0")}`;
+      await tx.invoice.update({ where: { id: created.id }, data: { invoiceNumber } });
+      invoiceId = created.id;
+    }
 
     await tx.jobCard.update({ where: { id: jobCardId }, data: { status: "INVOICED" } });
 
-    return tx.invoice.findUniqueOrThrow({ where: { id: created.id }, include: detailInclude });
+    return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: detailInclude });
   });
 }
 
@@ -145,7 +167,7 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
-    if (locked.length === 0) throw new NotFoundError("Invoice not found");
+    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
 
     const alreadyPaid = Number(invoice.paymentAmount);

@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import fs from "fs";
 import path from "path";
 import { prisma } from "./prisma";
+import { stickerLabel } from "./itemCode";
 
 export const EXCEL_EXPORT_PATH = path.join(__dirname, "..", "..", "exports", "mm-erp-data.xlsx");
 
@@ -82,7 +83,11 @@ async function suppliersSheet(): Promise<SheetSpec> {
 }
 
 async function itemsSheet(): Promise<SheetSpec> {
-  const items = await prisma.item.findMany({ orderBy: { id: "asc" } });
+  const [items, purchased] = await Promise.all([
+    prisma.item.findMany({ orderBy: { id: "asc" } }),
+    prisma.purchase.groupBy({ by: ["itemId"], where: { itemId: { not: null } }, _sum: { quantity: true } }),
+  ]);
+  const purchasedQty = new Map(purchased.map((p) => [p.itemId, p._sum.quantity ?? 0]));
   return {
     name: "Items",
     columns: [
@@ -95,12 +100,14 @@ async function itemsSheet(): Promise<SheetSpec> {
       { header: "Purchase Cost", key: "purchaseCost", width: 14 },
       { header: "MRP", key: "sellingPrice", width: 14 },
       { header: "Min Stock", key: "minStock", width: 10 },
-      { header: "Current Stock", key: "currentStock", width: 12 },
+      { header: "Purchased Qty", key: "purchasedQty", width: 12 },
+      { header: "Available Qty", key: "currentStock", width: 12 },
       { header: "Active", key: "isActive", width: 10 },
       { header: "Created", key: "createdAt", width: 20 },
     ],
     rows: items.map((i) => ({
       ...i,
+      purchasedQty: purchasedQty.get(i.id) ?? 0,
       purchaseCost: n(i.purchaseCost),
       sellingPrice: n(i.sellingPrice),
     })),
@@ -122,6 +129,7 @@ async function purchasesSheet(): Promise<SheetSpec> {
       { header: "Item Code", key: "itemCode", width: 14 },
       { header: "Item/Expense", key: "itemName", width: 22 },
       { header: "Qty", key: "quantity", width: 8 },
+      { header: "Stickers", key: "stickers", width: 14 },
       { header: "Rate (per unit)", key: "purchaseCost", width: 14 },
       { header: "Total", key: "total", width: 14 },
       { header: "MRP", key: "sellingPrice", width: 14 },
@@ -137,6 +145,10 @@ async function purchasesSheet(): Promise<SheetSpec> {
       itemCode: p.item?.itemCode ?? "",
       itemName: p.item?.name ?? p.description ?? "",
       quantity: p.quantity,
+      stickers:
+        p.item && p.stickerFrom != null && p.stickerTo != null
+          ? `${stickerLabel(p.item.itemCode, p.stickerFrom)} – ${stickerLabel(p.item.itemCode, p.stickerTo)}`
+          : "",
       purchaseCost: n(p.purchaseCost),
       total: p.quantity * Number(p.purchaseCost),
       sellingPrice: n(p.sellingPrice),
@@ -179,41 +191,47 @@ async function supplierPaymentsSheet(): Promise<SheetSpec> {
   };
 }
 
-// Every physical unit's full trail: which purchase it came from, its
-// current status, and (once issued) which job card/vehicle it went to.
-// This is the direct replacement for the old aggregate Stock Ledger sheet.
-async function itemUnitsSheet(): Promise<SheetSpec> {
-  const units = await prisma.itemUnit.findMany({
-    include: {
-      item: true,
-      purchase: { include: { supplier: true } },
-      jobCardPart: { include: { jobCard: { include: { vehicle: true } } } },
-    },
-    orderBy: { id: "asc" },
+// One row per estimate line, with its estimate's header details repeated.
+async function estimatesSheet(): Promise<SheetSpec> {
+  const lines = await prisma.estimateLine.findMany({
+    include: { item: true, estimate: { include: { jobCard: { include: { vehicle: { include: { customer: true } } } } } } },
+    orderBy: [{ estimateId: "asc" }, { id: "asc" }],
   });
   return {
-    name: "Item Units",
+    name: "Estimates",
     columns: [
-      { header: "Serial No.", key: "id", width: 12 },
-      { header: "Item Code", key: "itemCode", width: 14 },
-      { header: "Item Name", key: "itemName", width: 22 },
-      { header: "Status", key: "status", width: 10 },
-      { header: "Purchase Serial No.", key: "purchaseId", width: 16 },
-      { header: "Supplier", key: "supplierName", width: 20 },
-      { header: "Issued To Job Card", key: "jobCardNumber", width: 16 },
+      { header: "Estimate No.", key: "estimateNumber", width: 14 },
+      { header: "Date", key: "estimateDate", width: 18 },
+      { header: "Job Card No.", key: "jobCardNumber", width: 14 },
       { header: "Vehicle", key: "vehicleRegistration", width: 16 },
-      { header: "Purchased On", key: "createdAt", width: 20 },
+      { header: "Customer", key: "customerName", width: 20 },
+      { header: "Status", key: "status", width: 10 },
+      { header: "Approved At", key: "approvedAt", width: 18 },
+      { header: "Approval Photo", key: "approvalPhotoUrl", width: 24 },
+      { header: "Tax %", key: "taxRate", width: 8 },
+      { header: "Line Type", key: "lineType", width: 10 },
+      { header: "Item Code", key: "itemCode", width: 12 },
+      { header: "Description", key: "description", width: 26 },
+      { header: "Qty", key: "quantity", width: 8 },
+      { header: "Rate", key: "rate", width: 12 },
+      { header: "Amount", key: "amount", width: 12 },
     ],
-    rows: units.map((u) => ({
-      id: u.id,
-      itemCode: u.item.itemCode,
-      itemName: u.item.name,
-      status: u.status,
-      purchaseId: u.purchaseId,
-      supplierName: u.purchase.supplier?.name ?? "",
-      jobCardNumber: u.jobCardPart?.jobCard.jobCardNumber ?? "",
-      vehicleRegistration: u.jobCardPart?.jobCard.vehicle.registrationNumber ?? "",
-      createdAt: u.createdAt,
+    rows: lines.map((l) => ({
+      estimateNumber: l.estimate.estimateNumber,
+      estimateDate: l.estimate.estimateDate,
+      jobCardNumber: l.estimate.jobCard.jobCardNumber,
+      vehicleRegistration: l.estimate.jobCard.vehicle.registrationNumber,
+      customerName: l.estimate.jobCard.vehicle.customer.name,
+      status: l.estimate.status,
+      approvedAt: l.estimate.approvedAt,
+      approvalPhotoUrl: l.estimate.approvalPhotoUrl,
+      taxRate: n(l.estimate.taxRate),
+      lineType: l.lineType,
+      itemCode: l.item?.itemCode ?? "",
+      description: l.description,
+      quantity: l.quantity,
+      rate: n(l.rate),
+      amount: n(l.amount),
     })),
   };
 }
@@ -270,7 +288,7 @@ async function jobCardsSheet(): Promise<SheetSpec> {
 
 async function jobCardPartsSheet(): Promise<SheetSpec> {
   const parts = await prisma.jobCardPart.findMany({
-    include: { jobCard: true, item: true, itemUnit: true, createdBy: true },
+    include: { jobCard: true, item: true, createdBy: true },
     orderBy: { id: "asc" },
   });
   return {
@@ -279,7 +297,8 @@ async function jobCardPartsSheet(): Promise<SheetSpec> {
       { header: "Job Card No.", key: "jobCardNumber", width: 14 },
       { header: "Item Code", key: "itemCode", width: 14 },
       { header: "Item Name", key: "itemName", width: 22 },
-      { header: "Serial No.", key: "itemUnitId", width: 12 },
+      { header: "Qty Used", key: "quantity", width: 10 },
+      { header: "Rate", key: "rate", width: 12 },
       { header: "Amount", key: "amount", width: 12 },
       { header: "Issued By", key: "createdByName", width: 16 },
       { header: "Date", key: "createdAt", width: 20 },
@@ -288,7 +307,8 @@ async function jobCardPartsSheet(): Promise<SheetSpec> {
       jobCardNumber: p.jobCard.jobCardNumber,
       itemCode: p.item.itemCode,
       itemName: p.item.name,
-      itemUnitId: p.itemUnitId,
+      quantity: p.quantity,
+      rate: n(p.rate),
       amount: n(p.amount),
       createdByName: p.createdBy.name,
       createdAt: p.createdAt,
@@ -539,8 +559,8 @@ export async function regenerateExcelExport(): Promise<void> {
     itemsSheet(),
     purchasesSheet(),
     supplierPaymentsSheet(),
-    itemUnitsSheet(),
     jobCardsSheet(),
+    estimatesSheet(),
     jobCardPartsSheet(),
     jobCardLabourSheet(),
     invoicesSheet(),

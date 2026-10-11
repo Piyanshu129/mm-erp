@@ -4,6 +4,7 @@ import * as jobCardPartsController from "./jobCardParts.controller";
 import * as jobCardLabourController from "./jobCardLabour.controller";
 import * as jobCardMediaController from "./jobCardMedia.controller";
 import * as invoicesController from "../invoices/invoices.controller";
+import * as estimatesController from "../estimates/estimates.controller";
 import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
@@ -61,3 +62,5 @@ jobCardsRouter.post(
   validateBody(invoicesController.createInvoiceSchema),
   asyncHandler(invoicesController.create)
 );
+
+jobCardsRouter.post("/:jobCardId/estimate", asyncHandler(estimatesController.createForJobCard));

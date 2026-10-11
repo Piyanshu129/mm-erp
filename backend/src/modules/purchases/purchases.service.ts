@@ -2,10 +2,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
+import { formatItemCode } from "../../lib/itemCode";
 
-// SPARE_PART/PAINT/TOOL are inventory types — they need an Item and generate
-// one ItemUnit (a physically-serialed part) per unit of quantity. The rest
-// are plain business expenses with no stock implications at all.
+// SPARE_PART/PAINT/TOOL are inventory types — they need an Item and add
+// their quantity to its stock. The rest are plain business expenses with no
+// stock implications at all.
 export const INVENTORY_ITEM_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
 export const EXPENSE_ITEM_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
 export const PURCHASE_ITEM_TYPES = [...INVENTORY_ITEM_TYPES, ...EXPENSE_ITEM_TYPES] as const;
@@ -51,8 +52,6 @@ const purchaseInclude = {
   supplier: true,
   item: true,
   createdBy: { select: { id: true, name: true } },
-  // Each unit's id is the serial number written on its sticker.
-  units: { select: { id: true }, orderBy: { id: "asc" } },
 } as const;
 
 function isInventoryType(itemType: string): boolean {
@@ -169,12 +168,10 @@ function validateLine(line: PurchaseLineInput, label: string) {
 // entry (one supplier, one bill) can contain several lines, and the whole
 // entry is saved atomically — every line or none. For each inventory line
 // this: (a) registers the item first if it's new (Item Code derived from
-// its own id, same as the Items page), (b) records the purchase, (c)
-// creates one ItemUnit per unit of quantity — each gets its own permanent
-// serial number (its own row id), written on a sticker and placed on the
-// physical part — and (d) bumps the item's cached stock count by exactly the
-// number of units just created. An expense line (Travel/Petrol/Food/Others)
-// just records the cost — no item, no units, no stock change.
+// its own id, same as the Items page), (b) records the purchase with the
+// next sticker range for that item (1.1–1.10, then 1.11… on the next
+// purchase), and (c) adds the quantity to the item's stock. An expense line
+// (Travel/Petrol/Food/Others) just records the cost — no item, no stock.
 export async function createPurchaseEntry(input: PurchaseEntryInput) {
   if (input.lines.length === 0) {
     throw new ConflictError("Add at least one item to the purchase");
@@ -213,18 +210,30 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
             vehicleModel: line.newItem.vehicleModel,
             variant: line.newItem.variant,
             photoUrl: line.newItem.photoUrl,
-            itemCode: "PENDING",
+            itemCode: `PENDING-${Date.now()}-${i}`,
           },
         });
         await tx.item.update({
           where: { id: created.id },
-          data: { itemCode: `ITM-${String(created.id).padStart(6, "0")}` },
+          data: { itemCode: formatItemCode(created.id) },
         });
         itemId = created.id;
       } else if (inventory) {
         const item = await tx.item.findUnique({ where: { id: line.itemId! } });
         if (!item) throw new NotFoundError(`${label}: item not found`);
         itemId = item.id;
+      }
+
+      // Next sticker numbers for this item. The item row is locked first so
+      // two purchases of the same item saved at once can't both take the
+      // same numbers.
+      let stickerFrom: number | undefined;
+      let stickerTo: number | undefined;
+      if (inventory && itemId != null) {
+        await tx.$queryRaw`SELECT id FROM items WHERE id = ${itemId} FOR UPDATE`;
+        const last = await tx.purchase.aggregate({ where: { itemId }, _max: { stickerTo: true } });
+        stickerFrom = (last._max.stickerTo ?? 0) + 1;
+        stickerTo = stickerFrom + line.quantity - 1;
       }
 
       const purchase = await tx.purchase.create({
@@ -237,6 +246,8 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
           purchaseCost: line.purchaseCost,
           sellingPrice: inventory ? line.sellingPrice : undefined,
           billUrl: input.billUrl,
+          stickerFrom,
+          stickerTo,
           remarks: input.remarks,
           purchaseDate,
           createdById: input.createdById,
@@ -245,10 +256,6 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
       createdIds.push(purchase.id);
 
       if (inventory && itemId != null) {
-        await tx.itemUnit.createMany({
-          data: Array.from({ length: line.quantity }, () => ({ itemId: itemId!, purchaseId: purchase.id })),
-        });
-
         await tx.item.update({
           where: { id: itemId },
           data: {

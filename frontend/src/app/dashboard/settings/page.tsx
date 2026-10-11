@@ -58,8 +58,8 @@ function SettingsContent() {
             <DatabaseBackup className="h-4 w-4 text-gray-400" /> Data Backup
           </h2>
           <p className="mb-4 text-sm text-gray-500">
-            Downloads a complete snapshot of every business record — customers, vehicles, items, item serial units,
-            suppliers, purchases, job cards, parts, labour, invoices, employees, attendance, and salary — as one JSON
+            Downloads a complete snapshot of every business record — customers, vehicles, items,
+            suppliers, purchases, job cards, parts, labour, estimates, invoices, employees, attendance, and salary — as one JSON
             file. Keep downloaded backups somewhere other than this machine.
           </p>
           <Button onClick={handleDownloadBackup} disabled={downloading}>

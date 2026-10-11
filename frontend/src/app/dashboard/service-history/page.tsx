@@ -34,6 +34,7 @@ interface HistoryEntry {
   labourTotal: number;
   grandTotal: number;
   invoice: { id: number; invoiceNumber: string; totalAmount: string } | null;
+  estimate: { id: number; estimateNumber: string; status: string; approvalPhotoUrl: string | null } | null;
 }
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
@@ -120,6 +121,7 @@ function ServiceHistoryPageContent() {
                   <Th>Complaint / Work</Th>
                   <Th>Status</Th>
                   <Th>Amount</Th>
+                  <Th>Estimate</Th>
                   <Th></Th>
                 </tr>
               </thead>
@@ -136,11 +138,21 @@ function ServiceHistoryPageContent() {
                       {h.invoice ? `₹${h.invoice.totalAmount}` : `₹${h.grandTotal.toFixed(2)}`}
                     </Td>
                     <Td>
+                      {h.estimate ? (
+                        <Link href={`/dashboard/estimates/${h.estimate.id}`} className="text-blue-600 hover:underline">
+                          {h.estimate.estimateNumber}
+                          {h.estimate.status === "APPROVED" ? " · signed" : " · not signed yet"}
+                        </Link>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </Td>
+                    <Td>
                       <Link
                         href={h.invoice ? `/dashboard/invoices/${h.invoice.id}` : `/dashboard/jobcards/${h.id}`}
                         className="text-blue-600 hover:underline"
                       >
-                        {h.invoice ? "View invoice" : "View job card"}
+                        {h.invoice ? "View draft invoice" : "View job card"}
                       </Link>
                     </Td>
                   </Tr>

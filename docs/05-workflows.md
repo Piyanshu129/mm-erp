@@ -8,7 +8,7 @@ This traces the system's real processes end-to-end — frontend page → API cal
 
 Nothing unusual here except normalization: registration numbers are uppercased and stripped of spaces before the uniqueness check, so `"hr06 ab 1234"` and `"HR06AB1234"` are the same vehicle. Neither Customer nor Vehicle can be hard-deleted — only `PATCH /:id/status` to toggle `isActive`, because Job Cards and Purchases reference them and history must survive.
 
-## 2. Purchasing & per-unit serial numbers
+## 2. Purchasing, stock & stickers
 
 `/dashboard/purchases` → `POST /purchases` → [`purchases.service.ts#createPurchaseEntry`](../backend/src/modules/purchases/purchases.service.ts).
 
@@ -19,11 +19,11 @@ One purchase entry is one supplier and one bill, with **any number of items**. T
 
 This is the single most business-critical write in the system, and it's the piece that changed most in the September 2026 rework (see [02-database-schema.md](02-database-schema.md#purchasing--inventory-phase-3-reworked-september-2026) for the *why*). **The whole entry is one `prisma.$transaction`**: every line saves or none does. For example, if item 3 fails, a new item created for item 1 is rolled back too. For each line:
 
-1. **Inventory** `itemType` (`SPARE_PART`/`PAINT`/`TOOL`): if it's a new item, the `Item` is created first (Item Code derived from its own id). Then the `Purchase` row is created, then `itemUnit.createMany` adds **one row per unit of `quantity`**, and each unit gets its own permanent serial number for free (its own auto-increment `id`). `Item.currentStock` goes up by exactly that quantity, and `Item.purchaseCost`/`sellingPrice` are set to this purchase's values.
-2. **Expense** `itemType` (`TRAVEL`/`PETROL`/`FOOD`/`OTHERS`): just the `Purchase` row with a `description`. No `Item`, no units, no stock change.
+1. **Inventory** `itemType` (`SPARE_PART`/`PAINT`/`TOOL`): if it's a new item, the `Item` is created first (Item Code derived from its own id). The item row is locked (`SELECT … FOR UPDATE`), the item's highest sticker number so far is read, and the `Purchase` row is created with the next range (`stickerFrom`/`stickerTo`; 10 of item `0001` after 8 earlier → `1.9`–`1.18`). `Item.currentStock` goes up by exactly that quantity, and `Item.purchaseCost`/`sellingPrice` are set to this purchase's values.
+2. **Expense** `itemType` (`TRAVEL`/`PETROL`/`FOOD`/`OTHERS`): just the `Purchase` row with a `description`. No `Item`, no stickers, no stock change.
 3. **Guardrail**: MRP (`sellingPrice`) can never be set below `purchaseCost`. It's checked here and again in `items.service.ts` for direct Item edits.
 
-Every error names the line it's about (`"Item 2: MRP cannot be lower than purchase cost"`), and the frontend runs the same checks before sending.
+After saving, the page lists every sticker number to write (`<item number>.<n>`, `lib/stickers.ts`) with a *Print stickers* button. Every error names the line it's about (`"Item 2: MRP cannot be lower than purchase cost"`), and the frontend runs the same checks before sending.
 
 ## 2b. Supplier payments
 
@@ -52,50 +52,55 @@ This is the central workflow — `/dashboard/jobcards/[id]` is the most complex 
 Defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts), enforced in [`jobCards.service.ts#updateJobCard`](../backend/src/modules/jobCards/jobCards.service.ts) and [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). On 2026-09-30 they were simplified from an eleven-step workflow (Draft → … → Completed → Invoiced → Ready for Delivery → Delivered → Closed):
 
 ```
-OPEN ──(generate invoice)──> INVOICED   (final)
-  ↑ ↓
+OPEN ──(generate draft invoice)──> INVOICED
+  ↑ ↓          <──(set back to Open)──
 CANCELLED
 ```
 
 - **Invoiced is reached only by generating the invoice.** `PATCH` with `status: "INVOICED"` is refused. In the UI, choosing *Invoiced* in the status dropdown opens a confirmation (totals plus an optional discount), which calls `POST /job-cards/:id/invoice`; that sets the status in the same transaction. A job card therefore can't say Invoiced without an invoice behind it.
-- **Invoiced is final.** Once an invoice exists, the status can't be changed back to Open or to Cancelled, and the dropdown is disabled.
+- **Invoiced can be set back to Open** (since 2026-10-11) to change parts or labour; the page asks for confirmation. The draft invoice stays. Invoicing again (`POST /job-cards/:id/invoice`) **updates that same invoice** — same number, same payments — with the new parts, labour and discount, and refuses a total below what's already been paid. A job card with an invoice can't be cancelled.
 - **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be invoiced.
 - **At least one labour / service line** is required to invoice.
 - **Mandatory before/after photos** are checked at invoicing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`. Before the simplification it guarded the old in-progress/Completed statuses; invoicing was only possible from Completed, so the rule's effect is unchanged.
 - **Assignment validation**: `assignedEmployeeId` must reference an active employee.
-- Side effects: setting `estimateApproved` stamps `estimateApprovedAt`, and setting `finalInspectionStatus` stamps `finalInspectionAt`. (`deliveredAt` remains in the schema but is no longer set, since there is no Delivered status.)
+- Side effects: `estimateAmount`/`estimateApproved`/`estimateApprovedAt` are kept in step by the estimate (below), and setting `finalInspectionStatus` stamps `finalInspectionAt`. (`deliveredAt` remains in the schema but is no longer set, since there is no Delivered status.)
 
 The migration `20260930110000_simplify_job_card_statuses` converted existing job cards by what was actually true of them. Any job card with an invoice became Invoiced, a cancelled one without an invoice stayed Cancelled, and everything else became Open.
 
-### The real lock: invoice existence, not the status field
+### The lock: the status
 
-A bug found and fixed while building Phase 6 (documented in the root [README.md](../README.md#whats-in-phase-6)): the status dropdown alone doesn't prevent editing parts/labour on an invoiced job card, because nothing stops someone dragging the status back to e.g. `COMPLETED`. The fix, still in place: `jobCardParts.service.ts` and `jobCardLabour.service.ts` both check **both** `isLocked(jobCard.status)` **and** whether an `Invoice` row actually exists for this job card — the invoice's existence can't be faked by editing a dropdown, so it's the authoritative check, not the status string.
+`jobCardParts.service.ts#assertJobCardEditable` (also used for labour) refuses changes while the status is `INVOICED` or `CANCELLED`. Until 2026-10-11 it also refused whenever an invoice existed, because Invoiced was final; now an invoiced job card is edited by setting it back to Open, and its invoice catches up when it's invoiced again. The status can't be set to Invoiced except by generating the draft invoice, so the status is a reliable lock.
 
-### Parts issue: by serial, not by quantity
+### Estimates
 
-`/dashboard/jobcards/[id]` → look up/scan a serial (`GET /item-units/:id`, fed by `GET /items/:id/available-units`) → `POST /job-cards/:jobCardId/parts` `{itemUnitId}` → [`jobCardParts.service.ts#addPart`](../backend/src/modules/jobCards/jobCardParts.service.ts).
+`/dashboard/jobcards/[id]` → *Create estimate* → `POST /job-cards/:jobCardId/estimate` → [`estimates.service.ts`](../backend/src/modules/estimates/estimates.service.ts), then `/dashboard/estimates/[id]`.
+
+Creating copies the job card's parts and labour so far into `EstimateLine`s (calling it again returns the existing estimate). While it's a `DRAFT`: `POST /estimates/:id/lines` adds an inventory part (`itemId`; name and MRP fill in), a part not in inventory (`description` + `rate`) or labour; `DELETE /estimates/:id/lines/:lineId` removes one; `PATCH /estimates/:id` sets `taxRate`/`notes`. Lines never touch stock. The page is printable and downloads as `EST-000123_<car number>_<date>.pdf`, with signature spaces for the customer and the workshop. `POST /estimates/:id/approval` (multipart `photo` of the signed copy) marks it `APPROVED` and locks it; the photo can be replaced later. The job card, the vehicle's service history (`GET /vehicles/:id/service-history` includes `estimate`) and the backup/Excel export all link to it. Every change also updates the job card's `estimateAmount`/`estimateApproved`/`estimateApprovedAt`.
+
+### Parts: by item code and quantity
+
+`/dashboard/jobcards/[id]` → type the item code (`GET /item-lookup/:code` shows the item, MRP and available quantity; `2`, `02` and `0002` all find `0002`) and the **Qty used** → `POST /job-cards/:jobCardId/parts` `{itemId, quantity}` → [`jobCardParts.service.ts#addPart`](../backend/src/modules/jobCards/jobCardParts.service.ts).
 
 Inside one transaction:
 1. `assertJobCardEditable` — the lock check above.
-2. `issueUnitOrThrow` — a **single conditional `UPDATE`** (`SET status='ISSUED' WHERE id=? AND status='IN_STOCK'`) via `$queryRaw`, not a read-then-write. This means two staff scanning the same physical sticker at the same instant can't both succeed — Postgres's row-level locking makes the second `UPDATE` affect zero rows, which the code turns into a `ConflictError("Serial number ... is already issued")`.
-3. Creates the `JobCardPart` row with `amount` copied from `Item.sellingPrice` **right now** (never recomputed later — a subsequent price change can't retroactively change what an already-issued part is worth).
-4. Decrements `Item.currentStock` by 1.
+2. A **single conditional `UPDATE`** (`SET current_stock = current_stock - qty WHERE id = ? AND current_stock >= qty`), not a read-then-write, so two job cards using the last few pieces at the same moment can't take more than there is. If no row is updated: `ConflictError("Only N … available — can't use X")`.
+3. Creates the `JobCardPart` with `rate` = the item's MRP **right now** and `amount = quantity × rate` (never recomputed later).
 
-Removing a part (`DELETE /job-cards/:jobCardId/parts/:partId`, only before lock) reverses all of this: the unit goes back to `IN_STOCK` under the *same* serial (units are never deleted, only re-flagged), and `currentStock` increments back.
+Removing a part (`DELETE /job-cards/:jobCardId/parts/:partId`, only while Open) puts its quantity back into stock.
 
-The original spec's acceptance tests are still the way to sanity-check this logic if you touch it: issuing 1 Oil Filter against 15 in stock should leave 14; attempting to issue against a unit that's already `ISSUED` (or a nonexistent quantity conceptually — 999 units, pre-rework) must be rejected with **no** stock change.
+Example: 10 available, use 2 → 8 available; trying to use 50 is refused with no stock change.
 
 ### Labour
 
 Simple — `POST/DELETE /job-cards/:jobCardId/labour`, same lock check, `amount = quantity × rate` computed server-side, no stock implications.
 
-## 4. Invoice generation & the payment-snapshot pattern
+## 4. Draft invoice generation & the payment-snapshot pattern
 
-`/dashboard/jobcards/[id]` (an Open job card, choosing *Invoiced* in the status dropdown or clicking *Mark as Invoiced*) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). After generating, the page moves to the invoice.
+`/dashboard/jobcards/[id]` (an Open job card, choosing *Invoiced* in the status dropdown or clicking *Mark as Invoiced*) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). After generating, the page moves to the invoice. Invoices are labelled **Draft Invoice** throughout the app (sidebar, list, PDF title); routes and tables are still `invoices`.
 
 **Viewing and downloading:** the invoice page (`/dashboard/invoices/[id]`) has *Print* and *Download PDF*. The Invoices list has *View* and *Download* on every row. Download renders the on-screen invoice to an A4 PDF in the browser (`lib/invoicePdf.ts`, using `html2pdf.js`, which loads only when a download is requested). The file is named `<car number>_<DD-MM-YYYY>.pdf`, for example `HR06AB1234_30-09-2026.pdf`. The page title is set to the same name, so the browser's own Print → Save as PDF suggests it too. `?download=1` on the invoice page starts the download automatically; that's how the list's Download link works.
 
-One transaction: reads `parts`/`labour` **live** from the job card (safe because the job card is about to be locked by this same transaction), computes `partsTotal + labourTotal - discount` (discount validated to be within `[0, subtotal]`), creates the `Invoice`, assigns `INV-000123`, and — critically — sets `JobCard.status = "INVOICED"` **in the same transaction**. This last write is what actually locks the job card; everything else (parts/labour services checking `isLocked()`) is downstream of it.
+One transaction: reads `parts`/`labour` **live** from the job card (safe because the job card is about to be locked by this same transaction), computes `partsTotal + labourTotal - discount` (discount validated to be within `[0, subtotal]`), creates the `Invoice` and assigns `INV-000123` — or, for a job card that was reopened, updates its existing invoice instead — and — critically — sets `JobCard.status = "INVOICED"` **in the same transaction**. This last write is what actually locks the job card; everything else (parts/labour services checking `isLocked()`) is downstream of it.
 
 Invoice math is worth knowing precisely if you ever touch this: `Parts + Labour − Discount = Total`, no tax applied yet (`taxRate`/`taxAmount` columns exist but nothing writes to them — reserved for a future GST feature).
 

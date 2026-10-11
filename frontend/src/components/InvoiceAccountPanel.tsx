@@ -127,7 +127,7 @@ export function InvoicePaymentHistory({ payments, showInvoice }: { payments: Inv
       <thead>
         <tr>
           <Th>Date</Th>
-          {showInvoice && <Th>Invoice</Th>}
+          {showInvoice && <Th>Draft Invoice</Th>}
           <Th className="text-right">Amount</Th>
           <Th>Mode</Th>
           <Th>Reference</Th>
@@ -207,7 +207,7 @@ export function RecordInvoicePaymentForm({
     e.preventDefault();
     setError(null);
     if (!selected) {
-      setError("Choose the invoice this payment is for");
+      setError("Choose the draft invoice this payment is for");
       return;
     }
     const value = Number(amount);
@@ -244,7 +244,7 @@ export function RecordInvoicePaymentForm({
     <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {unpaid.length > 1 || invoices.length > 1 ? (
         <div className="sm:col-span-2">
-          <Label>Invoice</Label>
+          <Label>Draft invoice</Label>
           <Select value={invoiceId ?? ""} onChange={(e) => choose(Number(e.target.value))}>
             {unpaid.map((i) => (
               <option key={i.id} value={i.id}>
@@ -352,7 +352,7 @@ export function InvoiceAccountPanel({
             <InvoiceAccountSummary account={data.account} />
 
             {data.invoices.length === 0 ? (
-              <p className="text-sm text-gray-500">No invoices yet.</p>
+              <p className="text-sm text-gray-500">No draft invoices yet.</p>
             ) : (
               <>
                 <div>
@@ -375,11 +375,11 @@ export function InvoiceAccountPanel({
                 </div>
 
                 <div>
-                  <p className="mb-2 text-sm font-semibold text-gray-900">Invoices</p>
+                  <p className="mb-2 text-sm font-semibold text-gray-900">Draft invoices</p>
                   <Table minWidth={620}>
                     <thead>
                       <tr>
-                        <Th>Invoice</Th>
+                        <Th>Draft Invoice</Th>
                         <Th>Date</Th>
                         <Th>Vehicle</Th>
                         <Th className="text-right">Total</Th>

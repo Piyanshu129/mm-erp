@@ -10,9 +10,10 @@ import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
-import { StockStatusBadge, Badge } from "@/components/ui/Badge";
+import { StockStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { stickerRange } from "@/lib/stickers";
 
 interface ItemDetail {
   id: number;
@@ -29,24 +30,28 @@ interface ItemDetail {
   brand: string | null;
 }
 
-interface UnitRow {
+interface PurchaseRow {
   id: number;
-  status: "IN_STOCK" | "ISSUED";
+  purchaseDate: string;
+  quantity: number;
+  purchaseCost: string;
+  stickerFrom: number | null;
+  stickerTo: number | null;
+  supplier: { name: string } | null;
+}
+
+interface IssueRow {
+  id: number;
+  quantity: number;
   createdAt: string;
-  purchase: {
-    id: number;
-    purchaseCost: string;
-    supplier: { name: string } | null;
-  };
-  jobCardPart: {
-    jobCard: { jobCardNumber: string; vehicle: { registrationNumber: string } };
-  } | null;
+  jobCard: { id: number; jobCardNumber: string; vehicle: { registrationNumber: string } };
 }
 
 function ItemDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<ItemDetail | null>(null);
-  const [units, setUnits] = useState<UnitRow[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
+  const [issues, setIssues] = useState<IssueRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -57,7 +62,8 @@ function ItemDetailPageContent() {
         apiFetch(`/items/${id}/stock-history`),
       ]);
       setItem(itemBody.item);
-      setUnits(historyBody.units);
+      setPurchases(historyBody.purchases);
+      setIssues(historyBody.issues);
       setLoading(false);
     })();
   }, [id]);
@@ -103,7 +109,11 @@ function ItemDetailPageContent() {
               <dd className="text-gray-900">₹{item.purchaseCost}</dd>
               <dt className="text-gray-500">MRP</dt>
               <dd className="text-gray-900">₹{item.sellingPrice}</dd>
-              <dt className="text-gray-500">Current Stock</dt>
+              <dt className="text-gray-500">Purchased Qty</dt>
+              <dd className="text-gray-900">
+                {purchases.reduce((sum, p) => sum + p.quantity, 0)} {item.uom}
+              </dd>
+              <dt className="text-gray-500">Available Qty</dt>
               <dd className="font-semibold text-gray-900">
                 {item.currentStock} {item.uom}
               </dd>
@@ -115,50 +125,62 @@ function ItemDetailPageContent() {
       </Card>
 
       <div>
-        <h2 className="mb-3 text-base font-semibold text-gray-900">Unit-by-unit stock history</h2>
-        <p className="mb-3 text-sm text-gray-500">
-          Every physical unit of this item has its own permanent serial number — the same number written on its
-          sticker when it was received.
-        </p>
-        {units.length === 0 ? (
-          <EmptyState icon={History} title="No units purchased yet" />
+        <h2 className="mb-3 text-base font-semibold text-gray-900">Purchased</h2>
+        {purchases.length === 0 ? (
+          <EmptyState icon={History} title="Not purchased yet" />
         ) : (
-          <Table minWidth={750}>
+          <Table minWidth={650}>
             <thead>
               <tr>
-                <Th>Serial No.</Th>
-                <Th>Status</Th>
-                <Th>Purchased From</Th>
-                <Th>Purchased On</Th>
-                <Th>Issued To</Th>
+                <Th>Date</Th>
+                <Th>Supplier</Th>
+                <Th>Qty</Th>
+                <Th>Rate</Th>
+                <Th>Stickers</Th>
               </tr>
             </thead>
             <tbody>
-              {units.map((u) => (
+              {purchases.map((p) => (
+                <Tr key={p.id}>
+                  <Td>{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                  <Td>
+                    {p.supplier?.name ?? "-"} <span className="text-gray-400">(Purchase #{p.id})</span>
+                  </Td>
+                  <Td>{p.quantity}</Td>
+                  <Td>₹{p.purchaseCost}</Td>
+                  <Td className="font-mono">{stickerRange(item.itemCode, p.stickerFrom, p.stickerTo) || "-"}</Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-base font-semibold text-gray-900">Used on job cards</h2>
+        {issues.length === 0 ? (
+          <EmptyState icon={History} title="Not used on any job card yet" />
+        ) : (
+          <Table minWidth={550}>
+            <thead>
+              <tr>
+                <Th>Date</Th>
+                <Th>Job Card</Th>
+                <Th>Vehicle</Th>
+                <Th>Qty Used</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {issues.map((u) => (
                 <Tr key={u.id}>
-                  <Td className="font-mono font-medium">#{u.id}</Td>
-                  <Td>
-                    {u.status === "IN_STOCK" ? (
-                      <Badge tone="green">In stock</Badge>
-                    ) : (
-                      <Badge tone="gray">Issued</Badge>
-                    )}
-                  </Td>
-                  <Td>
-                    {u.purchase.supplier?.name ?? "-"}{" "}
-                    <span className="text-gray-400">(Purchase #{u.purchase.id})</span>
-                  </Td>
                   <Td>{new Date(u.createdAt).toLocaleDateString()}</Td>
                   <Td>
-                    {u.jobCardPart ? (
-                      <>
-                        {u.jobCardPart.jobCard.jobCardNumber} ·{" "}
-                        {u.jobCardPart.jobCard.vehicle.registrationNumber}
-                      </>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
+                    <Link href={`/dashboard/jobcards/${u.jobCard.id}`} className="text-blue-600 hover:underline">
+                      {u.jobCard.jobCardNumber}
+                    </Link>
                   </Td>
+                  <Td>{u.jobCard.vehicle.registrationNumber}</Td>
+                  <Td>{u.quantity}</Td>
                 </Tr>
               ))}
             </tbody>

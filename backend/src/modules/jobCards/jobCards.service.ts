@@ -24,11 +24,14 @@ export interface JobCardInput {
 const detailInclude = {
   vehicle: { include: { customer: true } },
   media: { orderBy: { createdAt: "asc" as const } },
-  parts: { include: { item: true, itemUnit: true }, orderBy: { id: "asc" as const } },
+  parts: { include: { item: true }, orderBy: { id: "asc" as const } },
   labour: { orderBy: { id: "asc" as const } },
   assignedEmployee: { select: { id: true, name: true, role: true } },
   createdBy: { select: { id: true, name: true } },
-  invoice: { select: { id: true, invoiceNumber: true } },
+  invoice: { select: { id: true, invoiceNumber: true, discount: true, paymentAmount: true } },
+  estimate: {
+    select: { id: true, estimateNumber: true, status: true, approvalPhotoUrl: true, approvedAt: true },
+  },
 } satisfies Prisma.JobCardInclude;
 
 function withTotals<T extends { parts: { amount: Prisma.Decimal }[]; labour: { amount: Prisma.Decimal }[] }>(
@@ -145,20 +148,21 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
     throw new ConflictError(`Invalid status: ${input.status}`);
   }
 
-  // Once invoiced, a job card's status is final — moving it back to Open
-  // or Cancelled would make it look editable (or void) while its invoice
-  // still stands.
-  if (jobCard.invoice && input.status && input.status !== "INVOICED") {
+  // An invoiced job card can be set back to Open to change it; its draft
+  // invoice keeps its number and payments, and is brought up to date when
+  // the job card is invoiced again. It can't be cancelled while a draft
+  // invoice stands against it.
+  if (jobCard.invoice && input.status === "CANCELLED") {
     throw new ConflictError(
-      `This job card was already invoiced (${jobCard.invoice.invoiceNumber}) — its status can't be changed`
+      `This job card has draft invoice ${jobCard.invoice.invoiceNumber} — it can't be cancelled`
     );
   }
 
-  // Invoiced is reached only by generating the invoice (which sets it in the
-  // same transaction), never by setting the status directly — otherwise a
-  // job card could say Invoiced with no invoice behind it.
-  if (input.status === "INVOICED" && !jobCard.invoice) {
-    throw new ConflictError("Generate the invoice to mark this job card Invoiced");
+  // Invoiced is reached only by generating the draft invoice (which sets it
+  // in the same transaction), never by setting the status directly —
+  // otherwise a job card could say Invoiced with an out-of-date invoice.
+  if (input.status === "INVOICED" && jobCard.status !== "INVOICED") {
+    throw new ConflictError("Generate the draft invoice to mark this job card Invoiced");
   }
 
   if (input.assignedEmployeeId != null) {

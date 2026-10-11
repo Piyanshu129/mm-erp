@@ -30,26 +30,27 @@ model Role {
 // integrity beyond "is this string one we currently recognize" (checked at
 // the API layer, not the DB layer).
 model User {
-  id           Int       @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   name         String
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  isActive     Boolean   @default(true) @map("is_active")
-  roleId       Int       @map("role_id")
-  role         Role      @relation(fields: [roleId], references: [id])
-  permissions  String[]  @default([])
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  isActive     Boolean  @default(true) @map("is_active")
+  roleId       Int      @map("role_id")
+  role         Role     @relation(fields: [roleId], references: [id])
+  permissions  String[] @default([])
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   refreshTokens    RefreshToken[]
   purchases        Purchase[]
   supplierPayments SupplierPayment[]
   employeeAdvances EmployeeAdvance[]
   invoicePayments  InvoicePayment[]
-  jobCards        JobCard[]
-  jobCardParts    JobCardPart[]
-  invoices        Invoice[]
-  attendanceEdits Attendance[]
+  estimates        Estimate[]
+  jobCards         JobCard[]
+  jobCardParts     JobCardPart[]
+  invoices         Invoice[]
+  attendanceEdits  Attendance[]
 
   @@map("users")
 }
@@ -119,12 +120,11 @@ model Vehicle {
   @@map("vehicles")
 }
 
-// itemCode is assigned server-side right after insert (ITM-000123, derived
-// from the row's own id) — never typed by a user, so it can never collide.
-// currentStock is a denormalized count of this item's ItemUnit rows with
-// status IN_STOCK, kept in sync transactionally alongside every purchase
-// and every parts-issue/reversal — see purchases.service.ts and
-// jobCardParts.service.ts.
+// itemCode is assigned server-side right after insert (0001, 0002, ...,
+// derived from the row's own id) — never typed by a user, so it can never
+// collide. currentStock is the available quantity: every purchase adds its
+// quantity and every job card part takes its quantity out, transactionally
+// — see purchases.service.ts and jobCardParts.service.ts.
 model Item {
   id           Int      @id @default(autoincrement())
   itemCode     String   @unique @map("item_code")
@@ -147,9 +147,9 @@ model Item {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  purchases    Purchase[]
-  units        ItemUnit[]
-  jobCardParts JobCardPart[]
+  purchases     Purchase[]
+  jobCardParts  JobCardPart[]
+  estimateLines EstimateLine[]
 
   @@map("items")
 }
@@ -197,13 +197,13 @@ model SupplierPayment {
 }
 
 // A Purchase is one buying event. For inventory types (SPARE_PART/PAINT/
-// TOOL) it references an Item and generates one ItemUnit per unit of
-// quantity — each physical part gets its own permanent, never-reused
-// serial number (the ItemUnit's own id), per the workshop's actual
-// practice of writing a serial on a sticker for every part received, even
-// when several identical parts arrive in the same purchase. For expense
-// types (TRAVEL/PETROL/FOOD/OTHERS) itemId/units are unused — it's just a
-// cost record with no stock implications.
+// TOOL) it references an Item and adds its quantity to the item's stock.
+// Each piece still gets a sticker: stickerFrom..stickerTo is this
+// purchase's range of the item's sticker numbers, printed as
+// <item number>.<n> (10 of item 0001 → 1.1 – 1.10; the next purchase of it
+// continues at 1.11). For expense types (TRAVEL/PETROL/FOOD/OTHERS) itemId
+// and the stickers are unused — it's just a cost record with no stock
+// implications.
 //
 // One purchase entry in the UI can contain several items from the same
 // supplier; each item becomes its own Purchase row (sharing supplier, date,
@@ -214,47 +214,29 @@ model SupplierPayment {
 // normally empty for expenses — petrol or food isn't bought on a supplier's
 // account. Expenses recorded before 2026-09-30 may still have one.
 model Purchase {
-  id               Int       @id @default(autoincrement())
-  purchaseDate     DateTime  @default(now()) @map("purchase_date")
-  supplierId       Int?      @map("supplier_id")
-  supplier         Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  itemType         String    @map("item_type") // SPARE_PART | PAINT | TOOL | TRAVEL | PETROL | FOOD | OTHERS
-  itemId           Int?      @map("item_id") // set only for inventory item types
-  item             Item?     @relation(fields: [itemId], references: [id])
-  description      String? // for expense-type purchases (no item)
-  quantity         Int       @default(1)
-  purchaseCost     Decimal   @db.Decimal(12, 2) @map("purchase_cost") // per unit for inventory; total for expenses
-  sellingPrice     Decimal?  @db.Decimal(12, 2) @map("selling_price")
-  billUrl          String?   @map("bill_url")
-  remarks          String?
-  createdById      Int       @map("created_by_id")
-  createdBy        User      @relation(fields: [createdById], references: [id])
-  createdAt        DateTime  @default(now()) @map("created_at")
-
-  units ItemUnit[]
+  id           Int       @id @default(autoincrement())
+  purchaseDate DateTime  @default(now()) @map("purchase_date")
+  supplierId   Int?      @map("supplier_id")
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  itemType     String    @map("item_type") // SPARE_PART | PAINT | TOOL | TRAVEL | PETROL | FOOD | OTHERS
+  itemId       Int?      @map("item_id") // set only for inventory item types
+  item         Item?     @relation(fields: [itemId], references: [id])
+  description  String? // for expense-type purchases (no item)
+  quantity     Int       @default(1)
+  purchaseCost Decimal   @map("purchase_cost") @db.Decimal(12, 2) // per unit for inventory; total for expenses
+  sellingPrice Decimal?  @map("selling_price") @db.Decimal(12, 2)
+  billUrl      String?   @map("bill_url")
+  // Sticker labels for the pieces in this purchase: "<item no>.<n>" for n
+  // from stickerFrom to stickerTo — e.g. 10 of item 0001 → 1.1 … 1.10; the
+  // next purchase of that item carries on from 1.11. Inventory types only.
+  stickerFrom  Int?      @map("sticker_from")
+  stickerTo    Int?      @map("sticker_to")
+  remarks      String?
+  createdById  Int       @map("created_by_id")
+  createdBy    User      @relation(fields: [createdById], references: [id])
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   @@map("purchases")
-}
-
-// One row per physical unit. Its own id IS the unit's permanent serial
-// number — assigned the moment it's created, never reused, never
-// hand-typed. Parts Issue on a job card consumes one specific ItemUnit
-// (entered/scanned by serial), not "an item, minus a quantity" — this is
-// the traceability mechanism now: a unit's purchase and jobCardPart
-// relations already say exactly where it came from and where it went,
-// with no separate ledger needed.
-model ItemUnit {
-  id         Int      @id @default(autoincrement())
-  itemId     Int      @map("item_id")
-  item       Item     @relation(fields: [itemId], references: [id])
-  purchaseId Int      @map("purchase_id")
-  purchase   Purchase @relation(fields: [purchaseId], references: [id])
-  status     String   @default("IN_STOCK") // IN_STOCK | ISSUED
-  createdAt  DateTime @default(now()) @map("created_at")
-
-  jobCardPart JobCardPart?
-
-  @@map("item_units")
 }
 
 // Phase 4/Rev2: Job Card is the central sales-side workflow record.
@@ -267,23 +249,23 @@ model ItemUnit {
 // financial record, once invoiced, can't silently drift from what was
 // actually billed.
 model JobCard {
-  id            Int      @id @default(autoincrement())
-  jobCardNumber String   @unique @map("job_card_number")
-  vehicleId     Int      @map("vehicle_id")
-  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id])
-  jobType       String?  @map("job_type") // GENERAL_SERVICE | ACCIDENTAL_CLAIM | AC | DENT_PAINT | MECHANICAL
-  kmAtService   Int?     @map("km_at_service")
-  complaint     String?
-  requiredWork  String?  @map("required_work")
+  id               Int       @id @default(autoincrement())
+  jobCardNumber    String    @unique @map("job_card_number")
+  vehicleId        Int       @map("vehicle_id")
+  vehicle          Vehicle   @relation(fields: [vehicleId], references: [id])
+  jobType          String?   @map("job_type") // GENERAL_SERVICE | ACCIDENTAL_CLAIM | AC | DENT_PAINT | MECHANICAL
+  kmAtService      Int?      @map("km_at_service")
+  complaint        String?
+  requiredWork     String?   @map("required_work")
   expectedDelivery DateTime? @map("expected_delivery")
-  notes         String?
-  status        String   @default("OPEN") // OPEN | INVOICED | CANCELLED — see lib/jobCardStatus.ts
+  notes            String?
+  status           String    @default("OPEN") // OPEN | INVOICED | CANCELLED — see lib/jobCardStatus.ts
 
   // Initial inspection
   inspectionFindings String? @map("inspection_findings")
 
   // Estimate / customer approval — optional step
-  estimateAmount     Decimal?  @db.Decimal(12, 2) @map("estimate_amount")
+  estimateAmount     Decimal?  @map("estimate_amount") @db.Decimal(12, 2)
   estimateApproved   Boolean?  @map("estimate_approved") // null = not decided yet
   estimateApprovedAt DateTime? @map("estimate_approved_at")
 
@@ -303,10 +285,11 @@ model JobCard {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  media   JobCardMedia[]
-  parts   JobCardPart[]
-  labour  JobCardLabour[]
-  invoice Invoice?
+  media    JobCardMedia[]
+  parts    JobCardPart[]
+  labour   JobCardLabour[]
+  invoice  Invoice?
+  estimate Estimate?
 
   @@map("job_cards")
 }
@@ -327,25 +310,66 @@ model JobCardMedia {
   @@map("job_card_media")
 }
 
-// One row per issued physical unit (one row = one part, since each unit
-// already has its own serial — there is no separate "quantity" anymore).
-// amount is captured at the moment of issue (from Item.sellingPrice at
+// One row per item used on a job card: the quantity taken out of stock.
+// rate and amount are captured at the moment of issue (from Item.sellingPrice at
 // that time) and never recomputed later, so a later item price change
 // can't silently change what an already-issued job card is worth.
 model JobCardPart {
   id          Int      @id @default(autoincrement())
   jobCardId   Int      @map("job_card_id")
   jobCard     JobCard  @relation(fields: [jobCardId], references: [id])
-  itemUnitId  Int      @unique @map("item_unit_id")
-  itemUnit    ItemUnit @relation(fields: [itemUnitId], references: [id])
   itemId      Int      @map("item_id")
   item        Item     @relation(fields: [itemId], references: [id])
-  amount      Decimal  @db.Decimal(12, 2)
+  quantity    Int      @default(1)
+  rate        Decimal  @db.Decimal(12, 2) // the item's MRP when issued
+  amount      Decimal  @db.Decimal(12, 2) // quantity × rate
   createdById Int      @map("created_by_id")
   createdBy   User     @relation(fields: [createdById], references: [id])
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("job_card_parts")
+}
+
+// The estimate shown to the customer before work starts — one per job card,
+// pre-filled from it. Lines can be inventory items, parts not in inventory,
+// or labour. Once the customer signs it, a photo of the signed copy is
+// uploaded (approvalPhotoUrl) and the estimate is APPROVED and locked.
+model Estimate {
+  id               Int       @id @default(autoincrement())
+  estimateNumber   String    @unique @map("estimate_number")
+  jobCardId        Int       @unique @map("job_card_id")
+  jobCard          JobCard   @relation(fields: [jobCardId], references: [id])
+  estimateDate     DateTime  @default(now()) @map("estimate_date")
+  taxRate          Decimal?  @map("tax_rate") @db.Decimal(5, 2) // % — optional
+  notes            String?
+  status           String    @default("DRAFT") // DRAFT | APPROVED
+  approvalPhotoUrl String?   @map("approval_photo_url")
+  approvedAt       DateTime? @map("approved_at")
+  createdById      Int       @map("created_by_id")
+  createdBy        User      @relation(fields: [createdById], references: [id])
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  lines EstimateLine[]
+
+  @@map("estimates")
+}
+
+model EstimateLine {
+  id          Int      @id @default(autoincrement())
+  estimateId  Int      @map("estimate_id")
+  estimate    Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  lineType    String   @map("line_type") // PART | LABOUR
+  itemId      Int?     @map("item_id") // set when the part is from inventory
+  item        Item?    @relation(fields: [itemId], references: [id])
+  description String
+  quantity    Int      @default(1)
+  rate        Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([estimateId])
+  @@map("estimate_lines")
 }
 
 model JobCardLabour {
@@ -374,21 +398,21 @@ model JobCardLabour {
 // transaction as every payment. Pending/Partial/Paid is computed from
 // paymentAmount vs totalAmount, never stored.
 model Invoice {
-  id                Int       @id @default(autoincrement())
-  invoiceNumber     String    @unique @map("invoice_number")
-  jobCardId         Int       @unique @map("job_card_id")
-  jobCard           JobCard   @relation(fields: [jobCardId], references: [id])
-  invoiceDate       DateTime  @default(now()) @map("invoice_date")
-  partsTotal        Decimal   @db.Decimal(12, 2) @map("parts_total")
-  labourTotal       Decimal   @db.Decimal(12, 2) @map("labour_total")
-  discount          Decimal   @default(0) @db.Decimal(12, 2)
-  taxRate           Decimal?  @db.Decimal(5, 2) @map("tax_rate")
-  taxAmount         Decimal?  @db.Decimal(12, 2) @map("tax_amount")
-  totalAmount       Decimal   @db.Decimal(12, 2) @map("total_amount")
-  paymentAmount     Decimal   @default(0) @db.Decimal(12, 2) @map("payment_amount")
-  createdById       Int       @map("created_by_id")
-  createdBy         User      @relation(fields: [createdById], references: [id])
-  createdAt         DateTime  @default(now()) @map("created_at")
+  id            Int      @id @default(autoincrement())
+  invoiceNumber String   @unique @map("invoice_number")
+  jobCardId     Int      @unique @map("job_card_id")
+  jobCard       JobCard  @relation(fields: [jobCardId], references: [id])
+  invoiceDate   DateTime @default(now()) @map("invoice_date")
+  partsTotal    Decimal  @map("parts_total") @db.Decimal(12, 2)
+  labourTotal   Decimal  @map("labour_total") @db.Decimal(12, 2)
+  discount      Decimal  @default(0) @db.Decimal(12, 2)
+  taxRate       Decimal? @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount     Decimal? @map("tax_amount") @db.Decimal(12, 2)
+  totalAmount   Decimal  @map("total_amount") @db.Decimal(12, 2)
+  paymentAmount Decimal  @default(0) @map("payment_amount") @db.Decimal(12, 2)
+  createdById   Int      @map("created_by_id")
+  createdBy     User     @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now()) @map("created_at")
 
   payments InvoicePayment[]
 
@@ -430,7 +454,7 @@ model Employee {
   mobile                String?
   passwordHash          String?  @map("password_hash")
   joiningDate           DateTime @map("joining_date")
-  monthlySalary         Decimal  @db.Decimal(12, 2) @map("monthly_salary")
+  monthlySalary         Decimal  @map("monthly_salary") @db.Decimal(12, 2)
   monthlyLeaveAllowance Int      @default(0) @map("monthly_leave_allowance")
   isActive              Boolean  @default(true) @map("is_active")
   createdAt             DateTime @default(now()) @map("created_at")
@@ -496,23 +520,23 @@ model Attendance {
 // attendance correction doesn't silently change an already-paid salary —
 // recalculating is an explicit action, not automatic.
 model SalaryPayment {
-  id            Int       @id @default(autoincrement())
-  employeeId    Int       @map("employee_id")
-  employee      Employee  @relation(fields: [employeeId], references: [id])
-  periodMonth   Int       @map("period_month")
-  periodYear    Int       @map("period_year")
-  presentDays   Int       @map("present_days")
-  absentDays    Int       @map("absent_days")
-  leaveDays     Int       @map("leave_days")
-  grossSalary   Decimal   @db.Decimal(12, 2) @map("gross_salary")
+  id               Int       @id @default(autoincrement())
+  employeeId       Int       @map("employee_id")
+  employee         Employee  @relation(fields: [employeeId], references: [id])
+  periodMonth      Int       @map("period_month")
+  periodYear       Int       @map("period_year")
+  presentDays      Int       @map("present_days")
+  absentDays       Int       @map("absent_days")
+  leaveDays        Int       @map("leave_days")
+  grossSalary      Decimal   @map("gross_salary") @db.Decimal(12, 2)
   // Total of the advances charged to this month, at calculation time.
-  advanceDeduction Decimal @default(0) @db.Decimal(12, 2) @map("advance_deduction")
-  netSalary     Decimal   @db.Decimal(12, 2) @map("net_salary")
-  paymentAmount Decimal   @default(0) @db.Decimal(12, 2) @map("payment_amount")
-  paymentDate   DateTime? @map("payment_date")
-  paymentMode   String?   @map("payment_mode")
-  paymentBy     String?   @map("payment_by")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  advanceDeduction Decimal   @default(0) @map("advance_deduction") @db.Decimal(12, 2)
+  netSalary        Decimal   @map("net_salary") @db.Decimal(12, 2)
+  paymentAmount    Decimal   @default(0) @map("payment_amount") @db.Decimal(12, 2)
+  paymentDate      DateTime? @map("payment_date")
+  paymentMode      String?   @map("payment_mode")
+  paymentBy        String?   @map("payment_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
 
   @@unique([employeeId, periodMonth, periodYear])
   @@map("salary_payments")

@@ -540,7 +540,7 @@
       <ol class="steps">
         <li>From <strong>Items</strong> → <strong>New item</strong>, fill in name, category, unit of measure (PCS, LTR, SET…), pricing, and minimum stock level.</li>
         <li>A photo is optional but recommended — it helps staff confirm they've picked the right part.</li>
-        <li>Save. An <strong>Item Code</strong> like <span class="mono">ITM-000042</span> is assigned automatically — this never changes and is never typed by hand.</li>
+        <li>Save. An <strong>Item Code</strong> like <span class="mono">0042</span> is assigned automatically — this never changes and is never typed by hand.</li>
       </ol>
       <p>Each item's page shows a full <strong>stock history</strong>: every purchase that brought stock in and every job card that took stock out, in order.</p>
 
@@ -561,12 +561,12 @@
       <ol class="steps">
         <li>From <strong>Purchases</strong> → <strong>New purchase</strong>, pick the supplier.</li>
         <li>Choose <strong>Existing item</strong> and search for it, or <strong>New item</strong> to register something you've never stocked before — right there in the same form.</li>
-        <li>Enter quantity and cost. Save — stock goes up immediately, and every purchase is given a running <strong>Serial No.</strong> (1, 2, 3…) that's permanent and never re-used.</li>
+        <li>Enter quantity and cost. Save — stock goes up immediately, and the screen lists a <strong>sticker number</strong> for every piece (item number, then piece number) to write on or print.</li>
       </ol>
 
       <div class="callout good">
         <span class="label">Worked example</span>
-        <p>Buy 5 oil filters → Serial No. 1, stock becomes 5. Buy 10 more later → Serial No. 2, stock becomes 15. One serial number per purchase, no matter the quantity.</p>
+        <p>Oil filter is item 0001. Buy 5 → stickers 1.1 – 1.5, stock becomes 5. Buy 10 more later → stickers 1.6 – 1.15, stock becomes 15. On a job card, enter item code 0001 and the quantity used — using 2 leaves 13.</p>
       </div>
     </section>
 
@@ -636,9 +636,10 @@
         <table class="spec">
           <tr><th>Term</th><th>What it means</th></tr>
           <tr><td class="code">JC-000014</td><td><strong>Job Card Number.</strong> Assigned automatically the moment a job card is created. Never typed, never repeated.</td></tr>
-          <tr><td class="code">ITM-000042</td><td><strong>Item Code.</strong> Assigned automatically the first time a part is added to inventory.</td></tr>
-          <tr><td class="code">Serial No. 7</td><td>Identifies one <strong>purchase</strong> transaction — not one physical unit. Buying 20 filters at once is still a single serial number.</td></tr>
-          <tr><td class="code">INV-000009</td><td><strong>Invoice Number.</strong> Assigned automatically when an invoice is generated from a completed job card.</td></tr>
+          <tr><td class="code">0042</td><td><strong>Item Code.</strong> Assigned automatically the first time a part is added to inventory. Type it on a job card to use the item.</td></tr>
+          <tr><td class="code">42.7</td><td><strong>Sticker number</strong> — item 0042, piece 7. Every piece purchased gets one; numbering carries on across purchases.</td></tr>
+          <tr><td class="code">EST-000003</td><td><strong>Estimate Number.</strong> One per job card — printed for the customer to sign, then approved by uploading a photo of the signed copy.</td></tr>
+          <tr><td class="code">INV-000009</td><td><strong>Draft Invoice Number.</strong> Assigned automatically when a draft invoice is generated from a job card.</td></tr>
           <tr><td>UOM</td><td>Unit of Measure — how an item is counted: PCS (pieces), LTR (litres), SET, etc.</td></tr>
         </table>
       </div>

@@ -52,8 +52,8 @@ function InvoicesPageContent() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Invoices"
-        description="Every invoice generated when a job card is marked Invoiced. Downloads are named by car number and date."
+        title="Draft Invoices"
+        description="Every draft invoice generated when a job card is marked Invoiced. Downloads are named by car number and date."
       />
 
       <form onSubmit={handleSearch} className="flex max-w-md gap-2">
@@ -66,12 +66,12 @@ function InvoicesPageContent() {
       {loading ? (
         <TableSkeleton cols={6} />
       ) : invoices.length === 0 ? (
-        <EmptyState icon={Receipt} title="No invoices yet" description="Invoices appear here once a job card is marked Invoiced." />
+        <EmptyState icon={Receipt} title="No draft invoices yet" description="Draft invoices appear here once a job card is marked Invoiced." />
       ) : (
         <Table minWidth={1000}>
           <thead>
             <tr>
-              <Th>Invoice #</Th>
+              <Th>Draft Invoice #</Th>
               <Th>Date</Th>
               <Th>Job Card</Th>
               <Th>Vehicle</Th>

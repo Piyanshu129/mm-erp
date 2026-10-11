@@ -71,7 +71,7 @@ MM/
 3. On the backend, the request passes through `app.ts`'s global middleware (CORS, JSON body parsing, cookies, static `/uploads`), then the matched module's router.
 4. Each module's router applies `authenticate` (verifies the JWT) and `requirePermission("SOME_MODULE")` (or `authorize("ADMIN")` for admin-only routes) before any handler runs.
 5. `validateBody(schema)` (a Zod schema) parses/coerces `req.body`, throwing a `ZodError` on anything invalid — caught centrally by `errorHandler` and turned into `{"error": "Validation failed", "details": {...}}`.
-6. The controller calls into a `*.service.ts` function, which does the actual Prisma work — often inside `prisma.$transaction(...)` when more than one table needs to change atomically (e.g. a purchase creating `ItemUnit` rows and bumping `Item.currentStock` together).
+6. The controller calls into a `*.service.ts` function, which does the actual Prisma work — often inside `prisma.$transaction(...)` when more than one table needs to change atomically (e.g. a purchase creating `Purchase` rows with their sticker ranges and bumping `Item.currentStock` together).
 7. The response is plain JSON. Errors are `AppError` subclasses (`UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `ConflictError`) mapped to the right HTTP status by `errorHandler`.
 
 See [03-backend.md](03-backend.md) for the full middleware/route reference, and [05-workflows.md](05-workflows.md) for how several of these requests chain together into one real business process (e.g. "create a job card → issue parts → generate an invoice").

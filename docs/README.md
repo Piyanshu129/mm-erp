@@ -13,7 +13,7 @@ This developer documentation is generated from the code itself (not just the pla
 2. **[02-database-schema.md](02-database-schema.md)** — every table in the Postgres/Prisma schema, grouped by domain, with the *why* behind the non-obvious design choices.
 3. **[03-backend.md](03-backend.md)** — Express app structure, the request pipeline (auth/permissions/validation/errors), file uploads, and a full reference of every API route.
 4. **[04-frontend.md](04-frontend.md)** — Next.js App Router structure, the two separate auth systems (admin dashboard vs. employee portal), the API client, and a page-by-page map.
-5. **[05-workflows.md](05-workflows.md)** — the key business processes traced end-to-end through frontend → API → database: onboarding a vehicle, purchasing and per-unit serials, the job card lifecycle, invoicing, attendance → salary, and permissions.
+5. **[05-workflows.md](05-workflows.md)** — the key business processes traced end-to-end through frontend → API → database: onboarding a vehicle, purchasing, stock and stickers, estimates, the job card lifecycle, invoicing, attendance → salary, and permissions.
 6. **[06-deployment-and-ops.md](06-deployment-and-ops.md)** — how the system actually runs today (local Postgres + backend, ngrok tunnel, Vercel frontend), environment variables, storage, and backup/restore.
 
 ## Where to start

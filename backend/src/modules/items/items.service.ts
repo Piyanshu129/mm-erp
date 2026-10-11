@@ -1,6 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
+import { formatItemCode, normalizeItemCode } from "../../lib/itemCode";
 
 export interface ItemInput {
   name: string;
@@ -40,17 +41,25 @@ export async function listItems(
     prisma.item.findMany({ where, orderBy: { createdAt: "desc" }, ...toSkipTake(page) }),
   ]);
 
-  // The sticker serial numbers of each item's pieces still on the shelf, so
-  // the list shows which physical parts are in stock.
-  const units = await prisma.itemUnit.findMany({
-    where: { itemId: { in: items.map((i) => i.id) }, status: "IN_STOCK" },
-    select: { id: true, itemId: true },
-    orderBy: { id: "asc" },
+  // Purchased Qty (everything ever bought) alongside Available Qty
+  // (currentStock — what's left after job cards used some).
+  const purchased = await prisma.purchase.groupBy({
+    by: ["itemId"],
+    where: { itemId: { in: items.map((i) => i.id) } },
+    _sum: { quantity: true },
   });
-  const serialsByItem = new Map<number, number[]>();
-  for (const u of units) serialsByItem.set(u.itemId, [...(serialsByItem.get(u.itemId) ?? []), u.id]);
+  const purchasedByItem = new Map(purchased.map((p) => [p.itemId, p._sum.quantity ?? 0]));
 
-  return { total, items: items.map((i) => ({ ...i, inStockSerials: serialsByItem.get(i.id) ?? [] })) };
+  return { total, items: items.map((i) => ({ ...i, purchasedQty: purchasedByItem.get(i.id) ?? 0 })) };
+}
+
+// The item for a code typed on a job card or estimate ("1", "0001", ...),
+// with what's available — the job card's parts entry fetches this.
+export async function getItemByCode(code: string) {
+  const itemCode = normalizeItemCode(code);
+  const item = itemCode ? await prisma.item.findUnique({ where: { itemCode } }) : null;
+  if (!item) throw new NotFoundError(`No item with code ${code}`);
+  return item;
 }
 
 export async function getItem(id: number) {
@@ -65,21 +74,21 @@ function assertSellingPriceValid(purchaseCost: number | undefined, sellingPrice:
   }
 }
 
-// itemCode is derived from the row's own id right after insert (ITM-000123),
-// inside one transaction, so it's always unique and never hand-typed.
+// itemCode is derived from the row's own id right after insert (0001,
+// 0002, ...), inside one transaction, so it's always unique and never
+// hand-typed.
 export async function createItem(input: ItemInput, photoUrl?: string) {
   assertSellingPriceValid(input.purchaseCost, input.sellingPrice);
   return prisma.$transaction(async (tx) => {
     const created = await tx.item.create({
       data: {
         ...input,
-        itemCode: "PENDING",
+        itemCode: `PENDING-${Date.now()}-${Math.random()}`,
         photoUrl,
       },
     });
 
-    const itemCode = `ITM-${String(created.id).padStart(6, "0")}`;
-    return tx.item.update({ where: { id: created.id }, data: { itemCode } });
+    return tx.item.update({ where: { id: created.id }, data: { itemCode: formatItemCode(created.id) } });
   });
 }
 
@@ -104,36 +113,37 @@ export async function setItemActive(id: number, isActive: boolean) {
   return prisma.item.update({ where: { id }, data: { isActive } });
 }
 
-// Full traceability trail for one item: every physical unit ever
-// purchased, newest first — each one's own serial number, where it came
-// from (purchase + supplier), and where it went (job card + vehicle) if
-// issued. This replaced a separate stock-ledger table entirely: a unit's
-// own relations already say everything a ledger entry would have.
+// The item's stock movements: every purchase that brought quantity in
+// (with its sticker labels) and every job card that used some.
 export async function getItemStockHistory(id: number) {
   const item = await prisma.item.findUnique({ where: { id } });
   if (!item) throw new NotFoundError("Item not found");
 
-  const units = await prisma.itemUnit.findMany({
-    where: { itemId: id },
-    include: {
-      purchase: { include: { supplier: true } },
-      jobCardPart: { include: { jobCard: { include: { vehicle: true } } } },
-    },
-    orderBy: { id: "desc" },
-  });
+  const [purchases, issues] = await Promise.all([
+    prisma.purchase.findMany({
+      where: { itemId: id },
+      select: {
+        id: true,
+        purchaseDate: true,
+        quantity: true,
+        purchaseCost: true,
+        stickerFrom: true,
+        stickerTo: true,
+        supplier: { select: { name: true } },
+      },
+      orderBy: { id: "desc" },
+    }),
+    prisma.jobCardPart.findMany({
+      where: { itemId: id },
+      select: {
+        id: true,
+        quantity: true,
+        createdAt: true,
+        jobCard: { select: { id: true, jobCardNumber: true, vehicle: { select: { registrationNumber: true } } } },
+      },
+      orderBy: { id: "desc" },
+    }),
+  ]);
 
-  return units;
-}
-
-// The "browse and pick" convenience for Parts Issue — every serial of this
-// item still sitting on the shelf, for when staff doesn't already have the
-// physical part (and its sticker) in hand.
-export async function getAvailableUnits(id: number) {
-  const item = await prisma.item.findUnique({ where: { id } });
-  if (!item) throw new NotFoundError("Item not found");
-
-  return prisma.itemUnit.findMany({
-    where: { itemId: id, status: "IN_STOCK" },
-    orderBy: { id: "asc" },
-  });
+  return { purchases, issues };
 }
