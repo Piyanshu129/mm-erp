@@ -22,14 +22,15 @@ $envText = Get-Content "$Backend\.env" -Raw
 $DbPort = if ($envText -match 'DATABASE_URL="?postgresql://[^@]+@[^:/]+:(\d+)/') { $Matches[1] } else { "5432" }
 $AppPort = if ($envText -match '(?m)^PORT=(\d+)') { $Matches[1] } else { "4000" }
 
-# 1. Database
-& "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" status *> $null
-if ($LASTEXITCODE -ne 0) {
+# 1. Database. "Running" means its port is answering. pg_ctl's own status
+# check can miss a server that setup.bat started, and starting a second one
+# then fails on the log file the first one holds open.
+if (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyContinue) {
+  Write-Host "Database already running."
+} else {
   Write-Host "Starting the database..."
   & "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" -l "$PgDir\server.log" -o "-p $DbPort" -w start
   if ($LASTEXITCODE -ne 0) { throw "The database didn't start - see $PgDir\server.log" }
-} else {
-  Write-Host "Database already running."
 }
 
 # Double-clicking again while it's running must not start second copies (a

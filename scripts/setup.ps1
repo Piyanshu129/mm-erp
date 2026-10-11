@@ -123,8 +123,8 @@ if (-not (Test-Path "$PgData\PG_VERSION")) {
   & "$PgDir\bin\initdb.exe" -D $PgData -U postgres --pwfile=$SuperPasswordFile -A scram-sha-256 -E UTF8; Check "initdb"
 }
 
-& "$PgDir\bin\pg_ctl.exe" -D $PgData status *> $null
-if ($LASTEXITCODE -ne 0) {
+# Running = its port is answering (pg_ctl's own status check can miss it).
+if (-not (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyContinue)) {
   Step "Starting the database server on port $DbPort"
   & "$PgDir\bin\pg_ctl.exe" -D $PgData -l "$PgDir\server.log" -o "-p $DbPort" -w start; Check "Starting PostgreSQL"
 }
