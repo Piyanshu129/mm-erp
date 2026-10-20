@@ -18,6 +18,7 @@ reportsRouter.use(requirePermission("REPORTS"));
 // Sales and purchase figures are admin-only, even for a user granted REPORTS.
 reportsRouter.get("/sales", authorize("ADMIN"), asyncHandler(reportsController.sales));
 reportsRouter.get("/purchases", authorize("ADMIN"), asyncHandler(reportsController.purchases));
+reportsRouter.get("/daily", authorize("ADMIN"), asyncHandler(reportsController.daily));
 reportsRouter.get("/inventory", asyncHandler(reportsController.inventory));
 reportsRouter.get("/workshop", asyncHandler(reportsController.workshop));
 reportsRouter.get("/customers", asyncHandler(reportsController.customers));

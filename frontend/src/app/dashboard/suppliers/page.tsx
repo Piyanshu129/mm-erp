@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { compressImage } from "@/lib/compressImage";
 import { formatINR, todayISO } from "@/lib/format";
 import { AuthedImage } from "@/components/AuthedMedia";
+import { PaymentChangeLog } from "@/components/PaymentChangeLog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -376,6 +377,7 @@ function PaymentHistoryCard({
         ) : (
           <>
             {supplier && <AccountSummary account={supplier.account} />}
+            <PaymentChangeLog url={`/suppliers/${supplierId}/payment-audits`} refreshKey={payments.map((p) => `${p.id}:${p.amount}`).join()} />
             {payments.length === 0 ? (
               <p className="text-sm text-gray-500">No payments recorded for this supplier yet.</p>
             ) : (

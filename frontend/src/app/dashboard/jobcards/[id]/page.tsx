@@ -391,11 +391,11 @@ function JobCardDetailPageContent() {
     let body: Record<string, unknown>;
     if (partMode === "outside") {
       if (!outsideDesc.trim()) {
-        setActionError("Enter what the part is");
+        setActionError("Enter the non-inventory item or service description");
         return;
       }
       if (outsideRate.trim() === "" || Number(outsideRate) < 0) {
-        setActionError("Enter the part's rate");
+        setActionError("Enter the rate for the non-inventory item");
         return;
       }
       body = { description: outsideDesc.trim(), rate: Number(outsideRate), quantity };
@@ -922,19 +922,19 @@ function JobCardDetailPageContent() {
               <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-700">
                 <label className="flex items-center gap-1.5">
                   <input type="radio" checked={partMode === "inventory"} onChange={() => setPartMode("inventory")} />
-                  From inventory
+                  Inventory item
                 </label>
                 <label className="flex items-center gap-1.5">
                   <input type="radio" checked={partMode === "outside"} onChange={() => setPartMode("outside")} />
-                  Not in inventory (bought outside)
+                  Non-inventory item (consumable, outsourced service, other charge)
                 </label>
               </div>
               <form onSubmit={handleAddPart} className="space-y-2">
                 {partMode === "outside" ? (
                   <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_6rem_7rem_auto]">
                     <div>
-                      <Label>Part</Label>
-                      <Input placeholder="e.g. Bumper clip" value={outsideDesc} onChange={(e) => setOutsideDesc(e.target.value)} />
+                      <Label>Item / service</Label>
+                      <Input placeholder="e.g. Coolant top-up, Outside welding" value={outsideDesc} onChange={(e) => setOutsideDesc(e.target.value)} />
                     </div>
                     <div>
                       <Label>Qty used</Label>
@@ -1075,7 +1075,11 @@ function JobCardDetailPageContent() {
                   <Td className="font-mono">{p.item?.itemCode ?? "—"}</Td>
                   <Td>
                     {p.item?.name ?? p.description}
-                    {!p.item && <span className="block text-xs text-gray-500">Not in inventory</span>}
+                    {!p.item && (
+                      <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
+                        Non-inventory — no stock change
+                      </span>
+                    )}
                   </Td>
                   <Td>
                     {fmtQty(p.quantity)} {p.item?.uom ?? ""}

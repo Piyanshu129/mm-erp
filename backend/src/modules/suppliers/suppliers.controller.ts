@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { mobileSchema } from "../../lib/phone";
 import * as suppliersService from "./suppliers.service";
+import { listPaymentAudits } from "../../lib/paymentAudit";
 import { parsePageParams } from "../../lib/pagination";
 import { publicUrlFor } from "../../middleware/upload";
 
@@ -64,16 +65,23 @@ export async function payments(req: Request, res: Response) {
 export async function updatePayment(req: Request, res: Response) {
   const input = recordPaymentSchema.parse(req.body);
   const proofUrl = req.file ? publicUrlFor("supplier-payments", req.file.filename) : undefined;
-  const payment = await suppliersService.updateSupplierPayment(Number(req.params.id), Number(req.params.paymentId), {
-    ...input,
-    proofUrl,
-  });
+  const payment = await suppliersService.updateSupplierPayment(
+    Number(req.params.id),
+    Number(req.params.paymentId),
+    { ...input, proofUrl },
+    req.user!.id
+  );
   res.json({ payment });
 }
 
 export async function deletePayment(req: Request, res: Response) {
-  await suppliersService.deleteSupplierPayment(Number(req.params.id), Number(req.params.paymentId));
+  await suppliersService.deleteSupplierPayment(Number(req.params.id), Number(req.params.paymentId), req.user!.id);
   res.status(204).send();
+}
+
+// The change log of this supplier's payments (admin edits and deletions).
+export async function paymentAudits(req: Request, res: Response) {
+  res.json({ audits: await listPaymentAudits({ paymentKind: "SUPPLIER", supplierId: Number(req.params.id) }) });
 }
 
 export async function recordPayment(req: Request, res: Response) {

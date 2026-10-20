@@ -9,6 +9,7 @@ import { ArrowLeft, Printer, Download, Phone } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { fmtQty } from "@/lib/format";
 import { WhatsAppMessage } from "@/components/WhatsAppMessage";
+import { PaymentChangeLog } from "@/components/PaymentChangeLog";
 import { paymentReminder } from "@/lib/whatsappMessages";
 import { invoiceFileName, downloadElementAsPdf } from "@/lib/invoicePdf";
 import {
@@ -231,7 +232,11 @@ function InvoiceDetailPageContent() {
                 {jobCard.parts.map((p) => (
                   <tr key={p.id} className="border-b border-gray-100">
                     <td className="py-1">
-                      {p.item ? `${p.item.itemCode} — ${p.item.name}` : p.description}
+                      {p.item ? `${p.item.itemCode} — ${p.item.name}` : (
+                        <>
+                          {p.description} <span className="text-xs text-gray-500">(non-inventory)</span>
+                        </>
+                      )}
                     </td>
                     <td className="py-1">
                       {fmtQty(p.quantity)} {p.item?.uom ?? ""}
@@ -342,6 +347,7 @@ function InvoiceDetailPageContent() {
             <p className="mb-2 text-sm font-semibold text-gray-900">Payment history</p>
             <InvoicePaymentHistory payments={invoice.payments} onChanged={() => load(true)} />
           </div>
+          <PaymentChangeLog url={`/invoices/${invoice.id}/payment-audits`} refreshKey={invoice.paymentAmount + invoice.payments.length} />
         </CardBody>
       </Card>
 

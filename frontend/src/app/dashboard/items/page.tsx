@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { UOM_OPTIONS } from "@/lib/uom";
 import { compressImage } from "@/lib/compressImage";
+import { fmtQty } from "@/lib/format";
 
 interface ItemRow {
   id: number;
@@ -29,6 +30,8 @@ interface ItemRow {
   minStock: number;
   currentStock: number;
   photoUrl: string | null;
+  brand: string | null;
+  specification: string | null;
   isActive: boolean;
   purchasedQty: number;
 }
@@ -227,14 +230,21 @@ function ItemsPageContent() {
                     {item.itemCode}
                   </Link>
                 </Td>
-                <Td className="font-medium text-gray-900">{item.name}</Td>
+                <Td className="font-medium text-gray-900">
+                  {item.name}
+                  {(item.brand || item.specification) && (
+                    <span className="block text-xs font-normal text-gray-500">
+                      {[item.brand, item.specification].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                </Td>
                 <Td>{item.category}</Td>
                 <Td>{item.uom}</Td>
                 <Td>₹{item.sellingPrice}</Td>
-                <Td>{item.purchasedQty}</Td>
+                <Td>{fmtQty(item.purchasedQty)}</Td>
                 <Td>
                   <div className="flex items-center gap-2">
-                    <span>{item.currentStock}</span>
+                    <span>{fmtQty(item.currentStock)}</span>
                     <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
                   </div>
                 </Td>

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import * as invoicesService from "./invoices.service";
+import { listPaymentAudits } from "../../lib/paymentAudit";
 import { parsePageParams } from "../../lib/pagination";
 
 export const createInvoiceSchema = z.object({
@@ -42,13 +43,18 @@ export async function create(req: Request, res: Response) {
 
 export async function updatePayment(req: Request, res: Response) {
   const input = req.body as z.infer<typeof recordPaymentSchema>;
-  const invoice = await invoicesService.updateInvoicePayment(Number(req.params.id), Number(req.params.paymentId), input);
+  const invoice = await invoicesService.updateInvoicePayment(Number(req.params.id), Number(req.params.paymentId), input, req.user!.id);
   res.json({ invoice });
 }
 
 export async function deletePayment(req: Request, res: Response) {
-  const invoice = await invoicesService.deleteInvoicePayment(Number(req.params.id), Number(req.params.paymentId));
+  const invoice = await invoicesService.deleteInvoicePayment(Number(req.params.id), Number(req.params.paymentId), req.user!.id);
   res.json({ invoice });
+}
+
+// The change log of this invoice's payments (admin edits and deletions).
+export async function paymentAudits(req: Request, res: Response) {
+  res.json({ audits: await listPaymentAudits({ paymentKind: "INVOICE", invoiceId: Number(req.params.id) }) });
 }
 
 export async function recordPayment(req: Request, res: Response) {

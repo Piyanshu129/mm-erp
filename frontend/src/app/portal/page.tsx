@@ -23,6 +23,7 @@ interface TodayAttendance {
 interface MonthlySummary {
   presentDays: number;
   halfDays?: number;
+  workedMinutes?: number;
   absentDays: number;
   leaveDays: number;
 }
@@ -216,6 +217,11 @@ function PortalContent() {
                     <p className="text-xs text-gray-500">Leave</p>
                   </div>
                 </div>
+                {!!summary.workedMinutes && (
+                  <p className="mt-3 text-center text-sm text-gray-600">
+                    Hours worked (days with in/out time): {Math.floor(summary.workedMinutes / 60)}h {summary.workedMinutes % 60}m
+                  </p>
+                )}
               </CardBody>
             </Card>
           )}

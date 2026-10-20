@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { ConflictError, NotFoundError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { assertMandatoryPhotos } from "../jobCards/jobCards.service";
+import { paymentSnapshot, recordPaymentAudit } from "../../lib/paymentAudit";
 
 const paymentInclude = {
   createdBy: { select: { id: true, name: true } },
@@ -215,7 +216,12 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
 // Admin correction of a recorded payment (wrong amount, date, mode...). The
 // invoice's running total moves by the difference, in the same transaction
 // with the invoice row locked, and can't end up above the invoice total.
-export async function updateInvoicePayment(invoiceId: number, paymentId: number, input: InvoicePaymentInput) {
+export async function updateInvoicePayment(
+  invoiceId: number,
+  paymentId: number,
+  input: InvoicePaymentInput,
+  changedById: number
+) {
   if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
 
   return prisma.$transaction(async (tx) => {
@@ -231,7 +237,7 @@ export async function updateInvoicePayment(invoiceId: number, paymentId: number,
       throw new ConflictError(`That would overpay ${invoice.invoiceNumber} — this payment can be at most ₹${max.toFixed(2)}`);
     }
 
-    await tx.invoicePayment.update({
+    const updated = await tx.invoicePayment.update({
       where: { id: paymentId },
       data: {
         amount: input.amount,
@@ -242,6 +248,15 @@ export async function updateInvoicePayment(invoiceId: number, paymentId: number,
         notes: input.notes ?? null,
       },
     });
+    await recordPaymentAudit(tx, {
+      paymentKind: "INVOICE",
+      paymentId,
+      invoiceId,
+      action: "EDIT",
+      before: paymentSnapshot(payment),
+      after: paymentSnapshot(updated),
+      changedById,
+    });
     return tx.invoice.update({
       where: { id: invoiceId },
       data: { paymentAmount: Math.round(newPaid * 100) / 100 },
@@ -251,7 +266,7 @@ export async function updateInvoicePayment(invoiceId: number, paymentId: number,
 }
 
 // Admin removal of a payment recorded by mistake.
-export async function deleteInvoicePayment(invoiceId: number, paymentId: number) {
+export async function deleteInvoicePayment(invoiceId: number, paymentId: number, changedById: number) {
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
@@ -259,6 +274,14 @@ export async function deleteInvoicePayment(invoiceId: number, paymentId: number)
     if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
 
     await tx.invoicePayment.delete({ where: { id: paymentId } });
+    await recordPaymentAudit(tx, {
+      paymentKind: "INVOICE",
+      paymentId,
+      invoiceId,
+      action: "DELETE",
+      before: paymentSnapshot(payment),
+      changedById,
+    });
     return tx.invoice.update({
       where: { id: invoiceId },
       data: { paymentAmount: { decrement: payment.amount } },

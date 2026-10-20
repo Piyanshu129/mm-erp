@@ -50,6 +50,7 @@ model User {
   supplierPayments SupplierPayment[]
   employeeAdvances EmployeeAdvance[]
   invoicePayments  InvoicePayment[]
+  paymentAudits    PaymentAudit[]
   estimates        Estimate[]
   jobCards         JobCard[]
   jobCardParts     JobCardPart[]
@@ -250,7 +251,9 @@ model Purchase {
   itemId       Int?      @map("item_id") // set only for inventory item types
   item         Item?     @relation(fields: [itemId], references: [id])
   description  String? // for expense-type purchases (no item)
-  quantity     Int       @default(1)
+  // Can be part of a unit (2.5 L). Stickers cover each piece, a part piece
+  // included (2.5 → 3 stickers).
+  quantity     Float     @default(1)
   purchaseCost Decimal   @map("purchase_cost") @db.Decimal(12, 2) // per unit for inventory; total for expenses
   sellingPrice Decimal?  @map("selling_price") @db.Decimal(12, 2)
   billUrl      String?   @map("bill_url")
@@ -449,6 +452,27 @@ model Invoice {
   payments InvoicePayment[]
 
   @@map("invoices")
+}
+
+// A record of every admin change to a recorded payment — customer
+// (INVOICE) or supplier (SUPPLIER) — with the values before and after
+// (after is null for a deletion), who made it and when. Never edited.
+model PaymentAudit {
+  id          Int      @id @default(autoincrement())
+  paymentKind String   @map("payment_kind") // INVOICE | SUPPLIER
+  paymentId   Int      @map("payment_id")
+  invoiceId   Int?     @map("invoice_id")
+  supplierId  Int?     @map("supplier_id")
+  action      String // EDIT | DELETE
+  before      Json
+  after       Json?
+  changedById Int      @map("changed_by_id")
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  changedAt   DateTime @default(now()) @map("changed_at")
+
+  @@index([paymentKind, invoiceId])
+  @@index([paymentKind, supplierId])
+  @@map("payment_audits")
 }
 
 // One customer payment towards an invoice. Recorded from the invoice page,

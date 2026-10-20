@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { CalendarCheck, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { formatINR, todayISO } from "@/lib/format";
+import { formatINR, hoursWorked, todayISO } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -306,6 +306,11 @@ function AttendancePageContent() {
                         className="w-[6.5rem] rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:bg-gray-50 disabled:text-gray-400"
                       />
                     </div>
+                    {hoursWorked(r.attendance?.inTime, r.attendance?.outTime) && (
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        Worked {hoursWorked(r.attendance?.inTime, r.attendance?.outTime)}
+                      </span>
+                    )}
                   </Td>
                   <Td>{r.attendance?.correctedBy?.name ?? "-"}</Td>
                   <Td>

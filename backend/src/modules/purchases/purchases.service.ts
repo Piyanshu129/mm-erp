@@ -18,8 +18,8 @@ export type PurchaseCategory = (typeof PURCHASE_CATEGORIES)[number];
 
 export interface NewItemInput {
   name: string;
-  brand: string;
-  specification: string;
+  brand?: string;
+  specification?: string;
   category: string;
   uom: string;
   minStock?: number;
@@ -187,7 +187,10 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
     throw new ConflictError("Choose a supplier — spare parts, paint and tools must come from a supplier");
   }
 
-  const purchaseDate = input.purchaseDate ? new Date(input.purchaseDate) : new Date();
+  // A purchase date is a calendar date, stored at midnight UTC (that's what
+  // "YYYY-MM-DD" parses to). With none given it's today on the workshop's
+  // calendar — stored the same way, so day-wise reports find it.
+  const purchaseDate = new Date(`${input.purchaseDate?.slice(0, 10) ?? new Date().toLocaleDateString("en-CA")}T00:00:00Z`);
 
   return prisma.$transaction(async (tx) => {
     if (input.supplierId) {
@@ -238,7 +241,8 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
         await tx.$queryRaw`SELECT id FROM items WHERE id = ${itemId} FOR UPDATE`;
         const last = await tx.purchase.aggregate({ where: { itemId }, _max: { stickerTo: true } });
         stickerFrom = (last._max.stickerTo ?? 0) + 1;
-        stickerTo = stickerFrom + line.quantity - 1;
+        // One sticker per piece; a part piece (the 0.5 of 2.5 L) gets one too.
+        stickerTo = stickerFrom + Math.ceil(line.quantity) - 1;
       }
 
       const purchase = await tx.purchase.create({

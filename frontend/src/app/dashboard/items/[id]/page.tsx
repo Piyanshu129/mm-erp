@@ -14,6 +14,7 @@ import { StockStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { stickerRange } from "@/lib/stickers";
+import { fmtQty } from "@/lib/format";
 
 interface ItemDetail {
   id: number;
@@ -161,11 +162,11 @@ function ItemDetailPageContent() {
               <dd className="text-gray-900">₹{item.sellingPrice}</dd>
               <dt className="text-gray-500">Purchased Qty</dt>
               <dd className="text-gray-900">
-                {purchases.reduce((sum, p) => sum + p.quantity, 0)} {item.uom}
+                {fmtQty(purchases.reduce((sum, p) => sum + p.quantity, 0))} {item.uom}
               </dd>
               <dt className="text-gray-500">Available Qty</dt>
               <dd className="font-semibold text-gray-900">
-                {item.currentStock} {item.uom}
+                {fmtQty(item.currentStock)} {item.uom}
               </dd>
               <dt className="text-gray-500">Minimum Stock</dt>
               <dd className="text-gray-900">{item.minStock}</dd>
@@ -196,7 +197,7 @@ function ItemDetailPageContent() {
                   <Td>
                     {p.supplier?.name ?? "-"} <span className="text-gray-400">(Purchase #{p.id})</span>
                   </Td>
-                  <Td>{p.quantity}</Td>
+                  <Td>{fmtQty(p.quantity)}</Td>
                   <Td>₹{p.purchaseCost}</Td>
                   <Td className="font-mono">{stickerRange(item.itemCode, p.stickerFrom, p.stickerTo) || "-"}</Td>
                 </Tr>
@@ -230,7 +231,7 @@ function ItemDetailPageContent() {
                     </Link>
                   </Td>
                   <Td>{u.jobCard.vehicle.registrationNumber}</Td>
-                  <Td>{u.quantity}</Td>
+                  <Td>{fmtQty(u.quantity)}</Td>
                 </Tr>
               ))}
             </tbody>

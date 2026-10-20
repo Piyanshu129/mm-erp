@@ -45,8 +45,8 @@ export async function addPart(input: AddPartInput) {
     // Not in inventory: recorded as given, no stock.
     if (input.itemId == null) {
       const description = input.description?.trim();
-      if (!description) throw new ConflictError("Enter what the part is");
-      if (input.rate == null || input.rate < 0) throw new ConflictError("Enter the part's rate");
+      if (!description) throw new ConflictError("Enter the non-inventory item or service description");
+      if (input.rate == null || input.rate < 0) throw new ConflictError("Enter the rate for the non-inventory item");
       return tx.jobCardPart.create({
         data: {
           jobCardId: input.jobCardId,

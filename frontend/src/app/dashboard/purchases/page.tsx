@@ -4,9 +4,9 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ShoppingCart, Paperclip, Trash2, Printer } from "lucide-react";
+import { Plus, ShoppingCart, Paperclip, Trash2, Printer, Download } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
-import { formatINR, todayISO } from "@/lib/format";
+import { fmtQty, formatINR, todayISO } from "@/lib/format";
 import {
   INVENTORY_TYPES,
   EXPENSE_TYPES,
@@ -22,6 +22,7 @@ import { MonthNav, TotalTile, CategoryBadge, FilterHeaderSelect, currentMonth, m
 import { compressImage } from "@/lib/compressImage";
 import { UOM_OPTIONS } from "@/lib/uom";
 import { stickerLabel, stickerRange } from "@/lib/stickers";
+import { exportPurchasesToExcel } from "@/lib/purchaseExport";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -380,10 +381,10 @@ function LineEditor({
               <Field label="Item name" className="sm:col-span-2">
                 <Input value={line.newItemName} onChange={(e) => onChange({ newItemName: e.target.value })} />
               </Field>
-              <Field label="Brand name" hint="Required — e.g. Bosch, Castrol">
+              <Field label="Brand name (optional)" hint="e.g. Bosch, Castrol">
                 <Input value={line.newItemBrand} onChange={(e) => onChange({ newItemBrand: e.target.value })} />
               </Field>
-              <Field label="Specification" hint="Required — e.g. 5W-30, 12V 35Ah, 1 L">
+              <Field label="Specification (optional)" hint="e.g. 5W-30, 12V 35Ah, 1 L">
                 <Input value={line.newItemSpec} onChange={(e) => onChange({ newItemSpec: e.target.value })} />
               </Field>
               <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
@@ -437,7 +438,7 @@ function LineEditor({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Quantity">
-              <Input type="number" min={1} step={1} value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} />
+              <Input type="number" min={0.01} step="0.01" value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} />
             </Field>
             <Field label="Purchase cost (per unit)">
               <Input
@@ -487,12 +488,10 @@ function lineProblem(line: LineDraft): string | null {
     if (line.itemMode === "existing" && !line.selectedItem) return "search and select an existing item";
     if (line.itemMode === "new") {
       if (!line.newItemName.trim()) return "enter the item name";
-      if (!line.newItemBrand.trim()) return "enter the brand name";
-      if (!line.newItemSpec.trim()) return "enter the specification";
       if (!line.newItemUom.trim()) return "choose the unit of measure";
       if (!line.newItemPhoto) return "take a photo of the new item";
     }
-    if (!Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1) return "quantity must be a whole number, at least 1";
+    if (!(Number(line.quantity) > 0)) return "quantity must be more than 0 (e.g. 1, 2.5)";
     if (line.sellingPrice !== "" && Number(line.sellingPrice) < Number(line.purchaseCost)) {
       return "MRP cannot be lower than purchase cost";
     }
@@ -545,6 +544,23 @@ function PurchasesPageContent() {
   // After an inventory purchase is saved: the sticker numbers to write on
   // each piece's sticker.
   const [stickerList, setStickerList] = useState<StickerLine[] | null>(null);
+
+  // The month's purchases as filtered (all of them, not just the loaded
+  // page) as an Excel file.
+  const [exporting, setExporting] = useState(false);
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const filters: Record<string, string> = { month };
+      if (typeFilter) filters.itemType = typeFilter;
+      else if (categoryFilter) filters.category = categoryFilter;
+      await exportPurchasesToExcel(filters, `purchases-${month}`);
+    } catch {
+      setFormError("Could not create the Excel file — please try again");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function listQuery(page: number): string {
     const params = new URLSearchParams({ month, page: String(page), pageSize: String(PAGE_SIZE) });
@@ -752,8 +768,8 @@ function PurchasesPageContent() {
           : {
               newItem: {
                 name: line.newItemName.trim(),
-                brand: line.newItemBrand.trim(),
-                specification: line.newItemSpec.trim(),
+                ...(line.newItemBrand.trim() ? { brand: line.newItemBrand.trim() } : {}),
+                ...(line.newItemSpec.trim() ? { specification: line.newItemSpec.trim() } : {}),
                 category: line.newItemCategory,
                 uom: line.newItemUom.trim(),
                 ...(line.newItemMinStock ? { minStock: Number(line.newItemMinStock) } : {}),
@@ -817,9 +833,14 @@ function PurchasesPageContent() {
         title="Purchases"
         description="Spare parts, paint and tools add to the item's stock, with a sticker for each piece. Travel, petrol, food and other costs are recorded as plain expenses. Payments to suppliers are recorded on the Suppliers page."
         action={
-          <Button onClick={() => setShowForm((s) => !s)}>
-            <Plus className="h-4 w-4" /> New purchase
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={exportExcel} disabled={exporting}>
+              <Download className="h-4 w-4" /> {exporting ? "Preparing..." : "Export Excel"}
+            </Button>
+            <Button onClick={() => setShowForm((s) => !s)}>
+              <Plus className="h-4 w-4" /> New purchase
+            </Button>
+          </div>
         }
       />
 
@@ -1144,7 +1165,7 @@ function PurchasesPageContent() {
                 </Td>
                 <Td>{p.supplier?.name ?? "-"}</Td>
                 <Td className="text-right">
-                  {p.quantity} {p.item?.uom ?? ""}
+                  {fmtQty(p.quantity)} {p.item?.uom ?? ""}
                 </Td>
                 <Td className="font-mono text-xs text-gray-700">{p.item ? stickerRange(p.item.itemCode, p.stickerFrom, p.stickerTo) || "-" : "-"}</Td>
                 <Td className="text-right">{formatINR(p.purchaseCost)}</Td>

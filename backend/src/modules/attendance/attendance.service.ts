@@ -4,6 +4,15 @@ import { NotFoundError, ConflictError } from "../../lib/errors";
 // HALF_DAY: worked half the day — half a day's pay is deducted.
 export const ATTENDANCE_STATUSES = ["PRESENT", "HALF_DAY", "ABSENT", "LEAVE"] as const;
 
+// Minutes between an "HH:MM" in time and out time, or null unless both are
+// set and out is after in.
+export function minutesWorked(inTime: string | null, outTime: string | null): number | null {
+  if (!inTime || !outTime) return null;
+  const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const diff = toMin(outTime) - toMin(inTime);
+  return diff > 0 ? diff : null;
+}
+
 // Today's date (YYYY-MM-DD) on the server's own calendar — the workshop PC's.
 export function todayLocalISO(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -98,10 +107,12 @@ export async function getMonthlySummary(employeeId: number, month: number, year:
     orderBy: { date: "asc" },
   });
 
+  // Hours worked, from the days that have both an in and an out time.
+  const workedMinutes = rows.reduce((sum, r) => sum + (minutesWorked(r.inTime, r.outTime) ?? 0), 0);
   const presentDays = rows.filter((r) => r.status === "PRESENT").length;
   const halfDays = rows.filter((r) => r.status === "HALF_DAY").length;
   const absentDays = rows.filter((r) => r.status === "ABSENT").length;
   const leaveDays = rows.filter((r) => r.status === "LEAVE").length;
 
-  return { employee, presentDays, halfDays, absentDays, leaveDays, days: rows };
+  return { employee, presentDays, halfDays, absentDays, leaveDays, workedMinutes, days: rows };
 }

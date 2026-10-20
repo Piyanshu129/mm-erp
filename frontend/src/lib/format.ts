@@ -15,3 +15,12 @@ export function todayISO(): string {
 export function fmtQty(n: number | string): string {
   return String(Math.round(Number(n) * 1000) / 1000);
 }
+
+// "HH:MM" in/out → "8h 45m" worked, or "" unless both are set and out is after in.
+export function hoursWorked(inTime: string | null | undefined, outTime: string | null | undefined): string {
+  if (!inTime || !outTime) return "";
+  const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const diff = toMin(outTime) - toMin(inTime);
+  if (diff <= 0) return "";
+  return `${Math.floor(diff / 60)}h ${String(diff % 60).padStart(2, "0")}m`;
+}

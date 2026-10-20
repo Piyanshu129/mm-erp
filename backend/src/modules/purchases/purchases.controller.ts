@@ -19,8 +19,9 @@ const lineSchema = z.object({
       name: z.string().trim().min(1),
       // Brand and specification are required for an item bought new, so
       // the same part can be identified and reordered later.
-      brand: z.string({ required_error: "enter the brand name" }).trim().min(1, "enter the brand name"),
-      specification: z.string({ required_error: "enter the specification" }).trim().min(1, "enter the specification"),
+      // Optional details that identify the exact part for reordering.
+      brand: optionalString,
+      specification: optionalString,
       category: z.enum(ITEM_CATEGORIES),
       uom: z.string().trim().min(1),
       minStock: z.coerce.number().int().min(0).optional(),
@@ -30,7 +31,8 @@ const lineSchema = z.object({
     })
     .optional(),
   description: optionalString,
-  quantity: z.coerce.number().int().positive(),
+  // Can be part of a unit (2.5 L); kept to 3 decimals.
+  quantity: z.coerce.number().positive("quantity must be more than 0").max(1000000).transform((q) => Math.round(q * 1000) / 1000),
   purchaseCost: z.coerce.number().min(0),
   sellingPrice: z.coerce.number().min(0).optional(),
 });

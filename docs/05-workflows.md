@@ -98,6 +98,12 @@ Example: 10 available, use 2 → 8 available; trying to use 50 is refused with n
 
 Simple — `POST/DELETE /job-cards/:jobCardId/labour`, same lock check, `amount = quantity × rate` computed server-side, no stock implications.
 
+## 3b. Daily Sales & Purchases report
+
+`/dashboard/reports` → **Daily Sales & Purchases** (admin) → `GET /reports/daily?date=YYYY-MM-DD` → [`reports/dailyReport.ts`](../backend/src/modules/reports/dailyReport.ts). For one day on the workshop's calendar: every draft invoice dated that day with its parts, non-inventory and labour lines, discount, tax, total, received, outstanding and payments; every customer payment received that day (totals by mode); and every purchase line with item code, brand, specification, quantity, rate, amount and the supplier's balance (supplier payments go against the account, not a purchase). Only invoices whose job card is Invoiced count in the totals — one whose job card was set back to Open is listed as "being revised". Print hides the app chrome; **Export Excel** writes a workbook with Summary, Sales, Sale Lines, Payments Received and Purchases sheets in the browser (`lib/excel.ts`, ExcelJS loaded on demand). All report exports, and the Purchases and Expenses month lists, export to Excel.
+
+**Payment corrections** (admin): `PATCH`/`DELETE /invoices/:id/payments/:paymentId` and `/suppliers/:id/payments/:paymentId` adjust the running totals in the same transaction (an edit can't overpay) and write a `PaymentAudit` row with the before/after values. The change log shows under the payment history (`GET /invoices/:id/payment-audits`, `GET /suppliers/:id/payment-audits`) and in the full Excel export's *Payment Changes* sheet.
+
 ## 4. Draft invoice generation & the payment-snapshot pattern
 
 `/dashboard/jobcards/[id]` (an Open job card, choosing *Invoiced* in the status dropdown or clicking *Mark as Invoiced*) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). After generating, the page moves to the invoice. Invoices are labelled **Draft Invoice** throughout the app (sidebar, list, PDF title); routes and tables are still `invoices`.

@@ -45,6 +45,10 @@ Stock is a **quantity per item** (since 2026-10-11): one item = one item code, a
 
   `purchaseCost` is the **per-unit** rate for inventory lines (the line total is `quantity × purchaseCost`) and the total for expense lines (quantity is always 1). `sellingPrice` is labelled **MRP** in the UI, and can't be below `purchaseCost`. Purchases carry **no payment fields** — payment is tracked per supplier, below.
 
+- **`PaymentAudit`** (added 2026-10-21) — one row per admin edit or deletion of a recorded payment, customer (`INVOICE`, with `invoiceId`) or supplier (`SUPPLIER`, with `supplierId`): `action` (`EDIT`/`DELETE`), `before` and `after` (JSON snapshots of amount, date, mode, reference, received/paid by, notes; `after` is null for a deletion), `changedById` and `changedAt`. Written in the same transaction as the change; never edited.
+
+- Purchase `quantity` is a decimal since 2026-10-21 (2.5 L); a part piece still gets a sticker (2.5 → 3).
+
 - **`SupplierPayment`** (added 2026-09-29) — one row per payment made to a supplier: `amount`, `paymentDate`, `paymentMode`, `reference`, `paidBy`, `proofUrl` (photo/screenshot of the transaction), `notes`, and `createdById`. Payments go against the supplier's **running account**, not against any one purchase, because that's how the workshop actually pays ("₹20,000 towards the balance"). The account is always computed and never stored: `totalPurchased` (sum of `quantity × purchaseCost` over the supplier's purchases) minus `totalPaid` (sum of these rows) = `balanceDue`. Because each payment is its own row, the full partial-payment history is kept. Before this table existed, each purchase stored one accumulated payment total. The migration `20260929130000_supplier_payments` copied each paid purchase into one row here, noted "Recorded against purchase #N", and then dropped those columns.
 
 - An item's history is its `Purchase` rows (what came in, with sticker ranges) and its `JobCardPart` rows (what was used, on which job card). **Purchased qty** is the sum of its purchases' `quantity`; **available qty** is `currentStock`.

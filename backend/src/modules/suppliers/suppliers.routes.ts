@@ -39,6 +39,7 @@ suppliersRouter.patch(
 // Supplier payments live on the Suppliers page, so they follow that page's
 // permission.
 suppliersRouter.get("/:id/payments", requirePermission("SUPPLIERS"), asyncHandler(suppliersController.payments));
+suppliersRouter.get("/:id/payment-audits", requirePermission("SUPPLIERS"), asyncHandler(suppliersController.paymentAudits));
 suppliersRouter.post(
   "/:id/payments",
   requirePermission("SUPPLIERS"),

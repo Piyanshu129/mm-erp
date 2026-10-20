@@ -12,6 +12,7 @@ invoicesRouter.use(authenticate);
 
 invoicesRouter.get("/", requirePermission("INVOICES"), asyncHandler(invoicesController.list));
 invoicesRouter.get("/:id", requirePermission("INVOICES"), asyncHandler(invoicesController.get));
+invoicesRouter.get("/:id/payment-audits", requirePermission("INVOICES"), asyncHandler(invoicesController.paymentAudits));
 // Payments can also be taken from the Customers and Vehicles pages, against
 // one of that customer's/vehicle's invoices — so any of the three
 // permissions is enough to record one.

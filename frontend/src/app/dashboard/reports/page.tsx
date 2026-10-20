@@ -8,16 +8,18 @@ import { ChevronDown, ChevronUp, Download } from "lucide-react";
 import { apiFetch, assetUrl } from "@/lib/api";
 import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { useAuth } from "@/context/AuthContext";
-import { downloadCsv } from "@/lib/csv";
+import { downloadRowsAsExcel } from "@/lib/excel";
+import { DailyReport } from "@/components/DailyReport";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
-type Tab = "sales" | "purchases" | "inventory" | "workshop" | "customers";
+type Tab = "daily" | "sales" | "purchases" | "inventory" | "workshop" | "customers";
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: "daily", label: "Daily Sales & Purchases" },
   { key: "sales", label: "Sales" },
   { key: "purchases", label: "Purchases" },
   { key: "inventory", label: "Inventory" },
@@ -130,7 +132,7 @@ interface PurchaseDetailRow {
 function ExportButton({ onClick }: { onClick: () => void }) {
   return (
     <Button size="sm" variant="ghost" onClick={onClick}>
-      <Download className="h-3.5 w-3.5" /> Export CSV
+      <Download className="h-3.5 w-3.5" /> Export Excel
     </Button>
   );
 }
@@ -188,7 +190,7 @@ function SalesTab() {
             <p className="text-sm text-gray-600">
               Grand total: <span className="font-semibold text-gray-900">₹{data.grandTotal.toFixed(2)}</span>
             </p>
-            <ExportButton onClick={() => downloadCsv("sales-report.csv", data.byDay)} />
+            <ExportButton onClick={() => downloadRowsAsExcel("sales-report.xlsx", "sales report", data.byDay)} />
           </div>
           <DayWiseTable
             days={data.byDay}
@@ -265,7 +267,7 @@ function PurchasesTab() {
           <div className="mb-6">
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900">By day</h3>
-              <ExportButton onClick={() => downloadCsv("purchases-by-day.csv", data.byDay)} />
+              <ExportButton onClick={() => downloadRowsAsExcel("purchases-by-day.xlsx", "purchases by day", data.byDay)} />
             </div>
             <DayWiseTable
               days={data.byDay}
@@ -316,7 +318,7 @@ function PurchasesTab() {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900">By supplier</h3>
-              <ExportButton onClick={() => downloadCsv("purchases-by-supplier.csv", data.bySupplier)} />
+              <ExportButton onClick={() => downloadRowsAsExcel("purchases-by-supplier.xlsx", "purchases by supplier", data.bySupplier)} />
             </div>
             <ReportTable columns={["supplier", "count", "total"]} rows={data.bySupplier} empty="No purchases in this range." />
           </div>
@@ -348,7 +350,7 @@ function InventoryTab() {
           stock: <span className="font-semibold text-amber-600">{data.lowStockCount}</span> · Out of stock:{" "}
           <span className="font-semibold text-red-600">{data.outOfStockCount}</span>
         </p>
-        <ExportButton onClick={() => downloadCsv("inventory-report.csv", data.rows)} />
+        <ExportButton onClick={() => downloadRowsAsExcel("inventory-report.xlsx", "inventory report", data.rows)} />
       </div>
       <ReportTable
         columns={["itemCode", "name", "category", "uom", "currentStock", "minStock", "stockValue", "status"]}
@@ -380,7 +382,7 @@ function WorkshopTab() {
         <>
           <div className="mb-1 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">Job cards by status</h3>
-            <ExportButton onClick={() => downloadCsv("workshop-report.csv", data.byStatus)} />
+            <ExportButton onClick={() => downloadRowsAsExcel("workshop-report.xlsx", "workshop report", data.byStatus)} />
           </div>
           <ReportTable columns={["status", "count"]} rows={data.byStatus} empty="No job cards in this range." />
         </>
@@ -460,19 +462,21 @@ function ReportTable({ columns, rows, empty }: { columns: string[]; rows: Record
 
 // Sales and purchase figures are admin-only (the server refuses them for
 // anyone else), so other users don't get those tabs.
-const ADMIN_ONLY_TABS: Tab[] = ["sales", "purchases"];
+const ADMIN_ONLY_TABS: Tab[] = ["daily", "sales", "purchases"];
 
 function ReportsPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const tabs = TABS.filter((t) => isAdmin || !ADMIN_ONLY_TABS.includes(t.key));
-  const [tab, setTab] = useState<Tab>(isAdmin ? "sales" : "inventory");
+  const [tab, setTab] = useState<Tab>(isAdmin ? "daily" : "inventory");
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Reports" description="Sales, purchases, inventory, workshop and customer insights." />
+      <div className="print:hidden">
+        <PageHeader title="Reports" description="Daily detail, sales, purchases, inventory, workshop and customer insights." />
+      </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-2">
+      <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-2 print:hidden">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -486,6 +490,7 @@ function ReportsPageContent() {
         ))}
       </div>
 
+      {isAdmin && tab === "daily" && <DailyReport />}
       {isAdmin && tab === "sales" && <SalesTab />}
       {isAdmin && tab === "purchases" && <PurchasesTab />}
       {tab === "inventory" && <InventoryTab />}

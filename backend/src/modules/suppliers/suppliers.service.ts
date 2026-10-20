@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { paymentSnapshot, recordPaymentAudit } from "../../lib/paymentAudit";
 import { prisma } from "../../lib/prisma";
 import { ConflictError, NotFoundError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
@@ -25,7 +26,7 @@ function round2(n: number): number {
 // A supplier's running account: everything bought from them (quantity ×
 // per-unit cost across all their purchases) against everything paid to them.
 // Always computed from the rows themselves, never stored, so it can't drift.
-async function accountsFor(
+export async function accountsFor(
   supplierIds: number[],
   db: Prisma.TransactionClient = prisma
 ): Promise<Map<number, SupplierAccount>> {
@@ -131,7 +132,12 @@ export interface SupplierPaymentInput {
 // Admin correction of a recorded supplier payment. Checked against the
 // supplier's balance as it would be without this payment, with the
 // supplier row locked, so a correction can't overpay either.
-export async function updateSupplierPayment(supplierId: number, paymentId: number, input: SupplierPaymentInput) {
+export async function updateSupplierPayment(
+  supplierId: number,
+  paymentId: number,
+  input: SupplierPaymentInput,
+  changedById: number
+) {
   if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
 
   return prisma.$transaction(async (tx) => {
@@ -146,7 +152,7 @@ export async function updateSupplierPayment(supplierId: number, paymentId: numbe
       throw new ConflictError(`That would overpay this supplier — this payment can be at most ₹${dueWithoutThis.toFixed(2)}`);
     }
 
-    return tx.supplierPayment.update({
+    const updated = await tx.supplierPayment.update({
       where: { id: paymentId },
       data: {
         amount: input.amount,
@@ -159,13 +165,33 @@ export async function updateSupplierPayment(supplierId: number, paymentId: numbe
       },
       include: { createdBy: { select: { id: true, name: true } } },
     });
+    await recordPaymentAudit(tx, {
+      paymentKind: "SUPPLIER",
+      paymentId,
+      supplierId,
+      action: "EDIT",
+      before: paymentSnapshot(payment),
+      after: paymentSnapshot(updated),
+      changedById,
+    });
+    return updated;
   });
 }
 
-export async function deleteSupplierPayment(supplierId: number, paymentId: number) {
-  const payment = await prisma.supplierPayment.findUnique({ where: { id: paymentId } });
-  if (!payment || payment.supplierId !== supplierId) throw new NotFoundError("Payment not found for this supplier");
-  await prisma.supplierPayment.delete({ where: { id: paymentId } });
+export async function deleteSupplierPayment(supplierId: number, paymentId: number, changedById: number) {
+  await prisma.$transaction(async (tx) => {
+    const payment = await tx.supplierPayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.supplierId !== supplierId) throw new NotFoundError("Payment not found for this supplier");
+    await tx.supplierPayment.delete({ where: { id: paymentId } });
+    await recordPaymentAudit(tx, {
+      paymentKind: "SUPPLIER",
+      paymentId,
+      supplierId,
+      action: "DELETE",
+      before: paymentSnapshot(payment),
+      changedById,
+    });
+  });
 }
 
 export async function recordSupplierPayment(id: number, input: SupplierPaymentInput, createdById: number) {

@@ -3,7 +3,8 @@
 import { RequireAuth } from "@/components/RequireAuth";
 
 import { useEffect, useState } from "react";
-import { Plus, Wallet, Paperclip } from "lucide-react";
+import { Plus, Wallet, Paperclip, Download } from "lucide-react";
+import { exportPurchasesToExcel } from "@/lib/purchaseExport";
 import { apiFetch, assetUrl } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import { EXPENSE_TYPES, TYPE_LABELS, PurchaseTotals } from "@/lib/purchaseTypes";
@@ -40,6 +41,20 @@ function ExpensesPageContent() {
   const [summary, setSummary] = useState<PurchaseTotals | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // The month's expenses (as filtered) as an Excel file.
+  const [exporting, setExporting] = useState(false);
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const filters: Record<string, string> = { month };
+      if (typeFilter) filters.itemType = typeFilter;
+      else filters.category = "EXPENSE";
+      await exportPurchasesToExcel(filters, `expenses-${month}`);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function query(p: number): string {
     const params = new URLSearchParams({ month, page: String(p), pageSize: String(PAGE_SIZE) });
@@ -85,9 +100,14 @@ function ExpensesPageContent() {
         title="Expenses"
         description="Miscellaneous purchases — travel, petrol, food and other business costs. No supplier, no stock."
         action={
-          <LinkButton href={`/dashboard/purchases?new=${typeFilter || EXPENSE_TYPES[0]}`}>
-            <Plus className="h-4 w-4" /> New expense
-          </LinkButton>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={exportExcel} disabled={exporting}>
+              <Download className="h-4 w-4" /> {exporting ? "Preparing..." : "Export Excel"}
+            </Button>
+            <LinkButton href={`/dashboard/purchases?new=${typeFilter || EXPENSE_TYPES[0]}`}>
+              <Plus className="h-4 w-4" /> New expense
+            </LinkButton>
+          </div>
         }
       />
 

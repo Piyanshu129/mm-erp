@@ -555,6 +555,43 @@ async function employeeAdvancesSheet(): Promise<SheetSpec> {
   };
 }
 
+// The audit trail of admin edits/deletions of recorded payments.
+async function paymentAuditsSheet(): Promise<SheetSpec> {
+  const audits = await prisma.paymentAudit.findMany({ include: { changedBy: true }, orderBy: { changedAt: "asc" } });
+  const fmt = (v: unknown) => {
+    if (!v || typeof v !== "object") return "";
+    const o = v as Record<string, unknown>;
+    return Object.entries(o)
+      .map(([k, val]) => `${k}: ${val ?? "-"}`)
+      .join("; ");
+  };
+  return {
+    name: "Payment Changes",
+    columns: [
+      { header: "When", key: "changedAt", width: 20 },
+      { header: "By", key: "changedBy", width: 16 },
+      { header: "Payment Type", key: "paymentKind", width: 14 },
+      { header: "Payment No.", key: "paymentId", width: 12 },
+      { header: "Draft Invoice ID", key: "invoiceId", width: 14 },
+      { header: "Supplier ID", key: "supplierId", width: 12 },
+      { header: "Action", key: "action", width: 10 },
+      { header: "Before", key: "before", width: 60 },
+      { header: "After", key: "after", width: 60 },
+    ],
+    rows: audits.map((a) => ({
+      changedAt: a.changedAt,
+      changedBy: a.changedBy.name,
+      paymentKind: a.paymentKind === "INVOICE" ? "Customer" : "Supplier",
+      paymentId: a.paymentId,
+      invoiceId: a.invoiceId,
+      supplierId: a.supplierId,
+      action: a.action,
+      before: fmt(a.before),
+      after: fmt(a.after),
+    })),
+  };
+}
+
 // One tab per business entity — deliberately mirrors the master spec's own
 // "master sheet" / backup data list, not the full schema (Users/Roles/
 // RefreshTokens are login plumbing, not business records).
@@ -580,6 +617,7 @@ export async function regenerateExcelExport(): Promise<void> {
     attendanceSheet(),
     salaryPaymentsSheet(),
     employeeAdvancesSheet(),
+    paymentAuditsSheet(),
   ]);
 
   for (const sheet of sheets) {
