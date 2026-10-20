@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
+import { EstimateCheck } from "@/components/EstimateCheck";
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
@@ -106,6 +107,7 @@ interface JobCardDetail {
   media: { id: number; mediaType: string; angle: string | null; phase: string; url: string }[];
   parts: {
     id: number;
+    itemId: number | null;
     quantity: number;
     rate: string;
     amount: string;
@@ -912,6 +914,15 @@ function JobCardDetailPageContent() {
           </div>
         )}
       </div>
+
+      {/* What the customer approved, to check the parts and labour against */}
+      {jobCard.estimate && (
+        <EstimateCheck
+          estimate={jobCard.estimate}
+          parts={jobCard.parts.map((p) => ({ itemId: p.itemId ?? null, description: p.item?.name ?? p.description ?? "", quantity: p.quantity }))}
+          labour={jobCard.labour.map((l) => ({ itemId: null, description: l.description, quantity: l.quantity }))}
+        />
+      )}
 
       {/* Parts */}
       <div>
