@@ -15,6 +15,7 @@ export const itemFieldsSchema = z.object({
   subCategory: optionalString,
   partNumber: optionalString,
   brand: optionalString,
+  specification: optionalString,
   vehicleMake: optionalString,
   vehicleModel: optionalString,
   variant: optionalString,

@@ -132,6 +132,8 @@ interface LineDraft {
   itemMode: "new" | "existing";
   selectedItem: ItemOption | null;
   newItemName: string;
+  newItemBrand: string;
+  newItemSpec: string;
   newItemCategory: string;
   newItemUom: string;
   newItemMinStock: string;
@@ -164,6 +166,8 @@ function emptyLine(itemType: string): LineDraft {
     itemMode: "new",
     selectedItem: null,
     newItemName: "",
+    newItemBrand: "",
+    newItemSpec: "",
     newItemCategory: ITEM_CATEGORIES[0],
     newItemUom: "PCS",
     newItemMinStock: "",
@@ -376,6 +380,12 @@ function LineEditor({
               <Field label="Item name" className="sm:col-span-2">
                 <Input value={line.newItemName} onChange={(e) => onChange({ newItemName: e.target.value })} />
               </Field>
+              <Field label="Brand name" hint="Required — e.g. Bosch, Castrol">
+                <Input value={line.newItemBrand} onChange={(e) => onChange({ newItemBrand: e.target.value })} />
+              </Field>
+              <Field label="Specification" hint="Required — e.g. 5W-30, 12V 35Ah, 1 L">
+                <Input value={line.newItemSpec} onChange={(e) => onChange({ newItemSpec: e.target.value })} />
+              </Field>
               <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
                 <Field label="Car maker (optional)" hint="e.g. Maruti">
                   <Input value={line.newItemMake} onChange={(e) => onChange({ newItemMake: e.target.value })} />
@@ -477,6 +487,8 @@ function lineProblem(line: LineDraft): string | null {
     if (line.itemMode === "existing" && !line.selectedItem) return "search and select an existing item";
     if (line.itemMode === "new") {
       if (!line.newItemName.trim()) return "enter the item name";
+      if (!line.newItemBrand.trim()) return "enter the brand name";
+      if (!line.newItemSpec.trim()) return "enter the specification";
       if (!line.newItemUom.trim()) return "choose the unit of measure";
       if (!line.newItemPhoto) return "take a photo of the new item";
     }
@@ -674,17 +686,19 @@ function PurchasesPageContent() {
       }
     }
 
-    if (!bill) {
+    // The bill photo is required for parts/paint/tools; for a miscellaneous
+    // expense there's often no slip, so it's optional.
+    if (inventory && !bill) {
       setFormError("Take a photo of the bill / receipt");
       return;
     }
 
     // Shrink the photos first — full-size phone photos made saving crawl.
     setSubmitting("photos");
-    let compressedBill: File;
+    let compressedBill: File | null = null;
     const compressedItemPhotos = new Map<number, File>();
     try {
-      compressedBill = await compressImage(bill);
+      if (bill) compressedBill = await compressImage(bill);
       for (const [i, line] of lines.entries()) {
         if (isInventoryType(line.itemType) && line.itemMode === "new" && line.newItemPhoto) {
           compressedItemPhotos.set(i, await compressImage(line.newItemPhoto));
@@ -708,7 +722,7 @@ function PurchasesPageContent() {
       return null;
     };
     const problems = [
-      photoProblem(compressedBill, "Bill photo"),
+      compressedBill ? photoProblem(compressedBill, "Bill photo") : null,
       ...[...compressedItemPhotos].map(([i, photo]) => photoProblem(photo, `Item ${i + 1}`)),
     ].filter((p): p is string => p != null);
     if (problems.length > 0) {
@@ -722,7 +736,7 @@ function PurchasesPageContent() {
     if (inventory && selectedSupplier) formData.set("supplierId", String(selectedSupplier.id));
     formData.set("purchaseDate", purchaseDate);
     if (remarks.trim()) formData.set("remarks", remarks.trim());
-    formData.set("bill", compressedBill);
+    if (compressedBill) formData.set("bill", compressedBill);
 
     const payload = lines.map((line, i) => {
       const cost = Number(line.purchaseCost);
@@ -738,6 +752,8 @@ function PurchasesPageContent() {
           : {
               newItem: {
                 name: line.newItemName.trim(),
+                brand: line.newItemBrand.trim(),
+                specification: line.newItemSpec.trim(),
                 category: line.newItemCategory,
                 uom: line.newItemUom.trim(),
                 ...(line.newItemMinStock ? { minStock: Number(line.newItemMinStock) } : {}),
@@ -987,7 +1003,7 @@ function PurchasesPageContent() {
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Bill / receipt photo" hint="Required">
+                <Field label={category === "INVENTORY" ? "Bill / receipt photo" : "Slip / receipt photo"} hint={category === "INVENTORY" ? "Required" : "Optional"}>
                   <input
                     key={fileInputsKey}
                     type="file"

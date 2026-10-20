@@ -1,10 +1,16 @@
 import { prisma } from "../../lib/prisma";
 import { ConflictError, NotFoundError } from "../../lib/errors";
 import { isLocked } from "../../lib/jobCardStatus";
+import { addStock, roundQty, takeStock } from "../../lib/stock";
 
+// A part is either from inventory (itemId — comes out of stock at the item's
+// MRP) or not in inventory (description + rate — bought outside for this
+// job, no stock involved). Quantity can be part of a unit (0.5).
 export interface AddPartInput {
   jobCardId: number;
-  itemId: number;
+  itemId?: number;
+  description?: string;
+  rate?: number;
   quantity: number;
   createdById: number;
 }
@@ -25,29 +31,40 @@ export async function assertJobCardEditable(db: any, jobCardId: number) {
   return jobCard;
 }
 
-// Takes `quantity` of the item out of stock and records it on the job card
-// at the item's current MRP. The stock check and the deduction are one
-// conditional UPDATE, so two job cards using the last few pieces at the
-// same moment can't take more than there is.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export async function addPart(input: AddPartInput) {
-  if (!Number.isInteger(input.quantity) || input.quantity < 1) {
-    throw new ConflictError("Quantity must be a whole number, at least 1");
-  }
+  const quantity = roundQty(input.quantity);
+  if (!(quantity > 0)) throw new ConflictError("Quantity must be more than 0");
 
   return prisma.$transaction(async (tx) => {
     await assertJobCardEditable(tx, input.jobCardId);
 
-    const rows: { id: number }[] = await tx.$queryRaw`
-      UPDATE items
-      SET current_stock = current_stock - ${input.quantity}
-      WHERE id = ${input.itemId} AND current_stock >= ${input.quantity}
-      RETURNING id
-    `;
-    if (rows.length === 0) {
+    // Not in inventory: recorded as given, no stock.
+    if (input.itemId == null) {
+      const description = input.description?.trim();
+      if (!description) throw new ConflictError("Enter what the part is");
+      if (input.rate == null || input.rate < 0) throw new ConflictError("Enter the part's rate");
+      return tx.jobCardPart.create({
+        data: {
+          jobCardId: input.jobCardId,
+          description,
+          quantity,
+          rate: input.rate,
+          amount: round2(input.rate * quantity),
+          createdById: input.createdById,
+        },
+        include: { item: true },
+      });
+    }
+
+    if (!(await takeStock(tx, input.itemId, quantity))) {
       const item = await tx.item.findUnique({ where: { id: input.itemId } });
       if (!item) throw new NotFoundError("Item not found");
       throw new ConflictError(
-        `Only ${item.currentStock} ${item.uom} of ${item.name} (${item.itemCode}) available — can't use ${input.quantity}`
+        `Only ${item.currentStock} ${item.uom} of ${item.name} (${item.itemCode}) available — can't use ${quantity}`
       );
     }
 
@@ -58,9 +75,9 @@ export async function addPart(input: AddPartInput) {
       data: {
         jobCardId: input.jobCardId,
         itemId: item.id,
-        quantity: input.quantity,
+        quantity,
         rate,
-        amount: rate * input.quantity,
+        amount: round2(rate * quantity),
         createdById: input.createdById,
       },
       include: { item: true },
@@ -68,8 +85,8 @@ export async function addPart(input: AddPartInput) {
   });
 }
 
-// Removing a part puts its quantity back into stock — only while the job
-// card is open, same rule as adding one.
+// Removing a part puts its quantity back into stock (inventory parts only)
+// — only while the job card is open, same rule as adding one.
 export async function removePart(jobCardId: number, partId: number) {
   return prisma.$transaction(async (tx) => {
     await assertJobCardEditable(tx, jobCardId);
@@ -77,7 +94,7 @@ export async function removePart(jobCardId: number, partId: number) {
     const part = await tx.jobCardPart.findUnique({ where: { id: partId } });
     if (!part || part.jobCardId !== jobCardId) throw new NotFoundError("Part not found on this job card");
 
-    await tx.item.update({ where: { id: part.itemId }, data: { currentStock: { increment: part.quantity } } });
+    if (part.itemId != null) await addStock(tx, part.itemId, part.quantity);
     await tx.jobCardPart.delete({ where: { id: partId } });
   });
 }

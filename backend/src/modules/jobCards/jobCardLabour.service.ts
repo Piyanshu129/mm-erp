@@ -1,5 +1,6 @@
 import { prisma } from "../../lib/prisma";
 import { NotFoundError } from "../../lib/errors";
+import { roundQty } from "../../lib/stock";
 import { assertJobCardEditable } from "./jobCardParts.service";
 
 export interface AddLabourInput {
@@ -13,8 +14,8 @@ export interface AddLabourInput {
 export async function addLabour(input: AddLabourInput) {
   await assertJobCardEditable(prisma, input.jobCardId);
 
-  const quantity = input.quantity ?? 1;
-  const amount = quantity * input.rate;
+  const quantity = roundQty(input.quantity ?? 1);
+  const amount = Math.round(quantity * input.rate * 100) / 100;
 
   return prisma.jobCardLabour.create({
     data: {

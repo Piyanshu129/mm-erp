@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, Truck, IndianRupee, History, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { compressImage } from "@/lib/compressImage";
 import { formatINR, todayISO } from "@/lib/format";
 import { AuthedImage } from "@/components/AuthedMedia";
@@ -216,24 +217,147 @@ function RecordPaymentCard({
   );
 }
 
-function PaymentHistoryCard({ supplierId, onClose }: { supplierId: number; onClose: () => void }) {
+// Admin-only (the server enforces it): correct a recorded supplier payment.
+function EditSupplierPaymentRow({
+  supplierId,
+  payment,
+  onDone,
+}: {
+  supplierId: number;
+  payment: SupplierPayment;
+  onDone: (changed: boolean) => void;
+}) {
+  const [amount, setAmount] = useState(String(Number(payment.amount)));
+  const [date, setDate] = useState(payment.paymentDate.slice(0, 10));
+  const [mode, setMode] = useState(payment.paymentMode ?? "CASH");
+  const [reference, setReference] = useState(payment.reference ?? "");
+  const [paidBy, setPaidBy] = useState(payment.paidBy ?? "");
+  const [notes, setNotes] = useState(payment.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!(Number(amount) > 0)) return setError("Amount must be more than 0");
+    setSaving(true);
+    try {
+      await apiFetch(`/suppliers/${supplierId}/payments/${payment.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          amount: Number(amount),
+          paymentDate: date,
+          paymentMode: mode,
+          reference: reference.trim() || undefined,
+          paidBy: paidBy.trim() || undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      onDone(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save the payment");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td colSpan={8} className="border-t border-gray-100 bg-blue-50 px-4 py-3">
+        <form onSubmit={save} className="grid grid-cols-2 gap-2 sm:grid-cols-6 sm:items-end">
+          <div>
+            <Label>Amount</Label>
+            <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <Label>Date</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <Label>Mode</Label>
+            <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+              {PAYMENT_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {modeLabel(m)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Reference</Label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} />
+          </div>
+          <div>
+            <Label>Paid by</Label>
+            <Input value={paidBy} onChange={(e) => setPaidBy(e.target.value)} />
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+          {error && <p className="col-span-2 text-sm text-red-600 sm:col-span-6">{error}</p>}
+          <div className="col-span-2 flex gap-2 sm:col-span-6">
+            <Button type="submit" size="sm" disabled={saving}>
+              {saving ? "Saving..." : "Save payment"}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => onDone(false)} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+function PaymentHistoryCard({
+  supplierId,
+  onClose,
+  onChanged,
+}: {
+  supplierId: number;
+  onClose: () => void;
+  onChanged?: () => void | Promise<void>;
+}) {
+  const { user } = useAuth();
+  const canEdit = user?.role === "ADMIN";
   const [supplier, setSupplier] = useState<SupplierRow | null>(null);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoomedProof, setZoomedProof] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
+  function load() {
     setError(null);
-    apiFetch(`/suppliers/${supplierId}/payments`)
+    return apiFetch(`/suppliers/${supplierId}/payments`)
       .then((body) => {
         setSupplier(body.supplier);
         setPayments(body.payments);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load payment history"))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierId]);
+
+  async function afterChange() {
+    await load();
+    await onChanged?.();
+  }
+
+  async function remove(p: SupplierPayment) {
+    if (!window.confirm(`Delete the ${formatINR(p.amount)} payment of ${new Date(p.paymentDate).toLocaleDateString()}? The balance due goes back up.`)) return;
+    try {
+      await apiFetch(`/suppliers/${supplierId}/payments/${p.id}`, { method: "DELETE" });
+      await afterChange();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete the payment");
+    }
+  }
 
   return (
     <Card>
@@ -265,10 +389,22 @@ function PaymentHistoryCard({ supplierId, onClose }: { supplierId: number; onClo
                     <Th>Paid by</Th>
                     <Th>Photo</Th>
                     <Th>Notes</Th>
+                    {canEdit && <Th></Th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((p) => (
+                  {payments.map((p) =>
+                    editingId === p.id ? (
+                      <EditSupplierPaymentRow
+                        key={p.id}
+                        supplierId={supplierId}
+                        payment={p}
+                        onDone={async (changed) => {
+                          setEditingId(null);
+                          if (changed) await afterChange();
+                        }}
+                      />
+                    ) : (
                     <Tr key={p.id}>
                       <Td className="whitespace-nowrap">{new Date(p.paymentDate).toLocaleDateString()}</Td>
                       <Td className="text-right font-medium text-gray-900">{formatINR(p.amount)}</Td>
@@ -288,8 +424,19 @@ function PaymentHistoryCard({ supplierId, onClose }: { supplierId: number; onClo
                         {p.notes ?? ""}
                         <span className="block text-gray-400">Entered by {p.createdBy.name}</span>
                       </Td>
+                      {canEdit && (
+                        <Td className="whitespace-nowrap">
+                          <button type="button" onClick={() => setEditingId(p.id)} className="mr-3 text-xs font-medium text-blue-600 hover:underline">
+                            Edit
+                          </button>
+                          <button type="button" onClick={() => remove(p)} className="text-xs font-medium text-red-600 hover:underline">
+                            Delete
+                          </button>
+                        </Td>
+                      )}
                     </Tr>
-                  ))}
+                    )
+                  )}
                 </tbody>
               </Table>
             )}
@@ -408,7 +555,7 @@ function SuppliersPageContent() {
         />
       )}
       {panel?.kind === "history" && (
-        <PaymentHistoryCard key={panel.supplierId} supplierId={panel.supplierId} onClose={() => setPanel(null)} />
+        <PaymentHistoryCard key={panel.supplierId} supplierId={panel.supplierId} onClose={() => setPanel(null)} onChanged={load} />
       )}
 
       {loading ? (

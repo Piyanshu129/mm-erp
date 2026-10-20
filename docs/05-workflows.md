@@ -81,6 +81,8 @@ Creating copies the job card's parts and labour so far into `EstimateLine`s (cal
 
 ### Parts: by item code and quantity
 
+Since 2026-10-20 the quantity can be **part of a unit** (0.5 L of oil): job card parts, labour and estimate lines, and `Item.currentStock`, are decimals. Every stock change goes through `lib/stock.ts` (`takeStock`/`addStock`), which rounds to 3 decimals in SQL so repeated changes can't drift. A part can also be **not in inventory** — bought outside for this job: `POST /job-cards/:jobCardId/parts` `{description, rate, quantity}` with no `itemId`. It's billed like any part but touches no stock (`JobCardPart.itemId` is null).
+
 `/dashboard/jobcards/[id]` → type the item code (`GET /item-lookup/:code` shows the item, MRP and available quantity; `2`, `02` and `0002` all find `0002`) and the **Qty used** → `POST /job-cards/:jobCardId/parts` `{itemId, quantity}` → [`jobCardParts.service.ts#addPart`](../backend/src/modules/jobCards/jobCardParts.service.ts).
 
 Inside one transaction:
@@ -146,6 +148,8 @@ netSalary = max(0, monthlySalary - deductionDays × perDayRate - advances)
 ```
 
 **Half days** (`HALF_DAY`, since 2026-10-20) deduct half a day's pay. **Unused leave carries forward** (`salary.service.ts#leaveBalanceFor`): each month opens with the previous month's closing balance, starting at 0 in the employee's first month (the later of joining and their first attendance mark). A month whose salary has been calculated stores its `openingLeaveBalance`/`closingLeaveBalance`, and later months use that stored closing figure — so a balance is never counted twice and a calculated month never shifts. Months not yet calculated are worked out from their attendance.
+
+**Optional in/out times** (`Attendance.inTime`/`outTime`, "HH:MM") can be entered on the sheet once the day's status is marked; out must be after in. **Advances** take an optional remark (`notes`).
 
 **Previous dates are admin-only**: `POST /attendance` refuses a date before today (the server's calendar) for anyone but an admin (`ForbiddenError`), and the attendance page disables the buttons to match.
 

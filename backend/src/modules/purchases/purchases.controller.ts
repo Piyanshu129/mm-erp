@@ -17,6 +17,10 @@ const lineSchema = z.object({
   newItem: z
     .object({
       name: z.string().trim().min(1),
+      // Brand and specification are required for an item bought new, so
+      // the same part can be identified and reordered later.
+      brand: z.string({ required_error: "enter the brand name" }).trim().min(1, "enter the brand name"),
+      specification: z.string({ required_error: "enter the specification" }).trim().min(1, "enter the specification"),
       category: z.enum(ITEM_CATEGORIES),
       uom: z.string().trim().min(1),
       minStock: z.coerce.number().int().min(0).optional(),
@@ -77,6 +81,8 @@ const FIELD_LABELS: Record<string, string> = {
   sellingPrice: "MRP",
   description: "description",
   name: "item name",
+  brand: "brand name",
+  specification: "specification",
   category: "category",
   uom: "unit of measure",
   minStock: "minimum stock",
@@ -115,9 +121,11 @@ export async function create(req: Request, res: Response) {
     if (match) itemPhotoUrls.set(Number(match[1]), publicUrlFor("items", file.filename));
   }
 
-  // Photos are mandatory: the bill for every purchase, and a photo of every
-  // new item (existing items already have theirs).
-  if (!billUrl) throw new AppError(400, "A photo of the bill / receipt is required");
+  // Photos: the bill is required for parts/paint/tools bought from a
+  // supplier (optional for a miscellaneous expense — there often isn't a
+  // slip), and every new item needs a photo (existing items have theirs).
+  const hasInventory = input.lines.some((line) => purchasesService.isInventoryType(line.itemType));
+  if (hasInventory && !billUrl) throw new AppError(400, "A photo of the bill / receipt is required");
   input.lines.forEach((line, i) => {
     if (line.newItem && !itemPhotoUrls.has(i)) {
       throw new AppError(400, `Item ${i + 1}: a photo of the new item is required`);

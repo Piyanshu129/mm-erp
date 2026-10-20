@@ -5,10 +5,12 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Car, ClipboardPlus } from "lucide-react";
+import { ArrowLeft, Plus, Car, ClipboardPlus, Pencil } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/Button";
-import { Input, Select } from "@/components/ui/Input";
+import { Input, Select, Textarea, Label } from "@/components/ui/Input";
+import { MobileInput } from "@/components/ui/MobileInput";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { ActiveBadge } from "@/components/ui/Badge";
@@ -40,7 +42,93 @@ interface CustomerDetail {
   vehicles: Vehicle[];
 }
 
+// Admin-only (the server enforces it): correct a customer's details. A
+// blank optional field clears it.
+function CustomerEditForm({
+  customer,
+  onCancel,
+  onSaved,
+}: {
+  customer: CustomerDetail;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(customer.name);
+  const [mobile, setMobile] = useState(customer.mobile);
+  const [whatsapp, setWhatsapp] = useState(customer.whatsapp ?? "");
+  const [email, setEmail] = useState(customer.email ?? "");
+  const [address, setAddress] = useState(customer.address ?? "");
+  const [notes, setNotes] = useState(customer.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!name.trim()) return setError("Enter the customer's name");
+    if (mobile.length !== 10) return setError("Mobile number must be 10 digits");
+    if (whatsapp && whatsapp.length !== 10) return setError("WhatsApp number must be 10 digits");
+    setSaving(true);
+    try {
+      await apiFetch(`/customers/${customer.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: name.trim(), mobile, whatsapp, email: email.trim(), address: address.trim(), notes: notes.trim() }),
+      });
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save — check the connection and try again");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="mt-3 max-w-lg border-blue-200">
+      <CardBody>
+        <form onSubmit={save} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Label>Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label>Mobile</Label>
+            <MobileInput value={mobile} onChange={setMobile} />
+          </div>
+          <div>
+            <Label>WhatsApp (optional)</Label>
+            <MobileInput value={whatsapp} onChange={setWhatsapp} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Email (optional)</Label>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Address (optional)</Label>
+            <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Notes (optional)</Label>
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+          {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
+          <div className="flex gap-2 sm:col-span-2">
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save details"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardBody>
+    </Card>
+  );
+}
+
 function CustomerDetailPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [editing, setEditing] = useState(false);
   const { id } = useParams<{ id: string }>();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,22 +231,42 @@ function CustomerDetailPageContent() {
         <Link href="/dashboard/customers" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
           <ArrowLeft className="h-4 w-4" /> All customers
         </Link>
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-gray-900">{customer.name}</h1>
           <ActiveBadge isActive={customer.isActive} />
+          {isAdmin && !editing && (
+            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit details
+            </Button>
+          )}
         </div>
-        <Card className="mt-3 max-w-md">
-          <CardBody>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              <dt className="text-gray-500">Mobile</dt>
-              <dd className="text-gray-900">{customer.mobile}</dd>
-              <dt className="text-gray-500">Email</dt>
-              <dd className="text-gray-900">{customer.email ?? "-"}</dd>
-              <dt className="text-gray-500">Address</dt>
-              <dd className="text-gray-900">{customer.address ?? "-"}</dd>
-            </dl>
-          </CardBody>
-        </Card>
+        {editing ? (
+          <CustomerEditForm
+            customer={customer}
+            onCancel={() => setEditing(false)}
+            onSaved={async () => {
+              setEditing(false);
+              await load();
+            }}
+          />
+        ) : (
+          <Card className="mt-3 max-w-md">
+            <CardBody>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                <dt className="text-gray-500">Mobile</dt>
+                <dd className="text-gray-900">{customer.mobile}</dd>
+                <dt className="text-gray-500">WhatsApp</dt>
+                <dd className="text-gray-900">{customer.whatsapp ?? "-"}</dd>
+                <dt className="text-gray-500">Email</dt>
+                <dd className="text-gray-900">{customer.email ?? "-"}</dd>
+                <dt className="text-gray-500">Address</dt>
+                <dd className="text-gray-900">{customer.address ?? "-"}</dd>
+                <dt className="text-gray-500">Notes</dt>
+                <dd className="text-gray-900">{customer.notes ?? "-"}</dd>
+              </dl>
+            </CardBody>
+          </Card>
+        )}
       </div>
 
       <div>

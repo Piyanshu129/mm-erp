@@ -31,6 +31,7 @@ import { JobCardStatusBadge, Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 import { compressImage } from "@/lib/compressImage";
+import { fmtQty } from "@/lib/format";
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
@@ -108,7 +109,9 @@ interface JobCardDetail {
     quantity: number;
     rate: string;
     amount: string;
-    item: { itemCode: string; name: string; uom: string };
+    // null for a part that isn't in inventory (then description says what it is)
+    item: { itemCode: string; name: string; uom: string } | null;
+    description: string | null;
   }[];
   labour: { id: number; description: string; technician: string | null; quantity: number; rate: string; amount: string }[];
   partsTotal: number;
@@ -183,6 +186,11 @@ function JobCardDetailPageContent() {
   // Parts are added by item code (0001) and the quantity used.
   const [codeInput, setCodeInput] = useState("");
   const [partQty, setPartQty] = useState("1");
+  // A part from inventory (by item code), or one bought outside for this
+  // job that isn't in inventory (description + rate, no stock).
+  const [partMode, setPartMode] = useState<"inventory" | "outside">("inventory");
+  const [outsideDesc, setOutsideDesc] = useState("");
+  const [outsideRate, setOutsideRate] = useState("");
   const [itemQuery, setItemQuery] = useState("");
   const [itemResults, setItemResults] = useState<ItemOption[]>([]);
   const [addingPart, setAddingPart] = useState(false);
@@ -375,22 +383,35 @@ function JobCardDetailPageContent() {
   async function handleAddPart(e: FormEvent) {
     e.preventDefault();
     setActionError(null);
-    if (codePreview.state !== "found") {
-      setActionError("Enter the item code of an item in inventory");
+    const quantity = Number(partQty);
+    if (!(quantity > 0)) {
+      setActionError("Enter the quantity used — more than 0 (e.g. 1, 2 or 0.5)");
       return;
     }
-    const quantity = Number(partQty);
-    if (!Number.isInteger(quantity) || quantity < 1) {
-      setActionError("Enter the quantity used — a whole number, at least 1");
-      return;
+    let body: Record<string, unknown>;
+    if (partMode === "outside") {
+      if (!outsideDesc.trim()) {
+        setActionError("Enter what the part is");
+        return;
+      }
+      if (outsideRate.trim() === "" || Number(outsideRate) < 0) {
+        setActionError("Enter the part's rate");
+        return;
+      }
+      body = { description: outsideDesc.trim(), rate: Number(outsideRate), quantity };
+    } else {
+      if (codePreview.state !== "found") {
+        setActionError("Enter the item code of an item in inventory");
+        return;
+      }
+      body = { itemId: codePreview.item.id, quantity };
     }
     setAddingPart(true);
     try {
-      await apiFetch(`/job-cards/${id}/parts`, {
-        method: "POST",
-        body: JSON.stringify({ itemId: codePreview.item.id, quantity }),
-      });
+      await apiFetch(`/job-cards/${id}/parts`, { method: "POST", body: JSON.stringify(body) });
       setCodeInput("");
+      setOutsideDesc("");
+      setOutsideRate("");
       setPartQty("1");
       setItemQuery("");
       setItemResults([]);
@@ -898,7 +919,36 @@ function JobCardDetailPageContent() {
         {!locked && (
           <Card className="mb-3 max-w-lg">
             <CardBody>
+              <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-700">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={partMode === "inventory"} onChange={() => setPartMode("inventory")} />
+                  From inventory
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={partMode === "outside"} onChange={() => setPartMode("outside")} />
+                  Not in inventory (bought outside)
+                </label>
+              </div>
               <form onSubmit={handleAddPart} className="space-y-2">
+                {partMode === "outside" ? (
+                  <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_6rem_7rem_auto]">
+                    <div>
+                      <Label>Part</Label>
+                      <Input placeholder="e.g. Bumper clip" value={outsideDesc} onChange={(e) => setOutsideDesc(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Qty used</Label>
+                      <Input type="number" min={0.01} step="0.01" value={partQty} onChange={(e) => setPartQty(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Rate (₹)</Label>
+                      <Input type="number" min={0} step="0.01" value={outsideRate} onChange={(e) => setOutsideRate(e.target.value)} />
+                    </div>
+                    <Button type="submit" disabled={addingPart || !outsideDesc.trim() || outsideRate === "" || !(Number(partQty) > 0)}>
+                      Add part
+                    </Button>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-[1fr_6rem_auto] items-end gap-2">
                   <div>
                     <Label>Item code</Label>
@@ -911,20 +961,23 @@ function JobCardDetailPageContent() {
                   </div>
                   <div>
                     <Label>Qty used</Label>
-                    <Input type="number" min={1} step={1} value={partQty} onChange={(e) => setPartQty(e.target.value)} />
+                    <Input type="number" min={0.01} step="0.01" value={partQty} onChange={(e) => setPartQty(e.target.value)} />
                   </div>
                   <Button
                     type="submit"
                     disabled={
                       addingPart ||
                       codePreview.state !== "found" ||
-                      !(Number(partQty) >= 1) ||
+                      !(Number(partQty) > 0) ||
                       Number(partQty) > codePreview.item.currentStock
                     }
                   >
                     Add part
                   </Button>
                 </div>
+                )}
+                {partMode === "inventory" && (
+                <>
                 {codePreview.state === "loading" && <p className="text-xs text-gray-500">Looking up item {codeInput}...</p>}
                 {codePreview.state === "notfound" && (
                   <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">No item with code {codeInput}.</p>
@@ -940,21 +993,25 @@ function JobCardDetailPageContent() {
                       {Number(codePreview.item.sellingPrice).toFixed(2)}
                     </p>
                     <p className="mt-0.5">
-                      Available: <strong>{codePreview.item.currentStock}</strong> {codePreview.item.uom}
-                      {Number(partQty) >= 1 && Number(partQty) <= codePreview.item.currentStock && (
+                      Available: <strong>{fmtQty(codePreview.item.currentStock)}</strong> {codePreview.item.uom}
+                      {Number(partQty) > 0 && Number(partQty) <= codePreview.item.currentStock && (
                         <>
                           {" "}
-                          · Used: {Number(partQty)} · Balance: <strong>{codePreview.item.currentStock - Number(partQty)}</strong>
+                          · Used: {fmtQty(Number(partQty))} · Balance:{" "}
+                          <strong>{fmtQty(codePreview.item.currentStock - Number(partQty))}</strong>
                         </>
                       )}
                       {Number(partQty) > codePreview.item.currentStock && (
-                        <span className="text-red-700"> · only {codePreview.item.currentStock} available</span>
+                        <span className="text-red-700"> · only {fmtQty(codePreview.item.currentStock)} available</span>
                       )}
                     </p>
                   </div>
                 )}
+                </>
+                )}
               </form>
 
+              {partMode === "inventory" && (
               <div className="mt-3 border-t border-gray-100 pt-3">
                 <p className="mb-1 text-xs text-gray-500">Don&apos;t know the code? Find the item:</p>
                 <div className="flex gap-2">
@@ -986,13 +1043,14 @@ function JobCardDetailPageContent() {
                           }}
                           className="block w-full px-3 py-2 text-left hover:bg-gray-50"
                         >
-                          {it.itemCode} — {it.name} (available: {it.currentStock})
+                          {it.itemCode} — {it.name} (available: {fmtQty(it.currentStock)})
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
+              )}
             </CardBody>
           </Card>
         )}
@@ -1014,10 +1072,13 @@ function JobCardDetailPageContent() {
             <tbody>
               {jobCard.parts.map((p) => (
                 <Tr key={p.id}>
-                  <Td className="font-mono">{p.item.itemCode}</Td>
-                  <Td>{p.item.name}</Td>
+                  <Td className="font-mono">{p.item?.itemCode ?? "—"}</Td>
                   <Td>
-                    {p.quantity} {p.item.uom}
+                    {p.item?.name ?? p.description}
+                    {!p.item && <span className="block text-xs text-gray-500">Not in inventory</span>}
+                  </Td>
+                  <Td>
+                    {fmtQty(p.quantity)} {p.item?.uom ?? ""}
                   </Td>
                   <Td>₹{p.rate}</Td>
                   <Td>₹{p.amount}</Td>
@@ -1050,7 +1111,7 @@ function JobCardDetailPageContent() {
                   className="sm:col-span-2"
                 />
                 <Input placeholder="Technician (optional)" value={labourTech} onChange={(e) => setLabourTech(e.target.value)} />
-                <Input type="number" min={1} placeholder="Qty" value={labourQty} onChange={(e) => setLabourQty(e.target.value)} />
+                <Input type="number" min={0.01} step="0.01" placeholder="Qty" value={labourQty} onChange={(e) => setLabourQty(e.target.value)} />
                 <Input
                   type="number"
                   step="0.01"

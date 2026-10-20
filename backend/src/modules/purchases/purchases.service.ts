@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { formatItemCode } from "../../lib/itemCode";
+import { addStock } from "../../lib/stock";
 
 // SPARE_PART/PAINT/TOOL/ELECTRICAL/SETTINGS_ADJUSTMENTS are inventory types — they need an Item and add
 // their quantity to its stock. The rest are plain business expenses with no
@@ -17,6 +18,8 @@ export type PurchaseCategory = (typeof PURCHASE_CATEGORIES)[number];
 
 export interface NewItemInput {
   name: string;
+  brand: string;
+  specification: string;
   category: string;
   uom: string;
   minStock?: number;
@@ -54,7 +57,7 @@ const purchaseInclude = {
   createdBy: { select: { id: true, name: true } },
 } as const;
 
-function isInventoryType(itemType: string): boolean {
+export function isInventoryType(itemType: string): boolean {
   return (INVENTORY_ITEM_TYPES as readonly string[]).includes(itemType);
 }
 
@@ -203,6 +206,8 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
         const created = await tx.item.create({
           data: {
             name: line.newItem.name,
+            brand: line.newItem.brand,
+            specification: line.newItem.specification,
             category: line.newItem.category,
             uom: line.newItem.uom,
             minStock: line.newItem.minStock,
@@ -256,10 +261,10 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
       createdIds.push(purchase.id);
 
       if (inventory && itemId != null) {
+        await addStock(tx, itemId, line.quantity);
         await tx.item.update({
           where: { id: itemId },
           data: {
-            currentStock: { increment: line.quantity },
             purchaseCost: line.purchaseCost,
             ...(line.sellingPrice != null ? { sellingPrice: line.sellingPrice } : {}),
           },

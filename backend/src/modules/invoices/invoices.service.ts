@@ -212,6 +212,61 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
   });
 }
 
+// Admin correction of a recorded payment (wrong amount, date, mode...). The
+// invoice's running total moves by the difference, in the same transaction
+// with the invoice row locked, and can't end up above the invoice total.
+export async function updateInvoicePayment(invoiceId: number, paymentId: number, input: InvoicePaymentInput) {
+  if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
+
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
+
+    const newPaid = Number(invoice.paymentAmount) - Number(payment.amount) + input.amount;
+    if (newPaid > Number(invoice.totalAmount) + 0.005) {
+      const max = Number(invoice.totalAmount) - (Number(invoice.paymentAmount) - Number(payment.amount));
+      throw new ConflictError(`That would overpay ${invoice.invoiceNumber} — this payment can be at most ₹${max.toFixed(2)}`);
+    }
+
+    await tx.invoicePayment.update({
+      where: { id: paymentId },
+      data: {
+        amount: input.amount,
+        paymentDate: input.paymentDate ? new Date(input.paymentDate) : payment.paymentDate,
+        paymentMode: input.paymentMode ?? null,
+        reference: input.reference ?? null,
+        receivedBy: input.receivedBy ?? null,
+        notes: input.notes ?? null,
+      },
+    });
+    return tx.invoice.update({
+      where: { id: invoiceId },
+      data: { paymentAmount: Math.round(newPaid * 100) / 100 },
+      include: detailInclude,
+    });
+  });
+}
+
+// Admin removal of a payment recorded by mistake.
+export async function deleteInvoicePayment(invoiceId: number, paymentId: number) {
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
+
+    await tx.invoicePayment.delete({ where: { id: paymentId } });
+    return tx.invoice.update({
+      where: { id: invoiceId },
+      data: { paymentAmount: { decrement: payment.amount } },
+      include: detailInclude,
+    });
+  });
+}
+
 // ---- Customer / vehicle accounts -------------------------------------------
 // What a customer (or one vehicle) has been invoiced, what they've paid, and
 // what's still due — always computed from the invoices themselves.

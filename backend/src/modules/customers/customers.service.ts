@@ -59,7 +59,17 @@ export async function createCustomer(input: CustomerInput) {
   return prisma.customer.create({ data: input });
 }
 
-export async function updateCustomer(id: number, input: Partial<CustomerInput>) {
+// null clears an optional field.
+export type CustomerUpdate = {
+  name?: string;
+  mobile?: string;
+  whatsapp?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+};
+
+export async function updateCustomer(id: number, input: CustomerUpdate) {
   const customer = await prisma.customer.findUnique({ where: { id } });
   if (!customer) throw new NotFoundError("Customer not found");
 

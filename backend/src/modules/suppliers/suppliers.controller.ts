@@ -61,6 +61,21 @@ export async function payments(req: Request, res: Response) {
   res.json(result);
 }
 
+export async function updatePayment(req: Request, res: Response) {
+  const input = recordPaymentSchema.parse(req.body);
+  const proofUrl = req.file ? publicUrlFor("supplier-payments", req.file.filename) : undefined;
+  const payment = await suppliersService.updateSupplierPayment(Number(req.params.id), Number(req.params.paymentId), {
+    ...input,
+    proofUrl,
+  });
+  res.json({ payment });
+}
+
+export async function deletePayment(req: Request, res: Response) {
+  await suppliersService.deleteSupplierPayment(Number(req.params.id), Number(req.params.paymentId));
+  res.status(204).send();
+}
+
 export async function recordPayment(req: Request, res: Response) {
   const input = recordPaymentSchema.parse(req.body);
   const proofUrl = req.file ? publicUrlFor("supplier-payments", req.file.filename) : undefined;

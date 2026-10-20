@@ -5,7 +5,7 @@ import * as jobCardLabourService from "./jobCardLabour.service";
 export const addLabourSchema = z.object({
   description: z.string().trim().min(1),
   technician: z.string().trim().min(1).optional(),
-  quantity: z.coerce.number().int().positive().optional(),
+  quantity: z.coerce.number().positive().max(100000).optional(), // can be part of a unit, e.g. 0.5 hr
   rate: z.coerce.number().min(0),
 });
 

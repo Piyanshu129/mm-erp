@@ -75,7 +75,7 @@ Cookie flags differ by environment ([`refreshCookieOptions()`](../backend/src/mo
 
 Two independent gates, both throwing `UnauthorizedError`/`ForbiddenError` (→ 401/403):
 
-- **`authorize(...roles)`** — hard role check. Used only for the Users and Backup routers (`authorize("ADMIN")`) — these stay Admin-only forever, never grantable.
+- **`authorize(...roles)`** — hard role check. Used for the Users and Backup routers (`authorize("ADMIN")`) — these stay Admin-only forever, never grantable — and for single admin-only actions inside other routers: editing a customer (`PATCH /customers/:id`), correcting or deleting a recorded payment (`PATCH`/`DELETE /invoices/:id/payments/:paymentId` and `/suppliers/:id/payments/:paymentId`), and the sales/purchases reports.
 - **`requirePermission(...modules)`** — checks `req.user.permissions` unless `req.user.role === "ADMIN"`, in which case it always passes. Most module routers use this: `vehiclesRouter.use(authenticate, requirePermission("VEHICLES"))`. Passing more than one module means "any of these" (e.g. `item-lookup` is shared by the Items and Job Cards workflows: `requirePermission("ITEMS", "JOB_CARDS")`).
 
 Because `permissions` is embedded in the JWT rather than looked up per-request, a permission change made via `/dashboard/users` takes effect on that user's *next token refresh* — worst case ~15 minutes — not instantly.
@@ -215,6 +215,8 @@ All of the parts/labour/media mutations are blocked once the job card is locked 
 
 ### Reports — `/reports` (permission `REPORTS`, [routes](../backend/src/modules/reports/reports.routes.ts))
 `GET /dashboard` (the live widget summary — no date range), `GET /sales`, `/purchases`, `/inventory`, `/workshop`, `/customers` (most accept `?from=&to=`).
+
+`/sales` and `/purchases` return each invoice / purchase with its `day` (local calendar date), so the Reports page can list a day's details under its total.
 
 Sales and purchase figures are **admin-only** (since 2026-10-20): `/sales` and `/purchases` require the `ADMIN` role even with `REPORTS`, and `/dashboard` omits `todaysSales`, `todaysPurchaseValue` and the month's purchase totals for anyone else. `/dashboard` adds `upcomingServices` (count and list of vehicles due within 30 days) for users with `JOB_CARDS` or `VEHICLES`.
 

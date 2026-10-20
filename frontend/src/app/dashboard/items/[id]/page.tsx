@@ -28,6 +28,7 @@ interface ItemDetail {
   photoUrl: string | null;
   partNumber: string | null;
   brand: string | null;
+  specification: string | null;
 }
 
 interface PurchaseRow {
@@ -152,6 +153,8 @@ function ItemDetailPageContent() {
               <dd className="text-gray-900">{item.partNumber ?? "-"}</dd>
               <dt className="text-gray-500">Brand</dt>
               <dd className="text-gray-900">{item.brand ?? "-"}</dd>
+              <dt className="text-gray-500">Specification</dt>
+              <dd className="text-gray-900">{item.specification ?? "-"}</dd>
               <dt className="text-gray-500">Purchase Cost</dt>
               <dd className="text-gray-900">₹{item.purchaseCost}</dd>
               <dt className="text-gray-500">MRP</dt>

@@ -9,6 +9,7 @@ export interface ItemInput {
   subCategory?: string;
   partNumber?: string;
   brand?: string;
+  specification?: string;
   vehicleMake?: string;
   vehicleModel?: string;
   variant?: string;
@@ -30,6 +31,7 @@ export async function listItems(
       { itemCode: { contains: q, mode: "insensitive" as const } },
       { name: { contains: q, mode: "insensitive" as const } },
       { partNumber: { contains: q, mode: "insensitive" as const } },
+      { brand: { contains: q, mode: "insensitive" as const } },
     ];
   }
   if (category) {

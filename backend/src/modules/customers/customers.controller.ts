@@ -15,7 +15,18 @@ export const createCustomerSchema = z.object({
   notes: optionalString,
 });
 
-export const updateCustomerSchema = createCustomerSchema.partial();
+// Editing can also clear an optional field: "" or null empties it.
+const clearable = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === "" ? null : v), schema.nullable().optional());
+
+export const updateCustomerSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  mobile: mobileSchema.optional(),
+  whatsapp: clearable(mobileSchema),
+  email: clearable(z.string().trim().email()),
+  address: clearable(z.string().trim()),
+  notes: clearable(z.string().trim()),
+});
 
 export const setActiveSchema = z.object({ isActive: z.boolean() });
 

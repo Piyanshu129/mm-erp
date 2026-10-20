@@ -7,6 +7,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Printer, Download, Phone } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { fmtQty } from "@/lib/format";
 import { WhatsAppMessage } from "@/components/WhatsAppMessage";
 import { paymentReminder } from "@/lib/whatsappMessages";
 import { invoiceFileName, downloadElementAsPdf } from "@/lib/invoicePdf";
@@ -46,7 +47,9 @@ interface InvoiceDetail {
       quantity: number;
       rate: string;
       amount: string;
-      item: { itemCode: string; name: string; uom: string };
+      // null for a part that isn't in inventory (then description says what it is)
+      item: { itemCode: string; name: string; uom: string } | null;
+      description: string | null;
     }[];
     labour: { id: number; description: string; technician: string | null; quantity: number; rate: string; amount: string }[];
   };
@@ -228,10 +231,10 @@ function InvoiceDetailPageContent() {
                 {jobCard.parts.map((p) => (
                   <tr key={p.id} className="border-b border-gray-100">
                     <td className="py-1">
-                      {p.item.itemCode} — {p.item.name}
+                      {p.item ? `${p.item.itemCode} — ${p.item.name}` : p.description}
                     </td>
                     <td className="py-1">
-                      {p.quantity} {p.item.uom}
+                      {fmtQty(p.quantity)} {p.item?.uom ?? ""}
                     </td>
                     <td className="py-1 text-right">₹{p.rate}</td>
                     <td className="py-1 text-right">₹{p.amount}</td>
@@ -337,7 +340,7 @@ function InvoiceDetailPageContent() {
           />
           <div>
             <p className="mb-2 text-sm font-semibold text-gray-900">Payment history</p>
-            <InvoicePaymentHistory payments={invoice.payments} />
+            <InvoicePaymentHistory payments={invoice.payments} onChanged={() => load(true)} />
           </div>
         </CardBody>
       </Card>

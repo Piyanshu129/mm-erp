@@ -42,13 +42,22 @@ export async function markAttendance(
   employeeId: number,
   date: string,
   status: string,
-  correctedById?: number
+  correctedById?: number,
+  times: { inTime?: string | null; outTime?: string | null } = {}
 ) {
   if (!(ATTENDANCE_STATUSES as readonly string[]).includes(status)) {
     throw new ConflictError(`Invalid attendance status: ${status}`);
   }
   const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!employee) throw new NotFoundError("Employee not found");
+  if (times.inTime && times.outTime && times.outTime <= times.inTime) {
+    throw new ConflictError("Out time must be after in time");
+  }
+  // Only the times that were sent are changed (undefined = leave as is).
+  const timeData = {
+    ...(times.inTime !== undefined ? { inTime: times.inTime } : {}),
+    ...(times.outTime !== undefined ? { outTime: times.outTime } : {}),
+  };
 
   // correctedById is only meaningful once there's something to correct — the
   // first mark of the day for an employee is the original record, not a
@@ -59,7 +68,7 @@ export async function markAttendance(
   });
 
   if (!existing) {
-    return prisma.attendance.create({ data: { employeeId, date: day, status, markedBy: "ADMIN" } });
+    return prisma.attendance.create({ data: { employeeId, date: day, status, markedBy: "ADMIN", ...timeData } });
   }
   // An admin correction always wins over a prior self-punch for the same
   // day — flip markedBy back to ADMIN, but leave the punch metadata
@@ -67,7 +76,7 @@ export async function markAttendance(
   // employee actually did before the override.
   return prisma.attendance.update({
     where: { id: existing.id },
-    data: { status, correctedById, markedBy: "ADMIN" },
+    data: { status, correctedById, markedBy: "ADMIN", ...timeData },
   });
 }
 

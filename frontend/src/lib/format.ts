@@ -9,3 +9,9 @@ export function formatINR(value: number | string | null | undefined): string {
 export function todayISO(): string {
   return new Date().toLocaleDateString("en-CA");
 }
+
+// A quantity, which can be part of a unit: 2 → "2", 0.5 → "0.5",
+// 1.25 → "1.25" (never float noise like 0.30000000000000004).
+export function fmtQty(n: number | string): string {
+  return String(Math.round(Number(n) * 1000) / 1000);
+}

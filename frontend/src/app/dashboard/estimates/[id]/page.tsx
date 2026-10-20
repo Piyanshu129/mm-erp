@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { downloadElementAsPdf, invoiceFileName } from "@/lib/invoicePdf";
 import { compressImage } from "@/lib/compressImage";
+import { fmtQty } from "@/lib/format";
 
 interface EstimateLine {
   id: number;
@@ -173,8 +174,8 @@ function EstimatePageContent() {
     e.preventDefault();
     setError(null);
     const qty = Number(quantity);
-    if (!Number.isInteger(qty) || qty < 1) {
-      setError("Quantity must be a whole number, at least 1");
+    if (!(qty > 0)) {
+      setError("Quantity must be more than 0 (e.g. 1, 2 or 0.5)");
       return;
     }
     if (kind === "INVENTORY" && (found == null || found === "notfound")) {
@@ -372,7 +373,7 @@ function EstimatePageContent() {
                         <span className="text-gray-500"> (not in stock)</span>
                       )}
                     </td>
-                    <td className="py-1 text-right">{l.quantity}</td>
+                    <td className="py-1 text-right">{fmtQty(l.quantity)}</td>
                     <td className="py-1 text-right">{money(l.rate)}</td>
                     <td className="py-1 text-right">{money(l.amount)}</td>
                     {removeCell(l.id)}
@@ -404,7 +405,7 @@ function EstimatePageContent() {
                   <tr key={l.id} className="border-b border-gray-100">
                     <td className="py-1">{i + 1}</td>
                     <td className="py-1">{l.description}</td>
-                    <td className="py-1 text-right">{l.quantity}</td>
+                    <td className="py-1 text-right">{fmtQty(l.quantity)}</td>
                     <td className="py-1 text-right">{money(l.rate)}</td>
                     <td className="py-1 text-right">{money(l.amount)}</td>
                     {removeCell(l.id)}
@@ -516,7 +517,7 @@ function EstimatePageContent() {
                 )}
                 <div>
                   <Label>Qty</Label>
-                  <Input type="number" min={1} step={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+                  <Input type="number" min={0.01} step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
                 </div>
                 <div>
                   <Label>Rate</Label>

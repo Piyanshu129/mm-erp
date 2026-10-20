@@ -2,9 +2,11 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { useEffect, useState } from "react";
-import { Download } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { Fragment, useEffect, useState } from "react";
+import Link from "next/link";
+import { ChevronDown, ChevronUp, Download } from "lucide-react";
+import { apiFetch, assetUrl } from "@/lib/api";
+import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { useAuth } from "@/context/AuthContext";
 import { downloadCsv } from "@/lib/csv";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -23,11 +25,106 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "customers", label: "Customers" },
 ];
 
+// Local calendar dates (the workshop's own day), as the server reads them.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date().toLocaleDateString("en-CA");
 }
 function daysAgoStr(n: number) {
-  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toLocaleDateString("en-CA");
+}
+
+function inr(n: number | string): string {
+  return `₹${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+type DayRow = {
+  date: string;
+  count: number;
+  total: number;
+};
+
+// Day-wise totals, newest first; click a day to see everything behind it.
+function DayWiseTable<T extends { day: string }>({
+  days,
+  rows,
+  empty,
+  renderDetail,
+}: {
+  days: DayRow[];
+  rows: T[];
+  empty: string;
+  renderDetail: (rows: T[]) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (days.length === 0) return <p className="text-sm text-gray-500">{empty}</p>;
+  return (
+    <Table minWidth={500}>
+      <thead>
+        <tr>
+          <Th>Date</Th>
+          <Th className="text-right">Count</Th>
+          <Th className="text-right">Total</Th>
+          <Th></Th>
+        </tr>
+      </thead>
+      <tbody>
+        {[...days].reverse().map((d) => (
+          <Fragment key={d.date}>
+            <Tr>
+              <Td className="whitespace-nowrap font-medium text-gray-900">
+                {new Date(`${d.date}T00:00:00`).toLocaleDateString(undefined, {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </Td>
+              <Td className="text-right">{d.count}</Td>
+              <Td className="text-right font-medium text-gray-900">{inr(d.total)}</Td>
+              <Td className="text-right">
+                <button
+                  type="button"
+                  onClick={() => setOpen(open === d.date ? null : d.date)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                >
+                  {open === d.date ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  {open === d.date ? "Hide details" : "Details"}
+                </button>
+              </Td>
+            </Tr>
+            {open === d.date && (
+              <tr>
+                <td colSpan={4} className="overflow-x-auto border-t border-gray-100 bg-gray-50 px-4 py-3">
+                  {renderDetail(rows.filter((r) => r.day === d.date))}
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+interface SaleRow {
+  id: number;
+  day: string;
+  invoiceNumber: string;
+  totalAmount: string;
+  paymentAmount: string;
+  jobCard: { jobCardNumber: string; vehicle: { registrationNumber: string; customer: { name: string; mobile: string } } };
+}
+
+interface PurchaseDetailRow {
+  id: number;
+  day: string;
+  itemType: string;
+  description: string | null;
+  quantity: number;
+  purchaseCost: string;
+  billUrl: string | null;
+  supplier: { name: string } | null;
+  item: { itemCode: string; name: string; uom: string } | null;
 }
 
 function ExportButton({ onClick }: { onClick: () => void }) {
@@ -71,7 +168,7 @@ function DateRangeControls({
 function SalesTab() {
   const [from, setFrom] = useState(daysAgoStr(30));
   const [to, setTo] = useState(todayStr());
-  const [data, setData] = useState<{ byDay: { date: string; count: number; total: number }[]; grandTotal: number } | null>(null);
+  const [data, setData] = useState<{ byDay: DayRow[]; invoices: SaleRow[]; grandTotal: number } | null>(null);
 
   async function load() {
     const body = await apiFetch(`/reports/sales?from=${from}&to=${to}`);
@@ -93,7 +190,45 @@ function SalesTab() {
             </p>
             <ExportButton onClick={() => downloadCsv("sales-report.csv", data.byDay)} />
           </div>
-          <ReportTable columns={["date", "count", "total"]} rows={data.byDay} empty="No sales in this range." />
+          <DayWiseTable
+            days={data.byDay}
+            rows={data.invoices}
+            empty="No sales in this range."
+            renderDetail={(rows) => (
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500">
+                    <th className="py-1 pr-3">Draft Invoice</th>
+                    <th className="py-1 pr-3">Vehicle</th>
+                    <th className="py-1 pr-3">Customer</th>
+                    <th className="py-1 pr-3 text-right">Total</th>
+                    <th className="py-1 pr-3 text-right">Paid</th>
+                    <th className="py-1 text-right">Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((inv) => (
+                    <tr key={inv.id} className="border-t border-gray-200">
+                      <td className="py-1.5 pr-3">
+                        <Link href={`/dashboard/invoices/${inv.id}`} className="font-mono text-blue-600 hover:underline">
+                          {inv.invoiceNumber}
+                        </Link>
+                        <span className="block text-xs text-gray-500">{inv.jobCard.jobCardNumber}</span>
+                      </td>
+                      <td className="py-1.5 pr-3 font-mono">{inv.jobCard.vehicle.registrationNumber}</td>
+                      <td className="py-1.5 pr-3">
+                        {inv.jobCard.vehicle.customer.name}
+                        <span className="block text-xs text-gray-500">{inv.jobCard.vehicle.customer.mobile}</span>
+                      </td>
+                      <td className="py-1.5 pr-3 text-right">{inr(inv.totalAmount)}</td>
+                      <td className="py-1.5 pr-3 text-right">{inr(inv.paymentAmount)}</td>
+                      <td className="py-1.5 text-right">{inr(Number(inv.totalAmount) - Number(inv.paymentAmount))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          />
         </>
       )}
     </div>
@@ -104,8 +239,9 @@ function PurchasesTab() {
   const [from, setFrom] = useState(daysAgoStr(30));
   const [to, setTo] = useState(todayStr());
   const [data, setData] = useState<{
-    byDay: { date: string; count: number; total: number }[];
+    byDay: DayRow[];
     bySupplier: { supplier: string; count: number; total: number }[];
+    purchases: PurchaseDetailRow[];
     grandTotal: number;
   } | null>(null);
 
@@ -131,7 +267,51 @@ function PurchasesTab() {
               <h3 className="text-sm font-semibold text-gray-900">By day</h3>
               <ExportButton onClick={() => downloadCsv("purchases-by-day.csv", data.byDay)} />
             </div>
-            <ReportTable columns={["date", "count", "total"]} rows={data.byDay} empty="No purchases in this range." />
+            <DayWiseTable
+              days={data.byDay}
+              rows={data.purchases}
+              empty="No purchases in this range."
+              renderDetail={(rows) => (
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500">
+                      <th className="py-1 pr-3">Type</th>
+                      <th className="py-1 pr-3">Item / Expense</th>
+                      <th className="py-1 pr-3">Supplier</th>
+                      <th className="py-1 pr-3 text-right">Qty</th>
+                      <th className="py-1 pr-3 text-right">Rate</th>
+                      <th className="py-1 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((p) => (
+                      <tr key={p.id} className="border-t border-gray-200">
+                        <td className="py-1.5 pr-3">{TYPE_LABELS[p.itemType] ?? p.itemType}</td>
+                        <td className="py-1.5 pr-3">
+                          {p.item ? `${p.item.itemCode} — ${p.item.name}` : p.description}
+                          {p.billUrl && (
+                            <a
+                              href={assetUrl(p.billUrl)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="ml-2 text-xs text-blue-600 hover:underline"
+                            >
+                              Bill
+                            </a>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3">{p.supplier?.name ?? "-"}</td>
+                        <td className="py-1.5 pr-3 text-right">
+                          {p.quantity} {p.item?.uom ?? ""}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right">{inr(p.purchaseCost)}</td>
+                        <td className="py-1.5 text-right">{inr(p.quantity * Number(p.purchaseCost))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            />
           </div>
           <div>
             <div className="mb-1 flex items-center justify-between">

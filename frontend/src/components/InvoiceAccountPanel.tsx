@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { X, IndianRupee, History } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { formatINR, todayISO } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
@@ -31,6 +32,7 @@ interface AccountInvoice {
 
 export interface InvoicePaymentRow {
   id: number;
+  invoiceId: number;
   amount: string;
   paymentDate: string;
   paymentMode: string | null;
@@ -118,51 +120,195 @@ export function InvoiceAccountActions({
 // Payment history table — shared by the invoice page and the account panel.
 // showInvoice adds which invoice each payment was against (for a customer
 // or vehicle with several invoices).
-export function InvoicePaymentHistory({ payments, showInvoice }: { payments: InvoicePaymentRow[]; showInvoice?: boolean }) {
+// Admin-only (the server enforces it): correct or remove a recorded payment.
+function EditPaymentRow({
+  payment,
+  colSpan,
+  onDone,
+}: {
+  payment: InvoicePaymentRow;
+  colSpan: number;
+  onDone: (changed: boolean) => void;
+}) {
+  const [amount, setAmount] = useState(String(Number(payment.amount)));
+  const [date, setDate] = useState(payment.paymentDate.slice(0, 10));
+  const [mode, setMode] = useState(payment.paymentMode ?? "CASH");
+  const [reference, setReference] = useState(payment.reference ?? "");
+  const [receivedBy, setReceivedBy] = useState(payment.receivedBy ?? "");
+  const [notes, setNotes] = useState(payment.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!(Number(amount) > 0)) return setError("Amount must be more than 0");
+    setSaving(true);
+    try {
+      await apiFetch(`/invoices/${payment.invoiceId}/payments/${payment.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          amount: Number(amount),
+          paymentDate: date,
+          paymentMode: mode,
+          reference: reference.trim() || undefined,
+          receivedBy: receivedBy.trim() || undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      onDone(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save the payment");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td colSpan={colSpan} className="border-t border-gray-100 bg-blue-50 px-4 py-3">
+        <form onSubmit={save} className="grid grid-cols-2 gap-2 sm:grid-cols-6 sm:items-end">
+          <div>
+            <Label>Amount</Label>
+            <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <Label>Date</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <Label>Mode</Label>
+            <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+              {PAYMENT_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {modeLabel(m)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Reference</Label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} />
+          </div>
+          <div>
+            <Label>Received by</Label>
+            <Input value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} />
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+          {error && <p className="col-span-2 text-sm text-red-600 sm:col-span-6">{error}</p>}
+          <div className="col-span-2 flex gap-2 sm:col-span-6">
+            <Button type="submit" size="sm" disabled={saving}>
+              {saving ? "Saving..." : "Save payment"}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => onDone(false)} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+export function InvoicePaymentHistory({
+  payments,
+  showInvoice,
+  onChanged,
+}: {
+  payments: InvoicePaymentRow[];
+  showInvoice?: boolean;
+  // Given → admins get Edit / Delete on each payment; called after a change.
+  onChanged?: () => void | Promise<void>;
+}) {
+  const { user } = useAuth();
+  const canEdit = user?.role === "ADMIN" && !!onChanged;
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove(p: InvoicePaymentRow) {
+    if (!window.confirm(`Delete the ${formatINR(p.amount)} payment of ${new Date(p.paymentDate).toLocaleDateString()}? The amount due goes back up.`)) return;
+    setError(null);
+    try {
+      await apiFetch(`/invoices/${p.invoiceId}/payments/${p.id}`, { method: "DELETE" });
+      await onChanged?.();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete the payment");
+    }
+  }
+
   if (payments.length === 0) {
     return <p className="text-sm text-gray-500">No payments recorded yet.</p>;
   }
+  const colSpan = (showInvoice ? 7 : 6) + (canEdit ? 1 : 0);
   return (
-    <Table minWidth={showInvoice ? 760 : 620}>
-      <thead>
-        <tr>
-          <Th>Date</Th>
-          {showInvoice && <Th>Draft Invoice</Th>}
-          <Th className="text-right">Amount</Th>
-          <Th>Mode</Th>
-          <Th>Reference</Th>
-          <Th>Received by</Th>
-          <Th>Notes</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {payments.map((p) => (
-          <Tr key={p.id}>
-            <Td className="whitespace-nowrap">{new Date(p.paymentDate).toLocaleDateString()}</Td>
-            {showInvoice && (
-              <Td className="whitespace-nowrap">
-                {p.invoice ? (
-                  <Link href={`/dashboard/invoices/${p.invoice.id}`} className="font-mono text-blue-600 hover:underline">
-                    {p.invoice.invoiceNumber}
-                  </Link>
-                ) : (
-                  "-"
+    <>
+      {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <Table minWidth={showInvoice ? 820 : 680}>
+        <thead>
+          <tr>
+            <Th>Date</Th>
+            {showInvoice && <Th>Draft Invoice</Th>}
+            <Th className="text-right">Amount</Th>
+            <Th>Mode</Th>
+            <Th>Reference</Th>
+            <Th>Received by</Th>
+            <Th>Notes</Th>
+            {canEdit && <Th></Th>}
+          </tr>
+        </thead>
+        <tbody>
+          {payments.map((p) =>
+            editingId === p.id ? (
+              <EditPaymentRow
+                key={p.id}
+                payment={p}
+                colSpan={colSpan}
+                onDone={async (changed) => {
+                  setEditingId(null);
+                  if (changed) await onChanged?.();
+                }}
+              />
+            ) : (
+              <Tr key={p.id}>
+                <Td className="whitespace-nowrap">{new Date(p.paymentDate).toLocaleDateString()}</Td>
+                {showInvoice && (
+                  <Td className="whitespace-nowrap">
+                    {p.invoice ? (
+                      <Link href={`/dashboard/invoices/${p.invoice.id}`} className="font-mono text-blue-600 hover:underline">
+                        {p.invoice.invoiceNumber}
+                      </Link>
+                    ) : (
+                      "-"
+                    )}
+                    {p.invoice && <span className="block text-xs text-gray-500">{p.invoice.jobCard.vehicle.registrationNumber}</span>}
+                  </Td>
                 )}
-                {p.invoice && <span className="block text-xs text-gray-500">{p.invoice.jobCard.vehicle.registrationNumber}</span>}
-              </Td>
-            )}
-            <Td className="text-right font-medium text-gray-900">{formatINR(p.amount)}</Td>
-            <Td>{modeLabel(p.paymentMode)}</Td>
-            <Td>{p.reference ?? "-"}</Td>
-            <Td>{p.receivedBy ?? "-"}</Td>
-            <Td className="text-xs text-gray-500">
-              {p.notes ?? ""}
-              <span className="block text-gray-400">Entered by {p.createdBy.name}</span>
-            </Td>
-          </Tr>
-        ))}
-      </tbody>
-    </Table>
+                <Td className="text-right font-medium text-gray-900">{formatINR(p.amount)}</Td>
+                <Td>{modeLabel(p.paymentMode)}</Td>
+                <Td>{p.reference ?? "-"}</Td>
+                <Td>{p.receivedBy ?? "-"}</Td>
+                <Td className="text-xs text-gray-500">
+                  {p.notes ?? ""}
+                  <span className="block text-gray-400">Entered by {p.createdBy.name}</span>
+                </Td>
+                {canEdit && (
+                  <Td className="whitespace-nowrap">
+                    <button type="button" onClick={() => setEditingId(p.id)} className="mr-3 text-xs font-medium text-blue-600 hover:underline">
+                      Edit
+                    </button>
+                    <button type="button" onClick={() => remove(p)} className="text-xs font-medium text-red-600 hover:underline">
+                      Delete
+                    </button>
+                  </Td>
+                )}
+              </Tr>
+            )
+          )}
+        </tbody>
+      </Table>
+    </>
   );
 }
 
@@ -412,7 +558,7 @@ export function InvoiceAccountPanel({
 
                 <div>
                   <p className="mb-2 text-sm font-semibold text-gray-900">Payment history</p>
-                  <InvoicePaymentHistory payments={data.payments} showInvoice />
+                  <InvoicePaymentHistory payments={data.payments} showInvoice onChanged={load} />
                 </div>
               </>
             )}

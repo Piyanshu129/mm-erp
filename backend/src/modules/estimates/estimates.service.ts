@@ -85,7 +85,7 @@ export async function createEstimate(jobCardId: number, createdById: number) {
             ...jobCard.parts.map((p) => ({
               lineType: "PART",
               itemId: p.itemId,
-              description: p.item.name,
+              description: p.item?.name ?? p.description ?? "Part",
               quantity: p.quantity,
               rate: p.rate,
               amount: p.amount,

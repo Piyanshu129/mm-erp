@@ -128,6 +128,46 @@ export interface SupplierPaymentInput {
 // catches a mistyped extra zero. The supplier row is locked for the length
 // of the check-and-insert, so two payments entered at the same moment can't
 // both pass the check and together overpay.
+// Admin correction of a recorded supplier payment. Checked against the
+// supplier's balance as it would be without this payment, with the
+// supplier row locked, so a correction can't overpay either.
+export async function updateSupplierPayment(supplierId: number, paymentId: number, input: SupplierPaymentInput) {
+  if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
+
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${supplierId} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundError("Supplier not found");
+    const payment = await tx.supplierPayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.supplierId !== supplierId) throw new NotFoundError("Payment not found for this supplier");
+
+    const account = (await accountsFor([supplierId], tx)).get(supplierId)!;
+    const dueWithoutThis = account.balanceDue + Number(payment.amount);
+    if (input.amount > dueWithoutThis + 0.005) {
+      throw new ConflictError(`That would overpay this supplier — this payment can be at most ₹${dueWithoutThis.toFixed(2)}`);
+    }
+
+    return tx.supplierPayment.update({
+      where: { id: paymentId },
+      data: {
+        amount: input.amount,
+        paymentDate: input.paymentDate ? new Date(input.paymentDate) : payment.paymentDate,
+        paymentMode: input.paymentMode ?? null,
+        reference: input.reference ?? null,
+        paidBy: input.paidBy ?? null,
+        notes: input.notes ?? null,
+        ...(input.proofUrl ? { proofUrl: input.proofUrl } : {}),
+      },
+      include: { createdBy: { select: { id: true, name: true } } },
+    });
+  });
+}
+
+export async function deleteSupplierPayment(supplierId: number, paymentId: number) {
+  const payment = await prisma.supplierPayment.findUnique({ where: { id: paymentId } });
+  if (!payment || payment.supplierId !== supplierId) throw new NotFoundError("Payment not found for this supplier");
+  await prisma.supplierPayment.delete({ where: { id: paymentId } });
+}
+
 export async function recordSupplierPayment(id: number, input: SupplierPaymentInput, createdById: number) {
   if (input.amount <= 0) {
     throw new ConflictError("Payment amount must be greater than zero");

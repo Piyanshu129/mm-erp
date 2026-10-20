@@ -66,7 +66,7 @@ Employee ──< JobCard   (assignedEmployee, optional)
 
 - **`JobCardMedia`** — inspection photos/video. `angle` (FRONT/REAR/LEFT/RIGHT/ROOF/INTERIOR/DASHBOARD/GLOVE_BOX/BOOT/WALKAROUND/OTHER) and `phase` (`BEFORE`/`AFTER`) together enforce the workshop's mandatory before/after comparison shots — see [`assertMandatoryPhotos()`](../backend/src/modules/jobCards/jobCards.service.ts) in the workflow doc.
 
-- **`JobCardPart`** — one row per item used: `quantity` taken out of stock, `rate` (the item's MRP at that moment) and `amount` (`quantity × rate`). Both are captured **at the moment of use** and never recomputed — a later price change on the Item can't silently change what an already-issued job card is worth.
+- **`JobCardPart`** — one row per item used (or, with `itemId` null and a `description`, a part not in inventory — no stock involved): `quantity` (a decimal — 0.5 is allowed) taken out of stock, `rate` (the item's MRP at that moment) and `amount` (`quantity × rate`). Both are captured **at the moment of use** and never recomputed — a later price change on the Item can't silently change what an already-issued job card is worth.
 
 - **`JobCardLabour`** — simple description/technician/quantity/rate lines, `amount` computed server-side (`quantity × rate`).
 

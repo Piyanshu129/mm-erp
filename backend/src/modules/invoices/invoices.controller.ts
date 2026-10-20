@@ -40,6 +40,17 @@ export async function create(req: Request, res: Response) {
   res.status(201).json({ invoice });
 }
 
+export async function updatePayment(req: Request, res: Response) {
+  const input = req.body as z.infer<typeof recordPaymentSchema>;
+  const invoice = await invoicesService.updateInvoicePayment(Number(req.params.id), Number(req.params.paymentId), input);
+  res.json({ invoice });
+}
+
+export async function deletePayment(req: Request, res: Response) {
+  const invoice = await invoicesService.deleteInvoicePayment(Number(req.params.id), Number(req.params.paymentId));
+  res.json({ invoice });
+}
+
 export async function recordPayment(req: Request, res: Response) {
   const input = req.body as z.infer<typeof recordPaymentSchema>;
   const invoice = await invoicesService.recordInvoicePayment(Number(req.params.id), input, req.user!.id);

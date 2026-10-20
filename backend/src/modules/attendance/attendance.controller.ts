@@ -8,6 +8,9 @@ export const markAttendanceSchema = z.object({
   employeeId: z.coerce.number().int().positive(),
   date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   status: z.enum(ATTENDANCE_STATUSES),
+  // Optional clock-in / clock-out, "HH:MM" (24h); null clears it.
+  inTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "in time must be HH:MM").nullable().optional(),
+  outTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "out time must be HH:MM").nullable().optional(),
 });
 
 export const summaryQuerySchema = z.object({
@@ -32,7 +35,8 @@ export async function mark(req: Request, res: Response) {
     input.employeeId,
     input.date,
     input.status,
-    req.user!.id
+    req.user!.id,
+    { inTime: input.inTime, outTime: input.outTime }
   );
   res.json({ attendance });
 }

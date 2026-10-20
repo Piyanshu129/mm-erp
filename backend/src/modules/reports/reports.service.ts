@@ -8,9 +8,12 @@ function startOfToday(): Date {
   return d;
 }
 
+// "YYYY-MM-DD" dates are whole days on the workshop's own calendar (local
+// midnight to midnight), not UTC — otherwise an invoice made before 5:30 am
+// IST would fall outside its own day.
 function parseRange(from?: string, to?: string) {
-  const end = to ? new Date(to) : new Date();
-  const start = from ? new Date(from) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const end = to ? new Date(`${to}T00:00:00`) : new Date();
+  const start = from ? new Date(`${from}T00:00:00`) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
   // Make the "to" date inclusive of its whole day.
   end.setHours(23, 59, 59, 999);
   return { start, end };
@@ -100,7 +103,8 @@ export async function getSalesReport(from?: string, to?: string) {
 
   const byDay = new Map<string, { count: number; total: number }>();
   for (const inv of invoices) {
-    const key = inv.invoiceDate.toISOString().slice(0, 10);
+    // Invoices are timestamps: grouped by the local calendar day.
+    const key = inv.invoiceDate.toLocaleDateString("en-CA");
     const row = byDay.get(key) ?? { count: 0, total: 0 };
     row.count += 1;
     row.total += Number(inv.totalAmount);
@@ -111,7 +115,8 @@ export async function getSalesReport(from?: string, to?: string) {
 
   return {
     byDay: [...byDay.entries()].map(([date, v]) => ({ date, ...v })),
-    invoices,
+    // Each with its day, so the report can list a day's invoices under it.
+    invoices: invoices.map((inv) => ({ ...inv, day: inv.invoiceDate.toLocaleDateString("en-CA") })),
     grandTotal,
   };
 }
@@ -147,7 +152,9 @@ export async function getPurchasesReport(from?: string, to?: string) {
   return {
     byDay: [...byDay.entries()].map(([date, v]) => ({ date, ...v })),
     bySupplier: [...bySupplier.entries()].map(([supplier, v]) => ({ supplier, ...v })),
-    purchases,
+    // purchaseDate is a calendar date (stored at midnight UTC), so its UTC
+    // date is the day.
+    purchases: purchases.map((p) => ({ ...p, day: p.purchaseDate.toISOString().slice(0, 10) })),
     grandTotal,
   };
 }

@@ -24,7 +24,7 @@ export const addLineSchema = z.object({
   lineType: z.enum(ESTIMATE_LINE_TYPES),
   itemId: z.coerce.number().int().positive().optional(),
   description: z.string().trim().optional(),
-  quantity: z.coerce.number().int().positive(),
+  quantity: z.coerce.number().positive().max(100000), // can be part of a unit, e.g. 0.5
   rate: z.coerce.number().min(0).optional(),
 });
 

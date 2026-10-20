@@ -4,6 +4,7 @@ import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
+import { authorize } from "../../middleware/authorize";
 
 export const invoicesRouter = Router();
 
@@ -20,3 +21,12 @@ invoicesRouter.post(
   validateBody(invoicesController.recordPaymentSchema),
   asyncHandler(invoicesController.recordPayment)
 );
+
+// Correcting or removing a recorded payment is admin-only.
+invoicesRouter.patch(
+  "/:id/payments/:paymentId",
+  authorize("ADMIN"),
+  validateBody(invoicesController.recordPaymentSchema),
+  asyncHandler(invoicesController.updatePayment)
+);
+invoicesRouter.delete("/:id/payments/:paymentId", authorize("ADMIN"), asyncHandler(invoicesController.deletePayment));

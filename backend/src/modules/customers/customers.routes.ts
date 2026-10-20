@@ -4,6 +4,7 @@ import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
+import { authorize } from "../../middleware/authorize";
 
 export const customersRouter = Router();
 
@@ -19,8 +20,10 @@ customersRouter.post(
   validateBody(customersController.createCustomerSchema),
   asyncHandler(customersController.create)
 );
+// Editing a customer's details is admin-only.
 customersRouter.patch(
   "/:id",
+  authorize("ADMIN"),
   validateBody(customersController.updateCustomerSchema),
   asyncHandler(customersController.update)
 );

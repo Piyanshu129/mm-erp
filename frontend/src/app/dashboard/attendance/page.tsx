@@ -16,7 +16,12 @@ import { TableSkeleton } from "@/components/ui/Skeleton";
 
 interface Row {
   employee: { id: number; name: string; role: string | null };
-  attendance: { status: string; correctedBy: { name: string } | null } | null;
+  attendance: {
+    status: string;
+    inTime: string | null;
+    outTime: string | null;
+    correctedBy: { name: string } | null;
+  } | null;
 }
 
 interface Advance {
@@ -24,6 +29,7 @@ interface Advance {
   employeeId: number;
   amount: string;
   date: string;
+  notes: string | null;
   salaryMonth: number;
   salaryYear: number;
   createdBy: { name: string };
@@ -50,18 +56,22 @@ function AdvanceInput({
   onSave,
 }: {
   saving: boolean;
-  onSave: (amount: number) => Promise<boolean>;
+  onSave: (amount: number, remark: string) => Promise<boolean>;
 }) {
   const [amount, setAmount] = useState("");
+  const [remark, setRemark] = useState("");
 
   async function save() {
     const value = Number(amount);
     if (!(value > 0)) return;
-    if (await onSave(value)) setAmount("");
+    if (await onSave(value, remark.trim())) {
+      setAmount("");
+      setRemark("");
+    }
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Input
         type="number"
         min={0}
@@ -76,6 +86,18 @@ function AdvanceInput({
           }
         }}
         className="w-28 py-1.5"
+      />
+      <Input
+        placeholder="Remark (optional)"
+        value={remark}
+        onChange={(e) => setRemark(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            save();
+          }
+        }}
+        className="w-36 py-1.5"
       />
       <Button type="button" size="sm" variant="secondary" onClick={save} disabled={saving || !(Number(amount) > 0)}>
         {saving ? "..." : "Add"}
@@ -120,11 +142,11 @@ function AttendancePageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  async function mark(employeeId: number, status: string) {
+  async function mark(employeeId: number, status: string, times?: { inTime?: string | null; outTime?: string | null }) {
     setError(null);
     setSavingId(employeeId);
     try {
-      await apiFetch("/attendance", { method: "POST", body: JSON.stringify({ employeeId, date, status }) });
+      await apiFetch("/attendance", { method: "POST", body: JSON.stringify({ employeeId, date, status, ...times }) });
       await load(date);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save attendance");
@@ -133,14 +155,14 @@ function AttendancePageContent() {
     }
   }
 
-  async function addAdvance(employee: Row["employee"], amount: number): Promise<boolean> {
+  async function addAdvance(employee: Row["employee"], amount: number, remark: string): Promise<boolean> {
     setError(null);
     setNotice(null);
     setSavingAdvanceId(employee.id);
     try {
       const body = await apiFetch("/advances", {
         method: "POST",
-        body: JSON.stringify({ employeeId: employee.id, date, amount }),
+        body: JSON.stringify({ employeeId: employee.id, date, amount, ...(remark ? { notes: remark } : {}) }),
       });
       const a: Advance = body.advance;
       const givenMonth = Number(date.slice(5, 7));
@@ -210,16 +232,17 @@ function AttendancePageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={6} />
+        <TableSkeleton cols={7} />
       ) : rows.length === 0 ? (
         <EmptyState icon={CalendarCheck} title="No active employees" description="Add employees on the Employees page first." />
       ) : (
-        <Table minWidth={1000}>
+        <Table minWidth={1250}>
           <thead>
             <tr>
               <Th>Employee</Th>
               <Th>Role</Th>
               <Th>Status</Th>
+              <Th>In / Out (optional)</Th>
               <Th>Corrected by</Th>
               <Th>Advance paid</Th>
               <Th>Advance history ({SHORT_MONTHS[givenMonth - 1]})</Th>
@@ -250,11 +273,45 @@ function AttendancePageContent() {
                       })}
                     </div>
                   </Td>
+                  <Td>
+                    {/* Saved when a time is changed; needs the day's status first. */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="time"
+                        aria-label="In time"
+                        disabled={!r.attendance || !canMark || savingId === r.employee.id}
+                        defaultValue={r.attendance?.inTime ?? ""}
+                        key={`in-${date}-${r.attendance?.inTime ?? ""}`}
+                        onBlur={(e) => {
+                          const value = e.target.value || null;
+                          if (r.attendance && value !== (r.attendance.inTime ?? null)) {
+                            mark(r.employee.id, r.attendance.status, { inTime: value });
+                          }
+                        }}
+                        className="w-[6.5rem] rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:bg-gray-50 disabled:text-gray-400"
+                      />
+                      <span className="text-gray-400">–</span>
+                      <input
+                        type="time"
+                        aria-label="Out time"
+                        disabled={!r.attendance || !canMark || savingId === r.employee.id}
+                        defaultValue={r.attendance?.outTime ?? ""}
+                        key={`out-${date}-${r.attendance?.outTime ?? ""}`}
+                        onBlur={(e) => {
+                          const value = e.target.value || null;
+                          if (r.attendance && value !== (r.attendance.outTime ?? null)) {
+                            mark(r.employee.id, r.attendance.status, { outTime: value });
+                          }
+                        }}
+                        className="w-[6.5rem] rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:bg-gray-50 disabled:text-gray-400"
+                      />
+                    </div>
+                  </Td>
                   <Td>{r.attendance?.correctedBy?.name ?? "-"}</Td>
                   <Td>
                     <AdvanceInput
                       saving={savingAdvanceId === r.employee.id}
-                      onSave={(amount) => addAdvance(r.employee, amount)}
+                      onSave={(amount, remark) => addAdvance(r.employee, amount, remark)}
                     />
                   </Td>
                   <Td>
@@ -266,6 +323,7 @@ function AttendancePageContent() {
                           <div key={a.id} className="flex items-center gap-1.5 whitespace-nowrap">
                             <span className="text-gray-500">{shortDate(a.date)}</span>
                             <span className="font-medium text-gray-900">{formatINR(a.amount)}</span>
+                            {a.notes && <span className="text-gray-500" title={a.notes}>({a.notes})</span>}
                             {a.salaryMonth !== givenMonth && (
                               <span className="text-blue-700">→ {SHORT_MONTHS[a.salaryMonth - 1]} salary</span>
                             )}
