@@ -34,8 +34,11 @@ interface SalaryPayment {
   periodMonth: number;
   periodYear: number;
   presentDays: number;
+  halfDays: number;
   absentDays: number;
   leaveDays: number;
+  openingLeaveBalance: string | null;
+  closingLeaveBalance: string | null;
   grossSalary: string;
   advanceDeduction: string;
   netSalary: string;
@@ -126,7 +129,7 @@ function SalaryPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Salary"
-        description="Calculate monthly salary from attendance, minus any advances paid (recorded on the Attendance page), then record payment."
+        description="Calculate monthly salary from attendance (a half day deducts half a day), minus any advances paid (recorded on the Attendance page), then record payment. Unused allowed leave carries into the next month."
       />
 
       <div className="flex gap-3">
@@ -190,17 +193,19 @@ function SalaryPageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={8} />
+        <TableSkeleton cols={10} />
       ) : employees.length === 0 ? (
         <EmptyState icon={Banknote} title="No active employees" description="Add employees on the Employees page first." />
       ) : (
-        <Table minWidth={950}>
+        <Table minWidth={1150}>
           <thead>
             <tr>
               <Th>Employee</Th>
               <Th>Present</Th>
+              <Th>Half day</Th>
               <Th>Absent</Th>
               <Th>Leave</Th>
+              <Th>Leave carried (in → out)</Th>
               <Th>Gross</Th>
               <Th>Advance</Th>
               <Th>Net</Th>
@@ -215,8 +220,14 @@ function SalaryPageContent() {
                 <Tr key={emp.id}>
                   <Td className="font-medium text-gray-900">{emp.name}</Td>
                   <Td>{p?.presentDays ?? "-"}</Td>
+                  <Td>{p?.halfDays ?? "-"}</Td>
                   <Td>{p?.absentDays ?? "-"}</Td>
                   <Td>{p?.leaveDays ?? "-"}</Td>
+                  <Td className="whitespace-nowrap">
+                    {p && p.openingLeaveBalance != null
+                      ? `${Number(p.openingLeaveBalance)} → ${Number(p.closingLeaveBalance ?? 0)}`
+                      : "-"}
+                  </Td>
                   <Td>{p ? `₹${p.grossSalary}` : "-"}</Td>
                   <Td className={p && Number(p.advanceDeduction) > 0 ? "text-red-700" : ""}>
                     {p ? (Number(p.advanceDeduction) > 0 ? `− ₹${p.advanceDeduction}` : "-") : "-"}

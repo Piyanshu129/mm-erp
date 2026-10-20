@@ -279,9 +279,20 @@ function JobCardDetailPageContent() {
 
   async function handleStatusChange(status: string) {
     setActionError(null);
+    // Choosing Invoiced generates the draft invoice right away (or updates
+    // the existing one, keeping its discount) and opens it. If something is
+    // missing, the server says what (labour line, photos).
     if (status === "INVOICED") {
-      if (jobCard?.invoice) setDiscount(String(Number(jobCard.invoice.discount)));
-      setShowInvoicePrompt(true);
+      setShowInvoicePrompt(false);
+      setGeneratingInvoice(true);
+      try {
+        const body = await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+        router.push(`/dashboard/invoices/${body.invoice.id}`);
+      } catch (err) {
+        setActionError(err instanceof ApiError ? err.message : "Could not generate the draft invoice");
+        setGeneratingInvoice(false);
+        await load();
+      }
       return;
     }
     setShowInvoicePrompt(false);
@@ -550,8 +561,9 @@ function JobCardDetailPageContent() {
             {/* An invoiced job card can go back to Open (to change it), but
                 one with a draft invoice can't be cancelled. */}
             <Select
-              value={showInvoicePrompt ? "INVOICED" : jobCard.status}
+              value={showInvoicePrompt || generatingInvoice ? "INVOICED" : jobCard.status}
               onChange={(e) => handleStatusChange(e.target.value)}
+              disabled={generatingInvoice}
               className="w-auto"
             >
               {Object.entries(STATUS_LABELS)
@@ -582,6 +594,9 @@ function JobCardDetailPageContent() {
         </div>
       </div>
 
+      {generatingInvoice && !showInvoicePrompt && (
+        <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">Generating the draft invoice...</p>
+      )}
       {actionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
       {showInvoicePrompt && jobCard.status === "OPEN" && (

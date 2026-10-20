@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useEffect, useState } from "react";
 import { CalendarCheck, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { formatINR, todayISO } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +31,7 @@ interface Advance {
 
 const STATUSES = [
   { value: "PRESENT", label: "Present", tone: "bg-green-600 text-white", idle: "bg-green-50 text-green-700" },
+  { value: "HALF_DAY", label: "Half day", tone: "bg-sky-600 text-white", idle: "bg-sky-50 text-sky-700" },
   { value: "ABSENT", label: "Absent", tone: "bg-red-600 text-white", idle: "bg-red-50 text-red-700" },
   { value: "LEAVE", label: "Leave", tone: "bg-amber-500 text-white", idle: "bg-amber-50 text-amber-700" },
 ];
@@ -94,6 +96,12 @@ function AttendancePageContent() {
   const [warning, setWarning] = useState<string | null>(null);
 
   const month = date.slice(0, 7);
+  // Only an admin can add or change attendance for a past date (the server
+  // enforces the same rule).
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const pastDate = date < todayISO();
+  const canMark = isAdmin || !pastDate;
 
   async function loadAdvances(m: string) {
     const body = await apiFetch(`/advances?month=${m}`);
@@ -183,8 +191,13 @@ function AttendancePageContent() {
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
 
+      {!canMark && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          This is a previous date — only an admin can add or change its attendance.
+        </p>
+      )}
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {notice && <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">{notice}</p>}
+      {notice &&<p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">{notice}</p>}
       {warning && (
         <div className="flex items-start justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <span>
@@ -221,13 +234,13 @@ function AttendancePageContent() {
                   <Td className="font-medium text-gray-900">{r.employee.name}</Td>
                   <Td>{r.employee.role ?? "-"}</Td>
                   <Td>
-                    <div className="flex gap-1.5">
+                    <div className="flex flex-wrap gap-1.5">
                       {STATUSES.map((s) => {
                         const active = r.attendance?.status === s.value;
                         return (
                           <button
                             key={s.value}
-                            disabled={savingId === r.employee.id}
+                            disabled={savingId === r.employee.id || !canMark}
                             onClick={() => mark(r.employee.id, s.value)}
                             className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${active ? s.tone : s.idle} disabled:opacity-50`}
                           >

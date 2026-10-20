@@ -8,10 +8,11 @@ function daysInMonth(month: number, year: number): number {
 
 // Salary policy: the employee's monthly salary is the gross figure
 // regardless of attendance. Net pay deducts one day's pay (monthlySalary /
-// days-in-month) for every absent day and for every leave day taken beyond
-// the employee's monthlyLeaveAllowance — present days and leave within the
-// allowance are fully paid — and then any advances already given against
-// this month's salary.
+// days-in-month) for every absent day, half a day's pay for every half day,
+// and a day's pay for every leave day beyond the leave available this month
+// — the month's allowance plus the unused leave carried in from earlier
+// months (openingLeave). Present days and leave within what's available are
+// fully paid. Then any advances given against this month's salary come off.
 export function calculateSalary(
   monthlySalary: number,
   monthlyLeaveAllowance: number,
@@ -19,15 +20,76 @@ export function calculateSalary(
   year: number,
   absentDays: number,
   leaveDays: number,
-  advances = 0
+  advances = 0,
+  halfDays = 0,
+  openingLeave = 0
 ) {
   const totalDays = daysInMonth(month, year);
   const perDayRate = monthlySalary / totalDays;
-  const unpaidLeaveDays = Math.max(0, leaveDays - monthlyLeaveAllowance);
-  const deductionDays = absentDays + unpaidLeaveDays;
+  const leave = leaveAfterMonth(openingLeave, monthlyLeaveAllowance, leaveDays);
+  const deductionDays = absentDays + halfDays * 0.5 + leave.unpaid;
   const grossSalary = monthlySalary;
   const netSalary = Math.max(0, round2(grossSalary - deductionDays * perDayRate - advances));
-  return { grossSalary, netSalary, perDayRate, deductionDays };
+  return { grossSalary, netSalary, perDayRate, deductionDays, unpaidLeaveDays: leave.unpaid, closingLeave: leave.closing };
+}
+
+// One month of the leave balance: what's available (carried in + this
+// month's allowance), what's left over to carry on, and how many leave days
+// went beyond it (unpaid).
+export function leaveAfterMonth(opening: number, allowance: number, leaveDays: number) {
+  const available = opening + allowance;
+  return {
+    available,
+    unpaid: Math.max(0, leaveDays - available),
+    closing: Math.max(0, available - leaveDays),
+  };
+}
+
+// The leave balance carried into a month: each month's closing balance is
+// the next month's opening. It starts from the employee's first month (the
+// later of joining and their first attendance mark) at 0. A month whose
+// salary has already been calculated uses the closing balance stored with
+// it — so a balance is only ever counted once, and a paid month's figures
+// never shift because of a later attendance correction.
+export async function leaveBalanceFor(employeeId: number, month: number, year: number): Promise<number> {
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
+  if (!employee) throw new NotFoundError("Employee not found");
+
+  const firstMark = await prisma.attendance.findFirst({ where: { employeeId }, orderBy: { date: "asc" } });
+  if (!firstMark) return 0;
+  const joined = employee.joiningDate;
+  const startIndex = Math.max(
+    joined.getUTCFullYear() * 12 + joined.getUTCMonth(),
+    firstMark.date.getUTCFullYear() * 12 + firstMark.date.getUTCMonth()
+  );
+  const targetIndex = year * 12 + (month - 1);
+  if (targetIndex <= startIndex) return 0;
+
+  const [stored, marks] = await Promise.all([
+    prisma.salaryPayment.findMany({ where: { employeeId } }),
+    prisma.attendance.findMany({
+      where: { employeeId, status: "LEAVE", date: { lt: new Date(Date.UTC(year, month - 1, 1)) } },
+      select: { date: true },
+    }),
+  ]);
+  const storedClosing = new Map(
+    stored
+      .filter((s) => s.closingLeaveBalance != null)
+      .map((s) => [s.periodYear * 12 + (s.periodMonth - 1), Number(s.closingLeaveBalance)])
+  );
+  const leaveByMonth = new Map<number, number>();
+  for (const m of marks) {
+    const idx = m.date.getUTCFullYear() * 12 + m.date.getUTCMonth();
+    leaveByMonth.set(idx, (leaveByMonth.get(idx) ?? 0) + 1);
+  }
+
+  let balance = 0;
+  for (let idx = startIndex; idx < targetIndex; idx++) {
+    balance =
+      storedClosing.get(idx) ??
+      leaveAfterMonth(balance, employee.monthlyLeaveAllowance, leaveByMonth.get(idx) ?? 0).closing;
+  }
+  return balance;
 }
 
 function round2(n: number): number {
@@ -82,34 +144,38 @@ export async function calculateMonthlySalary(employeeId: number, month: number, 
     throw new ConflictError("This month's salary already has a payment recorded — cannot recalculate");
   }
 
-  const [{ presentDays, absentDays, leaveDays }, advanceDeduction] = await Promise.all([
+  const [{ presentDays, halfDays, absentDays, leaveDays }, advanceDeduction, openingLeaveBalance] = await Promise.all([
     getMonthlySummary(employeeId, month, year),
     advancesForSalaryMonth(employeeId, month, year),
+    leaveBalanceFor(employeeId, month, year),
   ]);
-  const { grossSalary, netSalary } = calculateSalary(
+  const { grossSalary, netSalary, closingLeave } = calculateSalary(
     Number(employee.monthlySalary),
     employee.monthlyLeaveAllowance,
     month,
     year,
     absentDays,
     leaveDays,
-    advanceDeduction
+    advanceDeduction,
+    halfDays,
+    openingLeaveBalance
   );
+  const figures = {
+    presentDays,
+    halfDays,
+    absentDays,
+    leaveDays,
+    grossSalary,
+    advanceDeduction,
+    netSalary,
+    openingLeaveBalance,
+    closingLeaveBalance: closingLeave,
+  };
 
   return prisma.salaryPayment.upsert({
     where: { employeeId_periodMonth_periodYear: { employeeId, periodMonth: month, periodYear: year } },
-    create: {
-      employeeId,
-      periodMonth: month,
-      periodYear: year,
-      presentDays,
-      absentDays,
-      leaveDays,
-      grossSalary,
-      advanceDeduction,
-      netSalary,
-    },
-    update: { presentDays, absentDays, leaveDays, grossSalary, advanceDeduction, netSalary },
+    create: { employeeId, periodMonth: month, periodYear: year, ...figures },
+    update: figures,
     include: { employee: { select: { id: true, name: true, role: true } } },
   });
 }

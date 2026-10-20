@@ -69,8 +69,39 @@ export async function list(req: Request, res: Response) {
   res.json({ purchases, total, page: page.page, pageSize: page.pageSize, summary });
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  itemType: "type",
+  itemId: "item",
+  quantity: "quantity",
+  purchaseCost: "purchase cost",
+  sellingPrice: "MRP",
+  description: "description",
+  name: "item name",
+  category: "category",
+  uom: "unit of measure",
+  minStock: "minimum stock",
+  supplierId: "supplier",
+  purchaseDate: "purchase date",
+};
+
+// "Item 3: purchase cost — Expected number, received string" rather than a
+// bare "Validation failed": says which line and which field to fix.
+function describeIssue(issue: z.ZodIssue): string {
+  const [first, index, ...rest] = issue.path;
+  if (first === "lines" && typeof index === "number") {
+    const field = rest.filter((p) => typeof p === "string").pop() as string | undefined;
+    return `Item ${index + 1}: ${field ? `${FIELD_LABELS[field] ?? field} — ` : ""}${issue.message}`;
+  }
+  const field = typeof first === "string" ? FIELD_LABELS[first] ?? first : undefined;
+  return field ? `${field}: ${issue.message}` : issue.message;
+}
+
 export async function create(req: Request, res: Response) {
-  const input = createPurchaseSchema.parse(req.body);
+  const parsed = createPurchaseSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError(400, parsed.error.issues.slice(0, 3).map(describeIssue).join("; "));
+  }
+  const input = parsed.data;
 
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   let billUrl: string | undefined;

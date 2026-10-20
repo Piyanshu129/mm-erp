@@ -5,7 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, History } from "lucide-react";
+import { ArrowLeft, History, X, ZoomIn } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -53,6 +53,15 @@ function ItemDetailPageContent() {
   const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
   const [issues, setIssues] = useState<IssueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [photoOpen, setPhotoOpen] = useState(false);
+
+  // Esc closes the full-screen photo.
+  useEffect(() => {
+    if (!photoOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPhotoOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [photoOpen]);
 
   useEffect(() => {
     (async () => {
@@ -79,6 +88,28 @@ function ItemDetailPageContent() {
 
   return (
     <div className="space-y-8">
+      {photoOpen && item.photoUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setPhotoOpen(false)}
+          role="dialog"
+          aria-label={`Photo of ${item.name}`}
+        >
+          <button
+            type="button"
+            onClick={() => setPhotoOpen(false)}
+            className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-gray-800 hover:bg-white"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <AuthedImage src={item.photoUrl} alt={item.name} className="max-h-full max-w-full rounded-md object-contain" />
+          <p className="absolute bottom-4 left-0 right-0 text-center text-sm text-white">
+            {item.itemCode} — {item.name}
+          </p>
+        </div>
+      )}
+
       <Link href="/dashboard/items" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
         <ArrowLeft className="h-4 w-4" /> All items
       </Link>
@@ -86,9 +117,25 @@ function ItemDetailPageContent() {
       <Card>
         <CardBody className="flex flex-col gap-4 sm:flex-row">
           {item.photoUrl ? (
-            <AuthedImage src={item.photoUrl} alt={item.name} className="h-28 w-28 flex-shrink-0 rounded-lg object-cover" />
+            <button
+              type="button"
+              onClick={() => setPhotoOpen(true)}
+              className="group relative flex-shrink-0 self-start overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+              title="Click to enlarge"
+            >
+              <AuthedImage
+                src={item.photoUrl}
+                alt={item.name}
+                className="h-64 w-full object-contain sm:h-60 sm:w-60"
+              />
+              <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+                <ZoomIn className="h-3.5 w-3.5" /> Enlarge
+              </span>
+            </button>
           ) : (
-            <div className="h-28 w-28 flex-shrink-0 rounded-lg bg-gray-100" />
+            <div className="flex h-40 w-full flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs text-gray-400 sm:h-60 sm:w-60">
+              No photo
+            </div>
           )}
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2">

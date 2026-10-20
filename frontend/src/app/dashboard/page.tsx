@@ -13,6 +13,7 @@ import {
   XCircle,
   Plus,
   CalendarCheck,
+  CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
@@ -25,13 +26,19 @@ interface Summary {
   openJobCards: number;
   invoicedToday: number;
   cancelledThisMonth: number;
-  todaysSales: number;
-  todaysPurchaseValue: number;
   lowStockCount: number;
   outOfStockCount: number;
-  monthPurchaseValue: number;
-  monthInventoryPurchaseValue: number;
-  monthExpenseValue: number;
+  // Only sent to admins (sales and purchase figures).
+  todaysSales?: number;
+  todaysPurchaseValue?: number;
+  monthPurchaseValue?: number;
+  monthInventoryPurchaseValue?: number;
+  monthExpenseValue?: number;
+  // Only sent to users who can see vehicles or job cards.
+  upcomingServices: {
+    count: number;
+    vehicles: { vehicleId: number; registrationNumber: string; customerName: string; nextServiceDue: string | null; status: string }[];
+  } | null;
 }
 
 function rupees(value: number): string {
@@ -103,13 +110,17 @@ export default function DashboardPage() {
             icon={Ban}
             tone={summary.cancelledThisMonth > 0 ? "warning" : "default"}
           />
-          <StatCard label="Today's Sales" value={`₹${summary.todaysSales.toFixed(0)}`} href="/dashboard/reports" icon={IndianRupee} />
-          <StatCard
-            label="Today's Purchases"
-            value={`₹${summary.todaysPurchaseValue.toFixed(0)}`}
-            href="/dashboard/reports"
-            icon={ShoppingCart}
-          />
+          {summary.todaysSales != null && (
+            <StatCard label="Today's Sales" value={`₹${summary.todaysSales.toFixed(0)}`} href="/dashboard/reports" icon={IndianRupee} />
+          )}
+          {summary.todaysPurchaseValue != null && (
+            <StatCard
+              label="Today's Purchases"
+              value={`₹${summary.todaysPurchaseValue.toFixed(0)}`}
+              href="/dashboard/reports"
+              icon={ShoppingCart}
+            />
+          )}
           <StatCard
             label="Low Stock"
             value={summary.lowStockCount}
@@ -124,6 +135,16 @@ export default function DashboardPage() {
             icon={XCircle}
             tone={summary.outOfStockCount > 0 ? "danger" : "default"}
           />
+          {summary.upcomingServices && (
+            <StatCard
+              label="Service Due in 30 Days"
+              value={summary.upcomingServices.count}
+              href="/dashboard/service-schedule"
+              icon={CalendarClock}
+              tone={summary.upcomingServices.count > 0 ? "danger" : "default"}
+            />
+          )}
+          {summary.monthPurchaseValue != null && (
           <Link href="/dashboard/purchases" className="col-span-2 block transition-transform hover:-translate-y-0.5">
             <Card>
               <CardBody className="flex items-center gap-3">
@@ -136,18 +157,52 @@ export default function DashboardPage() {
                   </p>
                   <p className="text-xl font-semibold text-gray-900">{rupees(summary.monthPurchaseValue)}</p>
                   <p className="truncate text-xs text-gray-500">
-                    Inventory {rupees(summary.monthInventoryPurchaseValue)} · Expenses {rupees(summary.monthExpenseValue)}
+                    Inventory {rupees(summary.monthInventoryPurchaseValue ?? 0)} · Expenses {rupees(summary.monthExpenseValue ?? 0)}
                   </p>
                 </div>
               </CardBody>
             </Card>
           </Link>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-[72px]" />
           ))}
+        </div>
+      )}
+
+      {summary?.upcomingServices && summary.upcomingServices.count > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-semibold text-red-700">
+            Service due within 30 days ({summary.upcomingServices.count})
+          </h2>
+          <Card className="border-red-200">
+            <ul className="divide-y divide-red-100">
+              {summary.upcomingServices.vehicles.map((v) => (
+                <li key={v.vehicleId}>
+                  <Link
+                    href="/dashboard/service-schedule"
+                    className="flex flex-wrap items-center justify-between gap-2 bg-red-50 px-4 py-2.5 text-sm text-red-800 hover:bg-red-100"
+                  >
+                    <span>
+                      <span className="font-mono font-semibold">{v.registrationNumber}</span> · {v.customerName}
+                    </span>
+                    <span className="font-medium">
+                      {v.status === "OVERDUE" ? "Overdue" : "Due"}
+                      {v.nextServiceDue ? ` — ${new Date(v.nextServiceDue).toLocaleDateString()}` : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {summary.upcomingServices.count > summary.upcomingServices.vehicles.length && (
+              <Link href="/dashboard/service-schedule" className="block px-4 py-2 text-xs font-medium text-red-700 hover:underline">
+                See all {summary.upcomingServices.count} on the Service Schedule
+              </Link>
+            )}
+          </Card>
         </div>
       )}
 

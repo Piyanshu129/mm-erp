@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { downloadCsv } from "@/lib/csv";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -277,15 +278,22 @@ function ReportTable({ columns, rows, empty }: { columns: string[]; rows: Record
   );
 }
 
+// Sales and purchase figures are admin-only (the server refuses them for
+// anyone else), so other users don't get those tabs.
+const ADMIN_ONLY_TABS: Tab[] = ["sales", "purchases"];
+
 function ReportsPageContent() {
-  const [tab, setTab] = useState<Tab>("sales");
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const tabs = TABS.filter((t) => isAdmin || !ADMIN_ONLY_TABS.includes(t.key));
+  const [tab, setTab] = useState<Tab>(isAdmin ? "sales" : "inventory");
 
   return (
     <div className="space-y-6">
       <PageHeader title="Reports" description="Sales, purchases, inventory, workshop and customer insights." />
 
       <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-2">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
@@ -298,8 +306,8 @@ function ReportsPageContent() {
         ))}
       </div>
 
-      {tab === "sales" && <SalesTab />}
-      {tab === "purchases" && <PurchasesTab />}
+      {isAdmin && tab === "sales" && <SalesTab />}
+      {isAdmin && tab === "purchases" && <PurchasesTab />}
       {tab === "inventory" && <InventoryTab />}
       {tab === "workshop" && <WorkshopTab />}
       {tab === "customers" && <CustomersTab />}

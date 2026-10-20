@@ -1,7 +1,13 @@
 import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 
-export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LEAVE"] as const;
+// HALF_DAY: worked half the day — half a day's pay is deducted.
+export const ATTENDANCE_STATUSES = ["PRESENT", "HALF_DAY", "ABSENT", "LEAVE"] as const;
+
+// Today's date (YYYY-MM-DD) on the server's own calendar — the workshop PC's.
+export function todayLocalISO(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
 
 // Attendance.date is a plain @db.Date column — normalizing to midnight UTC
 // keeps every mark for a given calendar day landing on the same row instead
@@ -84,8 +90,9 @@ export async function getMonthlySummary(employeeId: number, month: number, year:
   });
 
   const presentDays = rows.filter((r) => r.status === "PRESENT").length;
+  const halfDays = rows.filter((r) => r.status === "HALF_DAY").length;
   const absentDays = rows.filter((r) => r.status === "ABSENT").length;
   const leaveDays = rows.filter((r) => r.status === "LEAVE").length;
 
-  return { employee, presentDays, absentDays, leaveDays, days: rows };
+  return { employee, presentDays, halfDays, absentDays, leaveDays, days: rows };
 }

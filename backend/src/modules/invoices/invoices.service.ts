@@ -59,7 +59,10 @@ export async function getInvoice(id: number) {
 // keeps its draft invoice: invoicing it again brings that same invoice —
 // same number, same payments — up to date with the job card, rather than
 // creating a second one.
-export async function createInvoice(jobCardId: number, discount: number, createdById: number) {
+//
+// discount left undefined (marking Invoiced from the status dropdown) keeps
+// the existing draft invoice's discount, or none for a first invoice.
+export async function createInvoice(jobCardId: number, discount: number | undefined, createdById: number) {
   // Status first, so a cancelled or already-invoiced job card gets that
   // reason rather than a list of missing photos. (Re-checked inside the
   // transaction below.)
@@ -85,16 +88,25 @@ export async function createInvoice(jobCardId: number, discount: number, created
   await assertMandatoryPhotos(jobCardId, "AFTER");
 
   return prisma.$transaction(async (tx) => {
+    // The job card row is locked for the whole generation, so two clicks
+    // (or two people) at the same moment can't both create a draft invoice:
+    // the second waits, then sees the status is already INVOICED.
+    await tx.$queryRaw`SELECT id FROM job_cards WHERE id = ${jobCardId} FOR UPDATE`;
     const jobCard = await tx.jobCard.findUnique({
       where: { id: jobCardId },
       include: { parts: true, labour: true, invoice: true },
     });
     if (!jobCard) throw new NotFoundError("Job card not found");
-    if (jobCard.status !== "OPEN") throw new ConflictError("Only an open job card can be invoiced");
+    if (jobCard.status !== "OPEN") {
+      throw new ConflictError(
+        jobCard.status === "INVOICED" ? "This job card is already invoiced" : "Only an open job card can be invoiced"
+      );
+    }
 
     const partsTotal = jobCard.parts.reduce((sum, p) => sum + Number(p.amount), 0);
     const labourTotal = jobCard.labour.reduce((sum, l) => sum + Number(l.amount), 0);
     const subtotal = partsTotal + labourTotal;
+    discount = discount ?? Number(jobCard.invoice?.discount ?? 0);
 
     if (discount < 0 || discount > subtotal) {
       throw new ConflictError(`Discount must be between 0 and ${subtotal.toFixed(2)}`);

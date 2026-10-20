@@ -8,8 +8,8 @@ function range(req: Request) {
   };
 }
 
-export async function dashboard(_req: Request, res: Response) {
-  res.json(await reportsService.getDashboardSummary());
+export async function dashboard(req: Request, res: Response) {
+  res.json(await reportsService.getDashboardSummary(req.user!));
 }
 
 export async function sales(req: Request, res: Response) {

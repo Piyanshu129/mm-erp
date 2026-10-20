@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import * as jobCardsService from "./jobCards.service";
+import * as invoicesService from "../invoices/invoices.service";
 import { JOB_TYPES } from "./jobCards.service";
 import { parsePageParams } from "../../lib/pagination";
 import { JOB_CARD_STATUSES } from "../../lib/jobCardStatus";
@@ -62,7 +63,22 @@ export async function create(req: Request, res: Response) {
 }
 
 export async function update(req: Request, res: Response) {
-  const input = req.body as z.infer<typeof updateJobCardSchema>;
-  const jobCard = await jobCardsService.updateJobCard(Number(req.params.id), input);
+  const id = Number(req.params.id);
+  const { status, ...rest } = req.body as z.infer<typeof updateJobCardSchema>;
+
+  // Marking a job card Invoiced generates its draft invoice (or, for one
+  // that was reopened, brings its existing draft invoice up to date) — the
+  // two always happen together, in one transaction (invoices.service.ts).
+  if (status === "INVOICED") {
+    const current = await jobCardsService.getJobCard(id);
+    if (current.status !== "INVOICED") {
+      if (Object.keys(rest).length > 0) await jobCardsService.updateJobCard(id, rest);
+      const invoice = await invoicesService.createInvoice(id, undefined, req.user!.id);
+      res.json({ jobCard: await jobCardsService.getJobCard(id), invoice });
+      return;
+    }
+  }
+
+  const jobCard = await jobCardsService.updateJobCard(id, status ? { ...rest, status } : rest);
   res.json({ jobCard });
 }

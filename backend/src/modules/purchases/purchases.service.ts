@@ -4,11 +4,11 @@ import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { formatItemCode } from "../../lib/itemCode";
 
-// SPARE_PART/PAINT/TOOL are inventory types — they need an Item and add
+// SPARE_PART/PAINT/TOOL/ELECTRICAL/SETTINGS_ADJUSTMENTS are inventory types — they need an Item and add
 // their quantity to its stock. The rest are plain business expenses with no
 // stock implications at all.
-export const INVENTORY_ITEM_TYPES = ["SPARE_PART", "PAINT", "TOOL"] as const;
-export const EXPENSE_ITEM_TYPES = ["TRAVEL", "PETROL", "FOOD", "OTHERS"] as const;
+export const INVENTORY_ITEM_TYPES = ["SPARE_PART", "PAINT", "TOOL", "ELECTRICAL", "SETTINGS_ADJUSTMENTS"] as const;
+export const EXPENSE_ITEM_TYPES = ["TRAVEL", "PETROL", "FOOD", "RENT", "BILLS_UTILITIES", "OTHERS"] as const;
 export const PURCHASE_ITEM_TYPES = [...INVENTORY_ITEM_TYPES, ...EXPENSE_ITEM_TYPES] as const;
 export const PURCHASE_CATEGORIES = ["INVENTORY", "EXPENSE"] as const;
 

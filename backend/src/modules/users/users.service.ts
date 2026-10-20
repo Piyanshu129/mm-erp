@@ -119,6 +119,7 @@ export async function deleteUser(userId: number, actingUserId: number) {
           jobCardParts: true,
           invoices: true,
           attendanceEdits: true,
+          odometerReadings: true,
         },
       },
     },

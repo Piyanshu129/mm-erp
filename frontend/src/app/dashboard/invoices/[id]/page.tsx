@@ -5,8 +5,10 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Printer, Download } from "lucide-react";
+import { ArrowLeft, Printer, Download, Phone } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { WhatsAppMessage } from "@/components/WhatsAppMessage";
+import { paymentReminder } from "@/lib/whatsappMessages";
 import { invoiceFileName, downloadElementAsPdf } from "@/lib/invoicePdf";
 import {
   InvoiceAccountSummary,
@@ -139,6 +141,7 @@ function InvoiceDetailPageContent() {
   }
 
   const { jobCard } = invoice;
+  const balanceDue = Math.round((Number(invoice.totalAmount) - Number(invoice.paymentAmount)) * 100) / 100;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -162,6 +165,16 @@ function InvoiceDetailPageContent() {
       )}
       {downloadError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 print:hidden">{downloadError}</p>}
 
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-blue-100 bg-blue-50 px-4 py-3 print:hidden">
+        <span className="text-sm text-gray-700">{jobCard.vehicle.customer.name}</span>
+        <a
+          href={`tel:${jobCard.vehicle.customer.mobile}`}
+          className="inline-flex items-center gap-1.5 text-lg font-semibold text-blue-700 hover:underline"
+        >
+          <Phone className="h-4 w-4" /> {jobCard.vehicle.customer.mobile}
+        </a>
+      </div>
+
       <div ref={invoiceRef} className="rounded-md border border-gray-200 bg-white p-6 print:border-0 print:p-0">
         <div className="mb-6 flex items-start justify-between border-b border-gray-200 pb-4">
           <div>
@@ -179,7 +192,7 @@ function InvoiceDetailPageContent() {
           <div>
             <p className="mb-1 font-semibold">Customer</p>
             <p>{jobCard.vehicle.customer.name}</p>
-            <p>{jobCard.vehicle.customer.mobile}</p>
+            <p className="font-semibold">Mobile: {jobCard.vehicle.customer.mobile}</p>
             {jobCard.vehicle.customer.address && <p>{jobCard.vehicle.customer.address}</p>}
           </div>
           <div>
@@ -328,6 +341,27 @@ function InvoiceDetailPageContent() {
           </div>
         </CardBody>
       </Card>
+
+      {balanceDue > 0.005 && (
+        <Card className="print:hidden">
+          <CardBody>
+            <WhatsAppMessage
+              title="Payment reminder (WhatsApp)"
+              mobile={jobCard.vehicle.customer.mobile}
+              message={paymentReminder({
+                customerName: jobCard.vehicle.customer.name,
+                registrationNumber: jobCard.vehicle.registrationNumber,
+                vehicle: `${jobCard.vehicle.make} ${jobCard.vehicle.model}`.trim(),
+                invoiceNumber: invoice.invoiceNumber,
+                invoiceDate: invoice.invoiceDate,
+                total: Number(invoice.totalAmount),
+                paid: Number(invoice.paymentAmount),
+                due: balanceDue,
+              })}
+            />
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

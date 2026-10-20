@@ -1,5 +1,6 @@
 import { prisma } from "../../lib/prisma";
 import { purchaseTotals } from "../purchases/purchases.service";
+import { upcomingServices } from "../../lib/serviceSchedule";
 
 function startOfToday(): Date {
   const d = new Date();
@@ -18,7 +19,13 @@ function parseRange(from?: string, to?: string) {
 // Backs the Dashboard's widget row: today's activity plus current
 // actionable counts (low/out of stock, jobs stuck waiting), all from live
 // queries — nothing here is cached or precomputed.
-export async function getDashboardSummary() {
+//
+// Sales and purchase money figures are for admins only: for anyone else
+// they're left out of the response entirely, not just hidden on the page.
+// The service-due reminder goes to whoever can see vehicles or job cards.
+export async function getDashboardSummary(viewer: { role: string; permissions: string[] }) {
+  const isAdmin = viewer.role === "ADMIN";
+  const seesServices = isAdmin || viewer.permissions.includes("JOB_CARDS") || viewer.permissions.includes("VEHICLES");
   const todayStart = startOfToday();
   const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
   const nextMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth() + 1, 1);
@@ -31,6 +38,7 @@ export async function getDashboardSummary() {
     todaysPurchases,
     items,
     monthPurchases,
+    services,
   ] = await Promise.all([
     prisma.jobCard.findMany({
       where: { createdAt: { gte: todayStart } },
@@ -51,6 +59,7 @@ export async function getDashboardSummary() {
       select: { currentStock: true, minStock: true },
     }),
     purchaseTotals({ start: monthStart, end: nextMonthStart }),
+    seesServices ? upcomingServices() : Promise.resolve(null),
   ]);
 
   const todaysSales = todaysInvoices.reduce((sum, inv) => sum + Number(inv.totalAmount), 0);
@@ -66,13 +75,18 @@ export async function getDashboardSummary() {
     openJobCards,
     invoicedToday: todaysInvoices.length,
     cancelledThisMonth,
-    todaysSales,
-    todaysPurchaseValue,
     lowStockCount,
     outOfStockCount,
-    monthPurchaseValue: monthPurchases.total,
-    monthInventoryPurchaseValue: monthPurchases.inventoryTotal,
-    monthExpenseValue: monthPurchases.expenseTotal,
+    upcomingServices: services,
+    ...(isAdmin
+      ? {
+          todaysSales,
+          todaysPurchaseValue,
+          monthPurchaseValue: monthPurchases.total,
+          monthInventoryPurchaseValue: monthPurchases.inventoryTotal,
+          monthExpenseValue: monthPurchases.expenseTotal,
+        }
+      : {}),
   };
 }
 

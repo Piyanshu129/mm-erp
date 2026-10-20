@@ -2,10 +2,11 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import * as attendanceService from "./attendance.service";
 import { ATTENDANCE_STATUSES } from "./attendance.service";
+import { ForbiddenError } from "../../lib/errors";
 
 export const markAttendanceSchema = z.object({
   employeeId: z.coerce.number().int().positive(),
-  date: z.string().trim().min(1),
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   status: z.enum(ATTENDANCE_STATUSES),
 });
 
@@ -23,6 +24,10 @@ export async function forDate(req: Request, res: Response) {
 
 export async function mark(req: Request, res: Response) {
   const input = req.body as z.infer<typeof markAttendanceSchema>;
+  // Past days are settled: only an admin can add or change them.
+  if (req.user!.role !== "ADMIN" && input.date.slice(0, 10) < attendanceService.todayLocalISO()) {
+    throw new ForbiddenError("Only an admin can add or change attendance for a previous date");
+  }
   const attendance = await attendanceService.markAttendance(
     input.employeeId,
     input.date,

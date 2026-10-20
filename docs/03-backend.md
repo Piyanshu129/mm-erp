@@ -216,6 +216,8 @@ All of the parts/labour/media mutations are blocked once the job card is locked 
 ### Reports — `/reports` (permission `REPORTS`, [routes](../backend/src/modules/reports/reports.routes.ts))
 `GET /dashboard` (the live widget summary — no date range), `GET /sales`, `/purchases`, `/inventory`, `/workshop`, `/customers` (most accept `?from=&to=`).
 
+Sales and purchase figures are **admin-only** (since 2026-10-20): `/sales` and `/purchases` require the `ADMIN` role even with `REPORTS`, and `/dashboard` omits `todaysSales`, `todaysPurchaseValue` and the month's purchase totals for anyone else. `/dashboard` adds `upcomingServices` (count and list of vehicles due within 30 days) for users with `JOB_CARDS` or `VEHICLES`.
+
 ### Backup — `/backup` (**Admin-only**, [routes](../backend/src/modules/backup/backup.routes.ts))
 `GET /` (downloads a full JSON backup, streamed as an attachment), `GET /excel` (downloads the pre-generated, auto-refreshing Excel workbook). Restore is **not** an HTTP route at all — see [06-deployment-and-ops.md](06-deployment-and-ops.md).
 

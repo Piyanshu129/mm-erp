@@ -152,6 +152,10 @@ const FILE_INPUT_CLASS =
 
 let nextLineKey = 1;
 
+// What the server accepts for bill and item photos (middleware/upload.ts).
+const UPLOADABLE_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
 // New item is the default — most purchases bring in parts not yet on file.
 function emptyLine(itemType: string): LineDraft {
   return {
@@ -692,6 +696,27 @@ function PurchasesPageContent() {
       return;
     }
 
+    // The server takes JPEG/PNG/WEBP photos of up to 5 MB. Check here so the
+    // message names the photo to retake, rather than failing the whole save.
+    const photoProblem = (file: File, what: string): string | null => {
+      if (!UPLOADABLE_PHOTO_TYPES.includes(file.type)) {
+        return `${what}: this photo format can't be uploaded — use a JPEG, PNG or WEBP photo (e.g. take it again with the camera)`;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        return `${what}: the photo is too large (${(file.size / 1024 / 1024).toFixed(1)} MB, limit 5 MB) — take it again at a lower resolution`;
+      }
+      return null;
+    };
+    const problems = [
+      photoProblem(compressedBill, "Bill photo"),
+      ...[...compressedItemPhotos].map(([i, photo]) => photoProblem(photo, `Item ${i + 1}`)),
+    ].filter((p): p is string => p != null);
+    if (problems.length > 0) {
+      setSubmitting(false);
+      setFormError(problems[0]);
+      return;
+    }
+
     const formData = new FormData();
     // Expenses aren't bought on a supplier's account, so none is sent.
     if (inventory && selectedSupplier) formData.set("supplierId", String(selectedSupplier.id));
@@ -744,7 +769,11 @@ function PurchasesPageContent() {
       setShowForm(false);
       await loadPurchases();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Could not save purchase");
+      setFormError(
+        err instanceof ApiError
+          ? `Not saved — ${err.message}`
+          : "Not saved — couldn't reach the server. Check the internet connection and that the servers are running, then try again. Nothing was saved, so you can simply retry."
+      );
     } finally {
       setSubmitting(false);
     }

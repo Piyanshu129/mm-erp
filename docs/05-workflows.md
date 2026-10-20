@@ -43,6 +43,8 @@ Dashboard → **New Job Card** → `/dashboard/vehicles?for=jobcard`. Search the
 
 `/dashboard/service-schedule` (`GET /service-schedule`, permission `JOB_CARDS` or `VEHICLES`) lists every active vehicle with its last general service (date, KM, job card), updated KM, and next service due date and KM. Each vehicle is flagged Passed, Due soon (within 30 days or 1,000 km), On track, or Not scheduled. `refreshVehicleService()` in `lib/serviceSchedule.ts` runs whenever a job card is created or its type, KM or status changes. It raises `currentKm` to the highest KM seen, and the latest non-cancelled General Service visit sets the next service to +6 months / +10,000 km from that visit. Cancelling that visit falls back to the previous one.
 
+Since 2026-10-20 the due date is **estimated from average running**. Readings are job card visits (`kmAtService`) plus readings typed on the schedule page (`POST /service-schedule/:vehicleId/odometer {km, readingDate}` → `OdometerReading`, refused if lower than an earlier reading). Average km/day is taken over the whole history (first to latest reading, at least 7 days apart). From the latest reading it projects the day the vehicle reaches `nextServiceKm`; the estimated due date is the earlier of that and the 6-month date (`dueBasis` says which). Each row's **Update KM / Ask customer** panel takes a reading and offers a pre-written, editable WhatsApp message asking the customer for it. Vehicles due within 30 days (or overdue) are highlighted red, and the dashboard shows their count and list (`upcomingServices`, for users with `JOB_CARDS` or `VEHICLES`).
+
 ## 3. The Job Card lifecycle
 
 This is the central workflow — `/dashboard/jobcards/[id]` is the most complex page in the app because it's driving all of the following through one status field plus several sub-resources.
@@ -57,7 +59,7 @@ OPEN ──(generate draft invoice)──> INVOICED
 CANCELLED
 ```
 
-- **Invoiced is reached only by generating the invoice.** `PATCH` with `status: "INVOICED"` is refused. In the UI, choosing *Invoiced* in the status dropdown opens a confirmation (totals plus an optional discount), which calls `POST /job-cards/:id/invoice`; that sets the status in the same transaction. A job card therefore can't say Invoiced without an invoice behind it.
+- **Invoiced always comes with a draft invoice.** `PATCH` with `status: "INVOICED"` (choosing *Invoiced* in the status dropdown) generates the draft invoice — or updates the existing one for a reopened job card, keeping its discount — in the same transaction as the status change (`jobCards.controller.ts#update` → `createInvoice`). *Mark as Invoiced* does the same through `POST /job-cards/:id/invoice` with an optional discount. The job card row is locked during generation, so two at once still produce one invoice. A job card therefore can't say Invoiced without an invoice behind it.
 - **Invoiced can be set back to Open** (since 2026-10-11) to change parts or labour; the page asks for confirmation. The draft invoice stays. Invoicing again (`POST /job-cards/:id/invoice`) **updates that same invoice** — same number, same payments — with the new parts, labour and discount, and refuses a total below what's already been paid. A job card with an invoice can't be cancelled.
 - **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be invoiced.
 - **At least one labour / service line** is required to invoice.
@@ -135,11 +137,17 @@ Two ways attendance gets marked, writing to the **same** `Attendance` table (`@@
 **Salary calculation** (`/dashboard/salary` → `POST /salary/calculate` `{employeeId, month, year}`):
 ```
 perDayRate = monthlySalary / daysInThatMonth
-unpaidLeaveDays = max(0, leaveDays - monthlyLeaveAllowance)
-deductionDays = absentDays + unpaidLeaveDays
+availableLeave = openingLeave + monthlyLeaveAllowance
+unpaidLeaveDays = max(0, leaveDays - availableLeave)
+closingLeave = max(0, availableLeave - leaveDays)        → next month's openingLeave
+deductionDays = absentDays + 0.5 × halfDays + unpaidLeaveDays
 advances = sum of EmployeeAdvance.amount charged to this month
 netSalary = max(0, monthlySalary - deductionDays × perDayRate - advances)
 ```
+
+**Half days** (`HALF_DAY`, since 2026-10-20) deduct half a day's pay. **Unused leave carries forward** (`salary.service.ts#leaveBalanceFor`): each month opens with the previous month's closing balance, starting at 0 in the employee's first month (the later of joining and their first attendance mark). A month whose salary has been calculated stores its `openingLeaveBalance`/`closingLeaveBalance`, and later months use that stored closing figure — so a balance is never counted twice and a calculated month never shifts. Months not yet calculated are worked out from their attendance.
+
+**Previous dates are admin-only**: `POST /attendance` refuses a date before today (the server's calendar) for anyone but an admin (`ForbiddenError`), and the attendance page disables the buttons to match.
 
 **Advances** are entered in the attendance sheet's "Advance paid" column (`POST /advances`), and each row's history column lists that month's advances. An advance is charged to the month it was given. If that month's salary has already started being paid, it's too late to deduct there, so it's charged to the next unpaid month and the page says so. Recording or removing an advance recalculates that month's salary automatically, but only while it's calculated and unpaid, the same rule as manual recalculation. The advances charged to one month can't total more than the monthly salary; the employee row is locked during that check.
 This is computed **once and stored** (`SalaryPayment`, `@@unique([employeeId, periodMonth, periodYear])`), not a live view — recalculating is an explicit re-run of the same endpoint, and it's **blocked entirely** once `paymentAmount > 0` for that month, so a later attendance correction can never silently change an already-paid salary figure.

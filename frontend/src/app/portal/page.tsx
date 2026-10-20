@@ -22,6 +22,7 @@ interface TodayAttendance {
 
 interface MonthlySummary {
   presentDays: number;
+  halfDays?: number;
   absentDays: number;
   leaveDays: number;
 }
@@ -197,10 +198,14 @@ function PortalContent() {
             <Card>
               <CardBody>
                 <p className="mb-3 text-sm font-semibold text-gray-900">This month</p>
-                <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="grid grid-cols-4 gap-3 text-center">
                   <div>
                     <p className="text-lg font-semibold text-green-700">{summary.presentDays}</p>
                     <p className="text-xs text-gray-500">Present</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-sky-700">{summary.halfDays ?? 0}</p>
+                    <p className="text-xs text-gray-500">Half day</p>
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-red-600">{summary.absentDays}</p>
