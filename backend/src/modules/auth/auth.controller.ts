@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import * as authService from "./auth.service";
 import { UnauthorizedError } from "../../lib/errors";
+import { changeOwnPassword } from "../users/users.service";
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -50,6 +51,18 @@ export async function logout(req: Request, res: Response) {
     await authService.logout(presentedToken);
   }
   res.clearCookie(env.REFRESH_COOKIE_NAME, { path: "/api/auth" });
+  res.status(204).send();
+}
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Enter your current password"),
+  newPassword: z.string().min(8, "New password must be at least 8 characters"),
+});
+
+// Any signed-in user can change their own password.
+export async function changePassword(req: Request, res: Response) {
+  const { currentPassword, newPassword } = req.body as z.infer<typeof changePasswordSchema>;
+  await changeOwnPassword(req.user!.id, currentPassword, newPassword);
   res.status(204).send();
 }
 

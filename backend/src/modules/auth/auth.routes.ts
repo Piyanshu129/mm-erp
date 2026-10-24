@@ -14,3 +14,9 @@ authRouter.post(
 authRouter.post("/refresh", asyncHandler(authController.refresh));
 authRouter.post("/logout", asyncHandler(authController.logout));
 authRouter.get("/me", authenticate, asyncHandler(authController.me));
+authRouter.post(
+  "/change-password",
+  authenticate,
+  validateBody(authController.changePasswordSchema),
+  asyncHandler(authController.changePassword)
+);

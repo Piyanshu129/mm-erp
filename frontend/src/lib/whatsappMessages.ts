@@ -15,25 +15,21 @@ export function paymentReminder(d: {
   paid: number;
   due: number;
 }): string {
-  const lines = [
-    `Dear ${d.customerName},`,
+  // Kept short on purpose: greeting, the vehicle, and just the three amounts.
+  return [
+    `Dear ${d.customerName} Ji,`,
     "",
     `Greetings from Motors Mitra. This is a gentle reminder about the payment pending for the service of your vehicle ${d.registrationNumber}${d.vehicle ? ` (${d.vehicle})` : ""}.`,
     "",
-    `Invoice No.: ${d.invoiceNumber}`,
-    `Invoice date: ${new Date(d.invoiceDate).toLocaleDateString("en-IN")}`,
-    `Invoice amount: ${rupees(d.total)}`,
-  ];
-  if (d.paid > 0) lines.push(`Paid so far: ${rupees(d.paid)}`);
-  lines.push(
-    `Amount outstanding: ${rupees(d.due)}`,
+    `Total Amount: ${rupees(d.total)}`,
+    `Paid Amount: ${rupees(d.paid)}`,
+    `Balance Outstanding: ${rupees(d.due)}`,
     "",
-    "We'd be grateful if you could clear the outstanding amount at your earliest convenience. If you have already paid, please ignore this message and accept our thanks.",
+    "We'd be grateful if you could clear the balance at your earliest convenience.",
     "",
     "Thank you,",
-    "Motors Mitra"
-  );
-  return lines.join("\n");
+    "Motors Mitra",
+  ].join("\n");
 }
 
 export function kmRequest(d: { customerName: string; registrationNumber: string; vehicle: string; lastKm: number | null }): string {

@@ -19,6 +19,7 @@ reportsRouter.use(requirePermission("REPORTS"));
 reportsRouter.get("/sales", authorize("ADMIN"), asyncHandler(reportsController.sales));
 reportsRouter.get("/purchases", authorize("ADMIN"), asyncHandler(reportsController.purchases));
 reportsRouter.get("/daily", authorize("ADMIN"), asyncHandler(reportsController.daily));
+reportsRouter.get("/estimates", authorize("ADMIN"), asyncHandler(reportsController.estimates));
 reportsRouter.get("/inventory", asyncHandler(reportsController.inventory));
 reportsRouter.get("/workshop", asyncHandler(reportsController.workshop));
 reportsRouter.get("/customers", asyncHandler(reportsController.customers));

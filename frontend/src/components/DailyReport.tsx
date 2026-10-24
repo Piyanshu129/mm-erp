@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Download, Printer } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, MessageCircle, Printer } from "lucide-react";
 import { apiFetch, ApiError, assetUrl } from "@/lib/api";
 import { fmtQty, formatINR } from "@/lib/format";
-import { downloadExcel } from "@/lib/excel";
+import { downloadExcel, ExcelSheet } from "@/lib/excel";
+import { shareReport } from "@/lib/shareReport";
 import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -78,9 +79,30 @@ interface PurchaseLine {
   remarks: string | null;
   paymentStatus: string | null;
 }
+interface EstimateRow {
+  id: number;
+  estimateNumber: string;
+  estimateDate: string;
+  approved: boolean;
+  jobCardId: number;
+  jobCardNumber: string;
+  customerName: string;
+  customerMobile: string;
+  registrationNumber: string;
+  lines: SaleLine[];
+  subtotal: number;
+  taxRate: number | null;
+  taxAmount: number;
+  total: number;
+}
 interface Daily {
   date: string;
+  from: string;
+  to: string;
   summary: {
+    estimatesCount: number;
+    estimatesApproved: number;
+    estimatesTotal: number;
     salesCount: number;
     salesTotal: number;
     salesReceived: number;
@@ -93,6 +115,7 @@ interface Daily {
     inventoryPurchaseTotal: number;
     expenseTotal: number;
   };
+  estimates: EstimateRow[];
   sales: Sale[];
   collections: Collection[];
   purchases: PurchaseLine[];
@@ -191,10 +214,75 @@ function SaleCard({ s }: { s: Sale }) {
   );
 }
 
-// One day in full: draft invoices with their lines and payments, money
-// received that day, and purchases — with print and Excel export.
+function EstimateCard({ e }: { e: EstimateRow }) {
+  return (
+    <div className="break-inside-avoid rounded-md border border-gray-200 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <Link href={`/dashboard/estimates/${e.id}`} className="font-mono font-semibold text-blue-700 hover:underline">
+            {e.estimateNumber}
+          </Link>{" "}
+          <span className="text-xs text-gray-500">
+            {new Date(e.estimateDate).toLocaleDateString()} ·{" "}
+            <Link href={`/dashboard/jobcards/${e.jobCardId}`} className="hover:underline">
+              {e.jobCardNumber}
+            </Link>
+          </span>{" "}
+          <Badge tone={e.approved ? "green" : "amber"}>{e.approved ? "Customer approved" : "Awaiting approval"}</Badge>
+          <p className="text-sm text-gray-700">
+            {e.customerName} · {e.customerMobile} · <span className="font-mono">{e.registrationNumber}</span>
+          </p>
+        </div>
+        <p className="text-right text-sm font-semibold text-gray-900">{formatINR(e.total)}</p>
+      </div>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[520px] text-xs">
+          <thead>
+            <tr className="text-left text-gray-500">
+              <th className="py-1 pr-2">Type</th>
+              <th className="py-1 pr-2">Item / service</th>
+              <th className="py-1 pr-2 text-right">Qty</th>
+              <th className="py-1 pr-2 text-right">Rate</th>
+              <th className="py-1 text-right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {e.lines.map((l, i) => (
+              <tr key={i} className="border-t border-gray-100">
+                <td className="py-1 pr-2 text-gray-500">{l.kind}</td>
+                <td className="py-1 pr-2">{l.description}</td>
+                <td className="py-1 pr-2 text-right">{fmtQty(l.quantity)}</td>
+                <td className="py-1 pr-2 text-right">{formatINR(l.rate)}</td>
+                <td className="py-1 text-right">{formatINR(l.amount)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-gray-200 text-gray-600">
+              <td colSpan={4} className="py-1 pr-2 text-right">
+                Subtotal {formatINR(e.subtotal)}
+                {e.taxAmount > 0 && ` · Tax ${e.taxRate}% ${formatINR(e.taxAmount)}`}
+              </td>
+              <td className="py-1 text-right font-semibold text-gray-900">{formatINR(e.total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function rangeLabel(from: string, to: string): string {
+  const f = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return from === to ? f(from) : `${f(from)} – ${f(to)}`;
+}
+
+// A date range (one day by default) in full: estimates with their lines,
+// draft invoices with their lines and payments, money received, and
+// purchases — with print, Excel export and WhatsApp share.
 export function DailyReport() {
-  const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const today = new Date().toLocaleDateString("en-CA");
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [sharing, setSharing] = useState(false);
   const [data, setData] = useState<Daily | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -204,32 +292,33 @@ export function DailyReport() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiFetch(`/reports/daily?date=${date}`)
+    apiFetch(`/reports/daily?from=${from}&to=${to}`)
       .then((body) => !cancelled && setData(body))
       .catch((err) => !cancelled && setError(err instanceof ApiError ? err.message : "Could not load the daily report"))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [from, to]);
 
-  async function exportExcel() {
-    if (!data) return;
-    setExporting(true);
-    try {
+  function sheets(data: Daily): ExcelSheet[] {
       const s = data.summary;
-      await downloadExcel(`daily-report-${data.date}`, [
+      return [
         {
           name: "Summary",
           columns: ["Item", "Value"],
           rows: [
-            { Item: "Date", Value: data.date },
+            { Item: "From", Value: data.from },
+            { Item: "To", Value: data.to },
+            { Item: "Estimates", Value: s.estimatesCount },
+            { Item: "  Customer approved", Value: s.estimatesApproved },
+            { Item: "Estimates value", Value: s.estimatesTotal },
             { Item: "Draft invoices (finalised)", Value: s.salesCount },
             { Item: "Sales total", Value: s.salesTotal },
             { Item: "Received against them", Value: s.salesReceived },
             { Item: "Outstanding on them", Value: s.salesOutstanding },
             { Item: "Invoices being revised (not in totals)", Value: s.beingRevisedCount },
-            { Item: "Payments received this day", Value: s.collectionsTotal },
+            { Item: "Payments received", Value: s.collectionsTotal },
             ...s.collectionsByMode.map((m) => ({ Item: `  by ${mode(m.mode)}`, Value: m.amount })),
             { Item: "Purchase lines", Value: s.purchaseCount },
             { Item: "Purchases total", Value: s.purchaseTotal },
@@ -238,7 +327,39 @@ export function DailyReport() {
           ],
         },
         {
-          name: "Sales",
+          name: "Estimates",
+          columns: ["Estimate", "Date", "Status", "Job Card", "Customer", "Mobile", "Vehicle", "Subtotal", "Tax", "Total"],
+          rows: data.estimates.map((e) => ({
+            Estimate: e.estimateNumber,
+            Date: new Date(e.estimateDate).toLocaleDateString(),
+            Status: e.approved ? "Customer approved" : "Awaiting approval",
+            "Job Card": e.jobCardNumber,
+            Customer: e.customerName,
+            Mobile: e.customerMobile,
+            Vehicle: e.registrationNumber,
+            Subtotal: e.subtotal,
+            Tax: e.taxAmount,
+            Total: e.total,
+          })),
+        },
+        {
+          name: "Estimate Lines",
+          columns: ["Estimate", "Customer", "Vehicle", "Type", "Item / Service", "Qty", "Rate", "Amount"],
+          rows: data.estimates.flatMap((e) =>
+            e.lines.map((l) => ({
+              Estimate: e.estimateNumber,
+              Customer: e.customerName,
+              Vehicle: e.registrationNumber,
+              Type: l.kind,
+              "Item / Service": l.description,
+              Qty: l.quantity,
+              Rate: l.rate,
+              Amount: l.amount,
+            }))
+          ),
+        },
+        {
+          name: "Draft Invoices",
           columns: ["Draft Invoice", "Time", "Status", "Job Card", "Customer", "Mobile", "Vehicle", "Parts", "Labour", "Discount", "Tax", "Total", "Received", "Outstanding", "Payments"],
           rows: data.sales.map((x) => ({
             "Draft Invoice": x.invoiceNumber,
@@ -308,7 +429,16 @@ export function DailyReport() {
             Remarks: p.remarks,
           })),
         },
-      ]);
+      ];
+  }
+
+  const fileName = data ? `report-${data.from}${data.to !== data.from ? `-to-${data.to}` : ""}` : "report";
+
+  async function exportExcel() {
+    if (!data) return;
+    setExporting(true);
+    try {
+      await downloadExcel(fileName, sheets(data));
     } catch {
       setError("Could not create the Excel file — please try again");
     } finally {
@@ -316,18 +446,78 @@ export function DailyReport() {
     }
   }
 
+  async function share() {
+    if (!data) return;
+    const s = data.summary;
+    const text = [
+      `Motors Mitra — Report ${rangeLabel(data.from, data.to)}`,
+      `Estimates: ${s.estimatesCount} (${s.estimatesApproved} approved) — ${formatINR(s.estimatesTotal)}`,
+      `Draft invoices: ${s.salesCount} — ${formatINR(s.salesTotal)} (received ${formatINR(s.salesReceived)}, outstanding ${formatINR(s.salesOutstanding)})`,
+      `Payments received: ${formatINR(s.collectionsTotal)}`,
+      `Purchases: ${formatINR(s.purchaseTotal)} (stock ${formatINR(s.inventoryPurchaseTotal)}, expenses ${formatINR(s.expenseTotal)})`,
+    ].join("\n");
+    setSharing(true);
+    try {
+      await shareReport({ fileName, sheets: sheets(data), text });
+    } finally {
+      setSharing(false);
+    }
+  }
+
   const s = data?.summary;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 print:hidden">
-        <Button type="button" variant="secondary" size="sm" onClick={() => setDate(shiftDate(date, -1))} aria-label="Previous day">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setFrom(shiftDate(from, -1));
+            setTo(shiftDate(from, -1));
+          }}
+          aria-label="Previous day"
+        >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <Input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="w-auto" />
-        <Button type="button" variant="secondary" size="sm" onClick={() => setDate(shiftDate(date, 1))} aria-label="Next day">
+        <label className="flex items-center gap-1 text-sm text-gray-600">
+          From
+          <Input type="date" value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} className="w-auto" />
+        </label>
+        <label className="flex items-center gap-1 text-sm text-gray-600">
+          To
+          <Input type="date" value={to} onChange={(e) => e.target.value && setTo(e.target.value)} className="w-auto" />
+        </label>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setFrom(shiftDate(to, 1));
+            setTo(shiftDate(to, 1));
+          }}
+          aria-label="Next day"
+        >
           <ChevronRight className="h-4 w-4" />
         </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => (setFrom(today), setTo(today))}>
+          Today
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setFrom(`${today.slice(0, 8)}01`);
+            setTo(today);
+          }}
+        >
+          This month
+        </Button>
         <div className="ml-auto flex gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={share} disabled={!data || sharing}>
+            <MessageCircle className="h-4 w-4" /> {sharing ? "Preparing..." : "Share on WhatsApp"}
+          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => window.print()} disabled={!data}>
             <Printer className="h-4 w-4" /> Print
           </Button>
@@ -338,8 +528,7 @@ export function DailyReport() {
       </div>
 
       <h2 className="text-lg font-semibold text-gray-900">
-        Daily report —{" "}
-        {new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+        Report — {rangeLabel(from, to)}
       </h2>
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -352,11 +541,12 @@ export function DailyReport() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Tile label={`Sales (${s.salesCount} draft invoices)`} value={formatINR(s.salesTotal)} />
+            <Tile label={`Estimates (${s.estimatesCount}, ${s.estimatesApproved} approved)`} value={formatINR(s.estimatesTotal)} />
+            <Tile label={`Draft invoices (${s.salesCount})`} value={formatINR(s.salesTotal)} />
             <Tile label="Received against them" value={formatINR(s.salesReceived)} tone="green" />
             <Tile label="Outstanding on them" value={formatINR(s.salesOutstanding)} tone={s.salesOutstanding > 0 ? "red" : "gray"} />
             <Tile
-              label="Payments received this day"
+              label="Payments received"
               value={formatINR(s.collectionsTotal)}
               sub={s.collectionsByMode.map((m) => `${mode(m.mode)} ${formatINR(m.amount)}`).join(" · ") || undefined}
             />
@@ -370,9 +560,20 @@ export function DailyReport() {
 
           <Card>
             <CardBody className="space-y-3">
-              <p className="text-base font-semibold text-gray-900">Sales — draft invoices</p>
+              <p className="text-base font-semibold text-gray-900">Estimates</p>
+              {data.estimates.length === 0 ? (
+                <p className="text-sm text-gray-500">No estimates in this period.</p>
+              ) : (
+                data.estimates.map((e) => <EstimateCard key={e.id} e={e} />)
+              )}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardBody className="space-y-3">
+              <p className="text-base font-semibold text-gray-900">Draft invoices</p>
               {data.sales.length === 0 ? (
-                <p className="text-sm text-gray-500">No draft invoices on this day.</p>
+                <p className="text-sm text-gray-500">No draft invoices in this period.</p>
               ) : (
                 data.sales.map((sale) => <SaleCard key={sale.id} s={sale} />)
               )}
@@ -381,9 +582,9 @@ export function DailyReport() {
 
           <Card>
             <CardBody className="space-y-2">
-              <p className="text-base font-semibold text-gray-900">Payments received this day</p>
+              <p className="text-base font-semibold text-gray-900">Payments received</p>
               {data.collections.length === 0 ? (
-                <p className="text-sm text-gray-500">No payments received on this day.</p>
+                <p className="text-sm text-gray-500">No payments received in this period.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[560px] text-sm">
@@ -423,7 +624,7 @@ export function DailyReport() {
             <CardBody className="space-y-2">
               <p className="text-base font-semibold text-gray-900">Purchases</p>
               {data.purchases.length === 0 ? (
-                <p className="text-sm text-gray-500">No purchases on this day.</p>
+                <p className="text-sm text-gray-500">No purchases in this period.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[820px] text-sm">

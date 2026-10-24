@@ -20,20 +20,32 @@ import { apiFetch } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { DashboardCharts, SeriesPoint } from "@/components/DashboardCharts";
+
+type Period = "today" | "month" | "fy";
+
+const PERIODS: { value: Period; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "month", label: "This month" },
+  { value: "fy", label: "This financial year" },
+];
 
 interface Summary {
-  todaysVehicles: number;
+  period: Period;
+  periodStart: string;
+  vehicles: number;
   openJobCards: number;
-  invoicedToday: number;
-  cancelledThisMonth: number;
+  estimatesCount: number;
+  estimatesApproved: number;
+  cancelled: number;
   lowStockCount: number;
   outOfStockCount: number;
-  // Only sent to admins (sales and purchase figures).
-  todaysSales?: number;
-  todaysPurchaseValue?: number;
-  monthPurchaseValue?: number;
-  monthInventoryPurchaseValue?: number;
-  monthExpenseValue?: number;
+  // Only sent to admins (money figures and graphs).
+  estimatesValue?: number;
+  purchaseValue?: number;
+  inventoryPurchaseValue?: number;
+  expenseValue?: number;
+  series?: SeriesPoint[];
   // Only sent to users who can see vehicles or job cards.
   upcomingServices: {
     count: number;
@@ -86,40 +98,81 @@ function StatCard({
 export default function DashboardPage() {
   const { user } = useAuth();
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Remembered on this device between visits.
+  const [period, setPeriod] = useState<Period | null>(null);
 
   useEffect(() => {
-    apiFetch("/reports/dashboard").then(setSummary);
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("mm-dashboard-period");
+    } catch {
+      /* not available — fine */
+    }
+    setPeriod(saved === "month" || saved === "fy" ? saved : "today");
   }, []);
+
+  useEffect(() => {
+    if (!period) return;
+    setSummary(null);
+    apiFetch(`/reports/dashboard?period=${period}`).then(setSummary);
+    try {
+      localStorage.setItem("mm-dashboard-period", period);
+    } catch {
+      /* not available — fine */
+    }
+  }, [period]);
+
+  const word = period === "today" ? "Today" : period === "month" ? "This Month" : "This FY";
+  const fyLabel = summary
+    ? `FY ${summary.periodStart.slice(0, 4)}–${String(Number(summary.periodStart.slice(0, 4)) + 1).slice(2)}`
+    : "";
+  const graphLabel =
+    period === "today" ? "Last 7 days" : period === "month" ? new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" }) : fyLabel;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Welcome, {user?.name}</h1>
-        <p className="mt-1 text-sm text-gray-500">Here&apos;s what&apos;s happening at the workshop today.</p>
+        <p className="mt-1 text-sm text-gray-500">Here&apos;s what&apos;s happening at the workshop.</p>
+      </div>
+
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Dashboard period">
+        {PERIODS.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            role="tab"
+            aria-selected={period === p.value}
+            onClick={() => setPeriod(p.value)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium ${period === p.value ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"}`}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       {summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Today's Vehicles" value={summary.todaysVehicles} href="/dashboard/jobcards" icon={Car} />
+          <StatCard label={`Vehicles — ${word}`} value={summary.vehicles} href="/dashboard/jobcards" icon={Car} />
           <StatCard label="Open Job Cards" value={summary.openJobCards} href="/dashboard/jobcards?status=OPEN" icon={ClipboardList} />
-          <StatCard label="Invoiced Today" value={summary.invoicedToday} href="/dashboard/invoices" icon={CheckCircle2} />
           <StatCard
-            label="Cancelled This Month"
-            value={summary.cancelledThisMonth}
+            label={`Estimates — ${word}`}
+            value={`${summary.estimatesCount}${summary.estimatesCount ? ` (${summary.estimatesApproved} approved)` : ""}`}
+            href="/dashboard/reports"
+            icon={CheckCircle2}
+          />
+          <StatCard
+            label={`Cancelled — ${word}`}
+            value={summary.cancelled}
             href="/dashboard/jobcards?status=CANCELLED"
             icon={Ban}
-            tone={summary.cancelledThisMonth > 0 ? "warning" : "default"}
+            tone={summary.cancelled > 0 ? "warning" : "default"}
           />
-          {summary.todaysSales != null && (
-            <StatCard label="Today's Sales" value={`₹${summary.todaysSales.toFixed(0)}`} href="/dashboard/reports" icon={IndianRupee} />
+          {summary.estimatesValue != null && (
+            <StatCard label={`Estimate Value — ${word}`} value={rupees(summary.estimatesValue)} href="/dashboard/reports" icon={IndianRupee} />
           )}
-          {summary.todaysPurchaseValue != null && (
-            <StatCard
-              label="Today's Purchases"
-              value={`₹${summary.todaysPurchaseValue.toFixed(0)}`}
-              href="/dashboard/reports"
-              icon={ShoppingCart}
-            />
+          {summary.purchaseValue != null && (
+            <StatCard label={`Purchases — ${word}`} value={rupees(summary.purchaseValue)} href="/dashboard/purchases" icon={ShoppingCart} />
           )}
           <StatCard
             label="Low Stock"
@@ -144,7 +197,7 @@ export default function DashboardPage() {
               tone={summary.upcomingServices.count > 0 ? "danger" : "default"}
             />
           )}
-          {summary.monthPurchaseValue != null && (
+          {summary.purchaseValue != null && (
           <Link href="/dashboard/purchases" className="col-span-2 block transition-transform hover:-translate-y-0.5">
             <Card>
               <CardBody className="flex items-center gap-3">
@@ -152,12 +205,10 @@ export default function DashboardPage() {
                   <ShoppingCart className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
+                  <p className="truncate text-xs text-gray-500">Total Purchases — {word}</p>
+                  <p className="text-xl font-semibold text-gray-900">{rupees(summary.purchaseValue)}</p>
                   <p className="truncate text-xs text-gray-500">
-                    Total Purchases — {new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-                  </p>
-                  <p className="text-xl font-semibold text-gray-900">{rupees(summary.monthPurchaseValue)}</p>
-                  <p className="truncate text-xs text-gray-500">
-                    Inventory {rupees(summary.monthInventoryPurchaseValue ?? 0)} · Expenses {rupees(summary.monthExpenseValue ?? 0)}
+                    Inventory {rupees(summary.inventoryPurchaseValue ?? 0)} · Expenses {rupees(summary.expenseValue ?? 0)}
                   </p>
                 </div>
               </CardBody>
@@ -172,6 +223,8 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+
+      {summary?.series && <DashboardCharts series={summary.series} periodLabel={`Graphs — ${graphLabel}`} />}
 
       {summary?.upcomingServices && summary.upcomingServices.count > 0 && (
         <div>

@@ -4,23 +4,24 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, Download } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, MessageCircle } from "lucide-react";
 import { apiFetch, assetUrl } from "@/lib/api";
 import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { useAuth } from "@/context/AuthContext";
 import { downloadRowsAsExcel } from "@/lib/excel";
 import { DailyReport } from "@/components/DailyReport";
+import { shareReport } from "@/lib/shareReport";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
-type Tab = "daily" | "sales" | "purchases" | "inventory" | "workshop" | "customers";
+type Tab = "daily" | "estimates" | "purchases" | "inventory" | "workshop" | "customers";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "daily", label: "Daily Sales & Purchases" },
-  { key: "sales", label: "Sales" },
+  { key: "daily", label: "Detailed (From–To)" },
+  { key: "estimates", label: "Estimates" },
   { key: "purchases", label: "Purchases" },
   { key: "inventory", label: "Inventory" },
   { key: "workshop", label: "Workshop" },
@@ -137,6 +138,32 @@ function ExportButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+// One click: the report's Excel file (phone) or summary text (computer)
+// into WhatsApp — see lib/shareReport.ts.
+function ShareButton({ fileName, sheetName, rows, text }: { fileName: string; sheetName: string; rows: Record<string, unknown>[]; text: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await shareReport({ fileName, sheets: [{ name: sheetName, columns: rows.length ? Object.keys(rows[0]) : [], rows }], text });
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <MessageCircle className="h-3.5 w-3.5" /> {busy ? "Preparing..." : "Share on WhatsApp"}
+    </Button>
+  );
+}
+
+const rangeText = (from: string, to: string) =>
+  `${new Date(`${from}T12:00:00`).toLocaleDateString("en-IN")} – ${new Date(`${to}T12:00:00`).toLocaleDateString("en-IN")}`;
+
 function DateRangeControls({
   from,
   to,
@@ -167,64 +194,94 @@ function DateRangeControls({
   );
 }
 
-function SalesTab() {
+interface EstimateReportRow {
+  id: number;
+  day: string;
+  estimateNumber: string;
+  approved: boolean;
+  jobCardId: number;
+  jobCardNumber: string;
+  registrationNumber: string;
+  customerName: string;
+  customerMobile: string;
+  total: number;
+}
+
+function EstimatesTab() {
   const [from, setFrom] = useState(daysAgoStr(30));
   const [to, setTo] = useState(todayStr());
-  const [data, setData] = useState<{ byDay: DayRow[]; invoices: SaleRow[]; grandTotal: number } | null>(null);
+  const [data, setData] = useState<{ byDay: DayRow[]; estimates: EstimateReportRow[]; grandTotal: number; approvedTotal: number } | null>(null);
 
   async function load() {
-    const body = await apiFetch(`/reports/sales?from=${from}&to=${to}`);
-    setData(body);
+    setData(await apiFetch(`/reports/estimates?from=${from}&to=${to}`));
   }
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const excelRows = (data?.estimates ?? []).map((e) => ({
+    Date: e.day,
+    Estimate: e.estimateNumber,
+    "Job Card": e.jobCardNumber,
+    Customer: e.customerName,
+    Mobile: e.customerMobile,
+    Vehicle: e.registrationNumber,
+    Status: e.approved ? "Customer approved" : "Awaiting approval",
+    Total: e.total,
+  }));
+
   return (
     <div>
       <DateRangeControls from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={load} />
       {data && (
         <>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-gray-600">
-              Grand total: <span className="font-semibold text-gray-900">₹{data.grandTotal.toFixed(2)}</span>
+              {data.estimates.length} estimates · Total <span className="font-semibold text-gray-900">{inr(data.grandTotal)}</span> · Customer
+              approved <span className="font-semibold text-gray-900">{inr(data.approvedTotal)}</span>
             </p>
-            <ExportButton onClick={() => downloadRowsAsExcel("sales-report.xlsx", "sales report", data.byDay)} />
+            <div className="flex gap-1">
+              <ExportButton onClick={() => downloadRowsAsExcel(`estimates-${from}-to-${to}.xlsx`, "estimates", excelRows)} />
+              <ShareButton
+                fileName={`estimates-${from}-to-${to}`}
+                sheetName="estimates"
+                rows={excelRows}
+                text={`Motors Mitra — Estimates ${rangeText(from, to)}\n${data.estimates.length} estimates: ${inr(data.grandTotal)}\nCustomer approved: ${inr(data.approvedTotal)}`}
+              />
+            </div>
           </div>
           <DayWiseTable
             days={data.byDay}
-            rows={data.invoices}
-            empty="No sales in this range."
+            rows={data.estimates}
+            empty="No estimates in this range."
             renderDetail={(rows) => (
               <table className="w-full min-w-[560px] text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500">
-                    <th className="py-1 pr-3">Draft Invoice</th>
+                    <th className="py-1 pr-3">Estimate</th>
                     <th className="py-1 pr-3">Vehicle</th>
                     <th className="py-1 pr-3">Customer</th>
-                    <th className="py-1 pr-3 text-right">Total</th>
-                    <th className="py-1 pr-3 text-right">Paid</th>
-                    <th className="py-1 text-right">Due</th>
+                    <th className="py-1 pr-3">Status</th>
+                    <th className="py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((inv) => (
-                    <tr key={inv.id} className="border-t border-gray-200">
+                  {rows.map((e) => (
+                    <tr key={e.id} className="border-t border-gray-200">
                       <td className="py-1.5 pr-3">
-                        <Link href={`/dashboard/invoices/${inv.id}`} className="font-mono text-blue-600 hover:underline">
-                          {inv.invoiceNumber}
+                        <Link href={`/dashboard/estimates/${e.id}`} className="font-mono text-blue-600 hover:underline">
+                          {e.estimateNumber}
                         </Link>
-                        <span className="block text-xs text-gray-500">{inv.jobCard.jobCardNumber}</span>
+                        <span className="block text-xs text-gray-500">{e.jobCardNumber}</span>
                       </td>
-                      <td className="py-1.5 pr-3 font-mono">{inv.jobCard.vehicle.registrationNumber}</td>
+                      <td className="py-1.5 pr-3 font-mono">{e.registrationNumber}</td>
                       <td className="py-1.5 pr-3">
-                        {inv.jobCard.vehicle.customer.name}
-                        <span className="block text-xs text-gray-500">{inv.jobCard.vehicle.customer.mobile}</span>
+                        {e.customerName}
+                        <span className="block text-xs text-gray-500">{e.customerMobile}</span>
                       </td>
-                      <td className="py-1.5 pr-3 text-right">{inr(inv.totalAmount)}</td>
-                      <td className="py-1.5 pr-3 text-right">{inr(inv.paymentAmount)}</td>
-                      <td className="py-1.5 text-right">{inr(Number(inv.totalAmount) - Number(inv.paymentAmount))}</td>
+                      <td className="py-1.5 pr-3">{e.approved ? "Customer approved" : "Awaiting approval"}</td>
+                      <td className="py-1.5 text-right">{inr(e.total)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -267,7 +324,15 @@ function PurchasesTab() {
           <div className="mb-6">
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900">By day</h3>
-              <ExportButton onClick={() => downloadRowsAsExcel("purchases-by-day.xlsx", "purchases by day", data.byDay)} />
+              <div className="flex gap-1">
+                <ExportButton onClick={() => downloadRowsAsExcel("purchases-by-day.xlsx", "purchases by day", data.byDay)} />
+                <ShareButton
+                  fileName={`purchases-${from}-to-${to}`}
+                  sheetName="purchases by day"
+                  rows={data.byDay}
+                  text={`Motors Mitra — Purchases ${rangeText(from, to)}\nTotal: ${inr(data.grandTotal)}`}
+                />
+              </div>
             </div>
             <DayWiseTable
               days={data.byDay}
@@ -350,7 +415,15 @@ function InventoryTab() {
           stock: <span className="font-semibold text-amber-600">{data.lowStockCount}</span> · Out of stock:{" "}
           <span className="font-semibold text-red-600">{data.outOfStockCount}</span>
         </p>
-        <ExportButton onClick={() => downloadRowsAsExcel("inventory-report.xlsx", "inventory report", data.rows)} />
+        <div className="flex gap-1">
+          <ExportButton onClick={() => downloadRowsAsExcel("inventory-report.xlsx", "inventory report", data.rows)} />
+          <ShareButton
+            fileName="inventory-report"
+            sheetName="inventory"
+            rows={data.rows}
+            text={`Motors Mitra — Inventory\nStock value: ${inr(data.totalStockValue)}\nLow stock: ${data.lowStockCount} · Out of stock: ${data.outOfStockCount}`}
+          />
+        </div>
       </div>
       <ReportTable
         columns={["itemCode", "name", "category", "uom", "currentStock", "minStock", "stockValue", "status"]}
@@ -382,7 +455,15 @@ function WorkshopTab() {
         <>
           <div className="mb-1 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">Job cards by status</h3>
-            <ExportButton onClick={() => downloadRowsAsExcel("workshop-report.xlsx", "workshop report", data.byStatus)} />
+            <div className="flex gap-1">
+              <ExportButton onClick={() => downloadRowsAsExcel("workshop-report.xlsx", "workshop report", data.byStatus)} />
+              <ShareButton
+                fileName={`workshop-${from}-to-${to}`}
+                sheetName="job cards by status"
+                rows={data.byStatus}
+                text={`Motors Mitra — Job cards ${rangeText(from, to)}\n${data.byStatus.map((b) => `${b.status}: ${b.count}`).join("\n")}`}
+              />
+            </div>
           </div>
           <ReportTable columns={["status", "count"]} rows={data.byStatus} empty="No job cards in this range." />
         </>
@@ -408,6 +489,16 @@ function CustomersTab() {
   return (
     <div>
       <DateRangeControls from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={load} />
+      {data && (
+        <div className="mb-2 flex justify-end">
+          <ShareButton
+            fileName={`customers-${from}-to-${to}`}
+            sheetName="customers"
+            rows={[{ "New customers": data.newCustomers, "Repeat customers": data.repeatCustomers, "Total customers": data.totalCustomers }]}
+            text={`Motors Mitra — Customers ${rangeText(from, to)}\nNew: ${data.newCustomers} · Repeat: ${data.repeatCustomers} · Total: ${data.totalCustomers}`}
+          />
+        </div>
+      )}
       {data && (
         <div className="grid grid-cols-3 gap-3">
           <Card>
@@ -462,7 +553,7 @@ function ReportTable({ columns, rows, empty }: { columns: string[]; rows: Record
 
 // Sales and purchase figures are admin-only (the server refuses them for
 // anyone else), so other users don't get those tabs.
-const ADMIN_ONLY_TABS: Tab[] = ["daily", "sales", "purchases"];
+const ADMIN_ONLY_TABS: Tab[] = ["daily", "estimates", "purchases"];
 
 function ReportsPageContent() {
   const { user } = useAuth();
@@ -491,7 +582,7 @@ function ReportsPageContent() {
       </div>
 
       {isAdmin && tab === "daily" && <DailyReport />}
-      {isAdmin && tab === "sales" && <SalesTab />}
+      {isAdmin && tab === "estimates" && <EstimatesTab />}
       {isAdmin && tab === "purchases" && <PurchasesTab />}
       {tab === "inventory" && <InventoryTab />}
       {tab === "workshop" && <WorkshopTab />}

@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import * as usersService from "./users.service";
-import { PERMISSIONS } from "../../lib/permissions";
+import { PERMISSIONS, PERMISSION_ACTIONS, isValidGrant } from "../../lib/permissions";
 
 export const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   role: z.enum(["ADMIN", "STORE_USER"]),
-  permissions: z.array(z.enum(PERMISSIONS)).optional(),
+  permissions: z.array(z.string().refine(isValidGrant, "Unknown permission")).optional(),
 });
 
 export const updateUserStatusSchema = z.object({
@@ -16,7 +16,7 @@ export const updateUserStatusSchema = z.object({
 });
 
 export const updateUserPermissionsSchema = z.object({
-  permissions: z.array(z.enum(PERMISSIONS)),
+  permissions: z.array(z.string().refine(isValidGrant, "Unknown permission")),
 });
 
 export async function list(_req: Request, res: Response) {
@@ -49,11 +49,22 @@ export async function remove(req: Request, res: Response) {
   res.status(204).send();
 }
 
+export const resetPasswordSchema = z.object({
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+// Admin sets a new password for a user who forgot theirs.
+export async function resetPassword(req: Request, res: Response) {
+  const { password } = req.body as z.infer<typeof resetPasswordSchema>;
+  await usersService.setPassword(Number(req.params.id), password);
+  res.status(204).send();
+}
+
 export async function roles(_req: Request, res: Response) {
   const list = await usersService.listRoles();
   res.json({ roles: list });
 }
 
 export async function permissions(_req: Request, res: Response) {
-  res.json({ permissions: PERMISSIONS });
+  res.json({ permissions: PERMISSIONS, actions: PERMISSION_ACTIONS });
 }

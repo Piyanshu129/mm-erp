@@ -131,8 +131,11 @@ export type ServiceStatus = "OVERDUE" | "DUE_SOON" | "OK" | "NOT_SCHEDULED";
 //     its latest reading and its average running per day.
 // Without enough reading history for an average, it's the time limit alone.
 export async function getServiceSchedule() {
+  // Only vehicles that come for general service: those with a (not
+  // cancelled) General Service job card. Vehicles seen only for AC, dent &
+  // paint, accidents etc. aren't on the schedule.
   const vehicles = await prisma.vehicle.findMany({
-    where: { isActive: true },
+    where: { isActive: true, jobCards: { some: { jobType: "GENERAL_SERVICE", status: { not: "CANCELLED" } } } },
     include: {
       customer: { select: { id: true, name: true, mobile: true } },
       jobCards: {

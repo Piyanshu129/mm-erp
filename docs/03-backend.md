@@ -76,7 +76,7 @@ Cookie flags differ by environment ([`refreshCookieOptions()`](../backend/src/mo
 Two independent gates, both throwing `UnauthorizedError`/`ForbiddenError` (→ 401/403):
 
 - **`authorize(...roles)`** — hard role check. Used for the Users and Backup routers (`authorize("ADMIN")`) — these stay Admin-only forever, never grantable — and for single admin-only actions inside other routers: editing a customer (`PATCH /customers/:id`), correcting or deleting a recorded payment (`PATCH`/`DELETE /invoices/:id/payments/:paymentId` and `/suppliers/:id/payments/:paymentId`), and the sales/purchases reports.
-- **`requirePermission(...modules)`** — checks `req.user.permissions` unless `req.user.role === "ADMIN"`, in which case it always passes. Most module routers use this: `vehiclesRouter.use(authenticate, requirePermission("VEHICLES"))`. Passing more than one module means "any of these" (e.g. `item-lookup` is shared by the Items and Job Cards workflows: `requirePermission("ITEMS", "JOB_CARDS")`).
+- **`requirePermission(...modules)`** — checks `req.user.permissions` unless `req.user.role === "ADMIN"`, in which case it always passes. Most module routers use this: `vehiclesRouter.use(authenticate, requirePermission("VEHICLES"))`. Passing more than one module means "any of these" (e.g. `item-lookup` is shared by the Items and Job Cards workflows: `requirePermission("ITEMS", "JOB_CARDS")`). **Per-action grants** (since 2026-10-24, `lib/permissions.ts`): a grant is a whole module (`"JOB_CARDS"`, everything — what older accounts have) or one action in it (`"JOB_CARDS:VIEW"`, `:ADD`, `:EDIT`, `:DELETE`). The action needed comes from the request method — GET → VIEW, POST → ADD, PATCH/PUT → EDIT, DELETE → DELETE — and a refusal names the module and action. The Users page sets them as a View/Add/Edit/Delete grid.
 
 Because `permissions` is embedded in the JWT rather than looked up per-request, a permission change made via `/dashboard/users` takes effect on that user's *next token refresh* — worst case ~15 minutes — not instantly.
 
@@ -124,6 +124,8 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | GET | `/me` | any staff token | |
 
 ### Users — `/users` ([routes](../backend/src/modules/users/users.routes.ts)) — **Admin-only, entire router**
+
+`PATCH /users/:id/password` `{password}` — admin sets a new password for a user who forgot theirs (signs them out everywhere). Any signed-in user can change their own: `POST /auth/change-password` `{currentPassword, newPassword}` (page `/dashboard/account`). An admin who forgot their own password runs `reset-password.bat` on the server PC (`backend/scripts/reset-password.ts`).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/` | list all staff users |

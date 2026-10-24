@@ -1,10 +1,19 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Eye, EyeOff, Shield, Pencil, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Shield, Pencil, Trash2, KeyRound } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { apiFetch, ApiError } from "@/lib/api";
-import { PERMISSIONS, PERMISSION_LABELS, Permission } from "@/lib/permissions";
+import {
+  PERMISSIONS,
+  PERMISSION_LABELS,
+  PERMISSION_ACTIONS,
+  ACTION_LABELS,
+  Permission,
+  PermissionAction,
+  actionsIn,
+  toGrants,
+} from "@/lib/permissions";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
@@ -22,6 +31,8 @@ interface UserRow {
   isActive: boolean;
 }
 
+// Which actions a Store User may take in each module: View / Add / Edit /
+// Delete. The server enforces the same per request.
 function PermissionChecklist({
   selected,
   onChange,
@@ -29,32 +40,79 @@ function PermissionChecklist({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
-  const allSelected = PERMISSIONS.every((p) => selected.includes(p));
+  const byModule = Object.fromEntries(PERMISSIONS.map((m) => [m, actionsIn(selected, m)])) as Record<Permission, PermissionAction[]>;
+  const allSelected = PERMISSIONS.every((m) => byModule[m].length === PERMISSION_ACTIONS.length);
 
-  function toggle(p: Permission) {
-    onChange(selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p]);
+  function set(module: Permission, actions: PermissionAction[]) {
+    // Add/Edit/Delete without View makes no sense — any of them turns View on.
+    const next = actions.length && !actions.includes("VIEW") ? (["VIEW", ...actions] as PermissionAction[]) : actions;
+    onChange(toGrants({ ...byModule, [module]: next }));
   }
-
-  function toggleAll() {
-    onChange(allSelected ? [] : [...PERMISSIONS]);
+  function toggle(module: Permission, action: PermissionAction) {
+    const has = byModule[module].includes(action);
+    // Turning View off turns the whole module off.
+    if (has && action === "VIEW") return set(module, []);
+    set(module, has ? byModule[module].filter((a) => a !== action) : [...byModule[module], action]);
   }
 
   return (
-    <div className="rounded-md border border-gray-200 p-3">
-      <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
-        <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-        All modules
-      </label>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-gray-100 pt-2">
-        {PERMISSIONS.map((p) => (
-          <label key={p} className="flex items-center gap-2 text-sm text-gray-600">
-            <input type="checkbox" checked={selected.includes(p)} onChange={() => toggle(p)} />
-            {PERMISSION_LABELS[p]}
-          </label>
-        ))}
-      </div>
+    <div className="overflow-x-auto rounded-md border border-gray-200">
+      <table className="w-full min-w-[420px] text-sm">
+        <thead>
+          <tr className="bg-gray-50 text-xs text-gray-500">
+            <th className="px-3 py-2 text-left">
+              <label className="flex items-center gap-2 font-medium text-gray-700">
+                <input type="checkbox" checked={allSelected} onChange={() => onChange(allSelected ? [] : [...PERMISSIONS])} />
+                Module (all)
+              </label>
+            </th>
+            {PERMISSION_ACTIONS.map((a) => (
+              <th key={a} className="px-2 py-2 text-center">
+                {ACTION_LABELS[a]}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {PERMISSIONS.map((m) => {
+            const all = byModule[m].length === PERMISSION_ACTIONS.length;
+            return (
+              <tr key={m} className="border-t border-gray-100">
+                <td className="px-3 py-1.5">
+                  <label className="flex items-center gap-2 text-gray-700">
+                    <input type="checkbox" checked={all} onChange={() => set(m, all ? [] : [...PERMISSION_ACTIONS])} />
+                    {PERMISSION_LABELS[m]}
+                  </label>
+                </td>
+                {PERMISSION_ACTIONS.map((a) => (
+                  <td key={a} className="px-2 py-1.5 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${PERMISSION_LABELS[m]} — ${ACTION_LABELS[a]}`}
+                      checked={byModule[m].includes(a)}
+                      onChange={() => toggle(m, a)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
+}
+
+// "Job Cards (View, Add) · Items" — what a user may do, for the list.
+function describeGrants(perms: string[]): string {
+  return PERMISSIONS.map((m) => {
+    const acts = actionsIn(perms, m);
+    if (acts.length === 0) return null;
+    if (acts.length === PERMISSION_ACTIONS.length) return PERMISSION_LABELS[m];
+    return `${PERMISSION_LABELS[m]} (${acts.map((a) => ACTION_LABELS[a]).join(", ")})`;
+  })
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function UsersPageContent() {
@@ -117,6 +175,26 @@ function UsersPageContent() {
   }
 
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // An admin sets a new password for a user who forgot theirs; they're
+  // signed out everywhere and log in with the new one.
+  async function handleResetPassword(user: UserRow) {
+    const password = window.prompt(`New password for ${user.name} (${user.email}) — at least 8 characters:`);
+    if (password == null) return;
+    setDeleteError(null);
+    setNotice(null);
+    if (password.length < 8) {
+      setDeleteError("The password must be at least 8 characters");
+      return;
+    }
+    try {
+      await apiFetch(`/users/${user.id}/password`, { method: "PATCH", body: JSON.stringify({ password }) });
+      setNotice(`Password reset for ${user.name}. Give them the new password — they've been signed out and must log in with it.`);
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Could not reset the password");
+    }
+  }
 
   async function handleDelete(user: UserRow) {
     if (
@@ -166,6 +244,7 @@ function UsersPageContent() {
       <PageHeader title="Users" description="Admin and Store User accounts that can sign in." />
 
       {deleteError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p>}
+      {notice && <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">{notice}</p>}
 
       {loading ? (
         <TableSkeleton />
@@ -192,13 +271,13 @@ function UsersPageContent() {
                 <Td>
                   {u.role === "ADMIN" ? (
                     <span className="text-xs text-gray-400">All (Admin)</span>
-                  ) : u.permissions.length === PERMISSIONS.length ? (
+                  ) : PERMISSIONS.every((m) => u.permissions.includes(m)) ? (
                     <span className="text-xs text-gray-600">All modules</span>
                   ) : u.permissions.length === 0 ? (
                     <span className="text-xs text-gray-400">None yet</span>
                   ) : (
                     <span className="text-xs text-gray-600">
-                      {u.permissions.map((p) => PERMISSION_LABELS[p as Permission] ?? p).join(", ")}
+                      {describeGrants(u.permissions)}
                     </span>
                   )}
                 </Td>
@@ -218,6 +297,13 @@ function UsersPageContent() {
                     <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
                       {u.isActive ? "Disable" : "Enable"}
                     </Button>
+                    <button
+                      onClick={() => handleResetPassword(u)}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      title="Set a new password"
+                    >
+                      <KeyRound className="h-3 w-3" /> Reset password
+                    </button>
                     <button
                       onClick={() => handleDelete(u)}
                       className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"

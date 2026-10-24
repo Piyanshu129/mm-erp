@@ -12,5 +12,6 @@ export const advancesRouter = Router();
 advancesRouter.use(authenticate, requirePermission("ATTENDANCE", "SALARY"));
 
 advancesRouter.get("/", asyncHandler(advancesController.list));
+advancesRouter.get("/employee/:employeeId", asyncHandler(advancesController.history));
 advancesRouter.post("/", validateBody(advancesController.recordAdvanceSchema), asyncHandler(advancesController.create));
 advancesRouter.delete("/:id", asyncHandler(advancesController.remove));

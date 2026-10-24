@@ -27,5 +27,10 @@ usersRouter.patch(
   asyncHandler(usersController.updatePermissions)
 );
 usersRouter.delete("/:id", asyncHandler(usersController.remove));
+usersRouter.patch(
+  "/:id/password",
+  validateBody(usersController.resetPasswordSchema),
+  asyncHandler(usersController.resetPassword)
+);
 usersRouter.get("/roles", asyncHandler(usersController.roles));
 usersRouter.get("/permissions", asyncHandler(usersController.permissions));

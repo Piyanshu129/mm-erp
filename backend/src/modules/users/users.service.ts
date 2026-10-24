@@ -150,3 +150,27 @@ export async function deleteUser(userId: number, actingUserId: number) {
 export async function listRoles() {
   return prisma.role.findMany({ orderBy: { name: "asc" } });
 }
+
+// Sets a new password for a login and signs them out everywhere (their
+// existing sessions end). Used by an admin resetting someone's forgotten
+// password, by a user changing their own, and by scripts/reset-password.ts.
+export async function setPassword(userId: number, password: string) {
+  if (password.length < 8) throw new ConflictError("Password must be at least 8 characters");
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.deletedAt) throw new NotFoundError("User not found");
+  const passwordHash = await bcrypt.hash(password, 12);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
+}
+
+// A user changing their own password must know the current one.
+export async function changeOwnPassword(userId: number, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError("User not found");
+  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+    throw new ConflictError("The current password is wrong");
+  }
+  await setPassword(userId, newPassword);
+}

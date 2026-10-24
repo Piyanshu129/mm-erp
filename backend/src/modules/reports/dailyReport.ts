@@ -6,8 +6,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-// Everything that happened on one day, in full detail:
-//   * sales — every draft invoice dated that day, with its line items,
+// Everything that happened in a date range (one day by default), in full
+// detail:
+//   * estimates — every estimate dated in the range, with its lines, tax,
+//     total and whether the customer approved it;
+//   * sales — every draft invoice dated in the range, with its line items,
 //     labour, discount, tax, total, amount received, outstanding and the
 //     payments against it;
 //   * collections — every customer payment received that day (whichever
@@ -20,14 +23,26 @@ function round2(n: number): number {
 // separately and left out of the totals until it's invoiced again. Cancelled
 // job cards can't have invoices, and there are no returns in this system.
 //
-// `date` is YYYY-MM-DD on the workshop's own calendar.
-export async function getDailyReport(date: string) {
-  const dayStart = new Date(`${date}T00:00:00`);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+// `from` and `to` are YYYY-MM-DD on the workshop's own calendar, both
+// days included.
+export async function getDailyReport(from: string, to: string = from) {
+  if (to < from) [from, to] = [to, from];
+  const dayStart = new Date(`${from}T00:00:00`);
+  const toStart = new Date(`${to}T00:00:00`);
+  const dayEnd = new Date(toStart.getFullYear(), toStart.getMonth(), toStart.getDate() + 1);
   // Purchase dates are calendar dates stored at midnight UTC.
-  const purchaseDay = new Date(`${date}T00:00:00Z`);
+  const purchaseDay = new Date(`${from}T00:00:00Z`);
+  const purchaseEnd = new Date(new Date(`${to}T00:00:00Z`).getTime() + 24 * 60 * 60 * 1000);
 
-  const [invoices, collections, purchases] = await Promise.all([
+  const [estimates, invoices, collections, purchases] = await Promise.all([
+    prisma.estimate.findMany({
+      where: { estimateDate: { gte: dayStart, lt: dayEnd } },
+      include: {
+        jobCard: { include: { vehicle: { include: { customer: true } } } },
+        lines: { include: { item: { select: { itemCode: true } } }, orderBy: { id: "asc" } },
+      },
+      orderBy: { id: "asc" },
+    }),
     prisma.invoice.findMany({
       where: { invoiceDate: { gte: dayStart, lt: dayEnd } },
       include: {
@@ -58,11 +73,38 @@ export async function getDailyReport(date: string) {
     prisma.purchase.findMany({
       // The whole UTC day, so a purchase stored with a time (older entries
       // saved without a date) is still found.
-      where: { purchaseDate: { gte: purchaseDay, lt: new Date(purchaseDay.getTime() + 24 * 60 * 60 * 1000) } },
+      where: { purchaseDate: { gte: purchaseDay, lt: purchaseEnd } },
       include: { supplier: true, item: true },
       orderBy: { id: "asc" },
     }),
   ]);
+
+  const estimateRows = estimates.map((e) => {
+    const subtotal = round2(e.lines.reduce((t, l) => t + Number(l.amount), 0));
+    const taxAmount = round2((subtotal * Number(e.taxRate ?? 0)) / 100);
+    return {
+      id: e.id,
+      estimateNumber: e.estimateNumber,
+      estimateDate: e.estimateDate,
+      approved: e.status === "APPROVED",
+      jobCardId: e.jobCardId,
+      jobCardNumber: e.jobCard.jobCardNumber,
+      customerName: e.jobCard.vehicle.customer.name,
+      customerMobile: e.jobCard.vehicle.customer.mobile,
+      registrationNumber: e.jobCard.vehicle.registrationNumber,
+      lines: e.lines.map((l) => ({
+        kind: l.lineType === "LABOUR" ? "Labour" : l.item ? "Part" : "Non-inventory",
+        description: l.item ? `${l.item.itemCode} — ${l.description}` : l.description,
+        quantity: l.quantity,
+        rate: Number(l.rate),
+        amount: Number(l.amount),
+      })),
+      subtotal,
+      taxRate: e.taxRate != null ? Number(e.taxRate) : null,
+      taxAmount,
+      total: round2(subtotal + taxAmount),
+    };
+  });
 
   const sales = invoices.map((inv) => {
     const jc = inv.jobCard;
@@ -150,8 +192,13 @@ export async function getDailyReport(date: string) {
   }
 
   return {
-    date,
+    date: from,
+    from,
+    to,
     summary: {
+      estimatesCount: estimateRows.length,
+      estimatesApproved: estimateRows.filter((e) => e.approved).length,
+      estimatesTotal: sum(estimateRows, (e) => e.total),
       salesCount: finalised.length,
       salesTotal: sum(finalised, (s) => s.total),
       salesReceived: sum(finalised, (s) => s.received),
@@ -164,6 +211,7 @@ export async function getDailyReport(date: string) {
       inventoryPurchaseTotal: sum(purchaseRows.filter((p) => p.category === "Inventory"), (p) => p.amount),
       expenseTotal: sum(purchaseRows.filter((p) => p.category === "Expense"), (p) => p.amount),
     },
+    estimates: estimateRows,
     sales,
     collections: collections.map((c) => ({
       id: c.id,

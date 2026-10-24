@@ -155,10 +155,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-sm font-medium text-gray-600">
             {user?.name?.[0]?.toUpperCase() ?? "?"}
           </div>
-          <div className="min-w-0 flex-1">
+          <Link href="/dashboard/account" className="min-w-0 flex-1 rounded hover:bg-gray-50" title="My account — change password">
             <p className="truncate text-sm font-medium text-gray-900">{user?.name}</p>
-            <p className="truncate text-xs text-gray-500">{user?.role}</p>
-          </div>
+            <p className="truncate text-xs text-gray-500">{user?.role} · My account</p>
+          </Link>
           <button
             onClick={handleLogout}
             title="Sign out"

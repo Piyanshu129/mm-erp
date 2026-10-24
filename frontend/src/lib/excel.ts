@@ -8,7 +8,8 @@ export interface ExcelSheet {
   rows: Record<string, unknown>[];
 }
 
-export async function downloadExcel(fileName: string, sheets: ExcelSheet[]): Promise<void> {
+// The workbook as a file (for downloading or sharing).
+export async function excelFile(fileName: string, sheets: ExcelSheet[]): Promise<File> {
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Motors Mitra ERP";
@@ -27,11 +28,17 @@ export async function downloadExcel(fileName: string, sheets: ExcelSheet[]): Pro
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
+  return new File([buffer], fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`, {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+export async function downloadExcel(fileName: string, sheets: ExcelSheet[]): Promise<void> {
+  const file = await excelFile(fileName, sheets);
+  const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   a.remove();

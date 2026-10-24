@@ -20,6 +20,10 @@ export async function list(req: Request, res: Response) {
   res.json({ advances });
 }
 
+export async function history(req: Request, res: Response) {
+  res.json(await advancesService.advanceHistory(Number(req.params.employeeId)));
+}
+
 export async function create(req: Request, res: Response) {
   const input = req.body as z.infer<typeof recordAdvanceSchema>;
   const { advance, warning } = await advancesService.recordAdvance(input, req.user!.id);

@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showForgot, setShowForgot] = useState(false);
 
   useEffect(() => {
     if (!loading && user) {
@@ -100,6 +101,22 @@ export default function LoginPage() {
         <Button type="submit" disabled={submitting} className="w-full py-2.5">
           {submitting ? "Signing in..." : "Sign in"}
         </Button>
+
+        <div className="mt-4 text-center">
+          <button type="button" onClick={() => setShowForgot((v) => !v)} className="text-sm text-blue-600 hover:underline">
+            Forgot password?
+          </button>
+          {showForgot && (
+            <div className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-left text-sm text-blue-900">
+              <p>
+                <strong>Staff:</strong> ask an admin to reset it — Users page → <em>Reset password</em>. They&apos;ll give you a new one.
+              </p>
+              <p className="mt-1">
+                <strong>Admin:</strong> on the server PC, open the MM folder and double-click <code>reset-password.bat</code>, then follow the prompts.
+              </p>
+            </div>
+          )}
+        </div>
       </form>
     </div>
   );

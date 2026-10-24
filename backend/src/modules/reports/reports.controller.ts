@@ -11,14 +11,24 @@ function range(req: Request) {
 }
 
 export async function dashboard(req: Request, res: Response) {
-  res.json(await reportsService.getDashboardSummary(req.user!));
+  const period = req.query.period === "month" || req.query.period === "fy" ? req.query.period : "today";
+  res.json(await reportsService.getDashboardSummary(req.user!, period));
 }
 
-// One day in full detail (dailyReport.ts). ?date=YYYY-MM-DD, default today.
+// A date range in full detail (dailyReport.ts). ?from=&to= (YYYY-MM-DD,
+// both included; ?date= still works for one day). Default: today.
 export async function daily(req: Request, res: Response) {
-  const date = typeof req.query.date === "string" ? req.query.date : new Date().toLocaleDateString("en-CA");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new AppError(400, "date must be YYYY-MM-DD");
-  res.json(await getDailyReport(date));
+  const today = new Date().toLocaleDateString("en-CA");
+  const q = (k: string) => (typeof req.query[k] === "string" ? (req.query[k] as string) : undefined);
+  const from = q("from") ?? q("date") ?? today;
+  const to = q("to") ?? from;
+  if (![from, to].every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))) throw new AppError(400, "dates must be YYYY-MM-DD");
+  res.json(await getDailyReport(from, to));
+}
+
+export async function estimates(req: Request, res: Response) {
+  const { from, to } = range(req);
+  res.json(await reportsService.getEstimatesReport(from, to));
 }
 
 export async function sales(req: Request, res: Response) {

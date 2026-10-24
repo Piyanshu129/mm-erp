@@ -57,6 +57,18 @@ export async function listAdvances(month: string, employeeId?: number) {
   });
 }
 
+// Every advance ever given to one employee, newest first — the full
+// history (the month list above is just one month).
+export async function advanceHistory(employeeId: number) {
+  const advances = await prisma.employeeAdvance.findMany({
+    where: { employeeId },
+    include: { createdBy: { select: { id: true, name: true } } },
+    orderBy: [{ date: "desc" }, { id: "desc" }],
+  });
+  const total = Math.round(advances.reduce((t, a) => t + Number(a.amount), 0) * 100) / 100;
+  return { advances, total };
+}
+
 export interface AdvanceInput {
   employeeId: number;
   date: string;

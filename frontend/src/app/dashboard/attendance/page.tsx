@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { CalendarCheck, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { TimeInput12 } from "@/components/TimeInput12";
 import { formatINR, hoursWorked, todayISO } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -196,6 +197,17 @@ function AttendancePageContent() {
     }
   }
 
+  // The employee whose full advance history (all months) is open.
+  const [historyFor, setHistoryFor] = useState<Row["employee"] | null>(null);
+  const [fullHistory, setFullHistory] = useState<{ advances: Advance[]; total: string | number } | null>(null);
+  useEffect(() => {
+    if (!historyFor) return;
+    setFullHistory(null);
+    apiFetch(`/advances/employee/${historyFor.id}`)
+      .then(setFullHistory)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load the advance history"));
+  }, [historyFor]);
+
   const advancesByEmployee = new Map<number, Advance[]>();
   for (const a of advances) {
     advancesByEmployee.set(a.employeeId, [...(advancesByEmployee.get(a.employeeId) ?? []), a]);
@@ -228,6 +240,52 @@ function AttendancePageContent() {
           <button type="button" onClick={() => setWarning(null)} className="text-xs font-medium text-amber-800 hover:underline">
             OK
           </button>
+        </div>
+      )}
+
+      {historyFor && (
+        <div className="rounded-md border border-blue-200 bg-white p-4">
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <p className="text-sm font-semibold text-gray-900">
+              Advance history — {historyFor.name}
+              {fullHistory && <span className="ml-2 font-normal text-gray-600">Total {formatINR(fullHistory.total)}</span>}
+            </p>
+            <button type="button" onClick={() => setHistoryFor(null)} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {!fullHistory ? (
+            <p className="text-sm text-gray-500">Loading...</p>
+          ) : fullHistory.advances.length === 0 ? (
+            <p className="text-sm text-gray-500">No advances given yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500">
+                    <th className="py-1 pr-2">Date given</th>
+                    <th className="py-1 pr-2 text-right">Amount</th>
+                    <th className="py-1 pr-2">Deducted from</th>
+                    <th className="py-1 pr-2">Remark</th>
+                    <th className="py-1">Entered by</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fullHistory.advances.map((a) => (
+                    <tr key={a.id} className="border-t border-gray-100">
+                      <td className="py-1.5 pr-2">{new Date(a.date).toLocaleDateString(undefined, { timeZone: "UTC" })}</td>
+                      <td className="py-1.5 pr-2 text-right font-medium">{formatINR(a.amount)}</td>
+                      <td className="py-1.5 pr-2">
+                        {SHORT_MONTHS[a.salaryMonth - 1]} {a.salaryYear} salary
+                      </td>
+                      <td className="py-1.5 pr-2 text-gray-600">{a.notes ?? "—"}</td>
+                      <td className="py-1.5 text-gray-500">{a.createdBy.name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -275,36 +333,25 @@ function AttendancePageContent() {
                   </Td>
                   <Td>
                     {/* Saved when a time is changed; needs the day's status first. */}
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="time"
-                        aria-label="In time"
-                        disabled={!r.attendance || !canMark || savingId === r.employee.id}
-                        defaultValue={r.attendance?.inTime ?? ""}
-                        key={`in-${date}-${r.attendance?.inTime ?? ""}`}
-                        onBlur={(e) => {
-                          const value = e.target.value || null;
-                          if (r.attendance && value !== (r.attendance.inTime ?? null)) {
-                            mark(r.employee.id, r.attendance.status, { inTime: value });
-                          }
-                        }}
-                        className="w-[6.5rem] rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:bg-gray-50 disabled:text-gray-400"
-                      />
-                      <span className="text-gray-400">–</span>
-                      <input
-                        type="time"
-                        aria-label="Out time"
-                        disabled={!r.attendance || !canMark || savingId === r.employee.id}
-                        defaultValue={r.attendance?.outTime ?? ""}
-                        key={`out-${date}-${r.attendance?.outTime ?? ""}`}
-                        onBlur={(e) => {
-                          const value = e.target.value || null;
-                          if (r.attendance && value !== (r.attendance.outTime ?? null)) {
-                            mark(r.employee.id, r.attendance.status, { outTime: value });
-                          }
-                        }}
-                        className="w-[6.5rem] rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:bg-gray-50 disabled:text-gray-400"
-                      />
+                    <div className="flex flex-col gap-1">
+                      <span className="flex items-center gap-1 text-xs text-gray-500">
+                        <span className="w-6">In</span>
+                        <TimeInput12
+                          label="In time"
+                          disabled={!r.attendance || !canMark || savingId === r.employee.id}
+                          value={r.attendance?.inTime ?? null}
+                          onChange={(value) => r.attendance && mark(r.employee.id, r.attendance.status, { inTime: value })}
+                        />
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-gray-500">
+                        <span className="w-6">Out</span>
+                        <TimeInput12
+                          label="Out time"
+                          disabled={!r.attendance || !canMark || savingId === r.employee.id}
+                          value={r.attendance?.outTime ?? null}
+                          onChange={(value) => r.attendance && mark(r.employee.id, r.attendance.status, { outTime: value })}
+                        />
+                      </span>
                     </div>
                     {hoursWorked(r.attendance?.inTime, r.attendance?.outTime) && (
                       <span className="mt-0.5 block text-xs text-gray-500">
@@ -320,6 +367,16 @@ function AttendancePageContent() {
                     />
                   </Td>
                   <Td>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryFor(r.employee);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className="mb-1 block text-xs font-medium text-blue-600 hover:underline"
+                    >
+                      Full history
+                    </button>
                     {history.length === 0 ? (
                       <span className="text-gray-400">-</span>
                     ) : (
