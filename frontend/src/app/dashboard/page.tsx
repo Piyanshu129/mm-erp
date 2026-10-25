@@ -117,7 +117,20 @@ export default function DashboardPage() {
     setSummary(null);
     setLoadError(null);
     apiFetch(`/reports/dashboard?period=${period}`)
-      .then(setSummary)
+      .then((body) => {
+        // A server that hasn't been updated yet (older backend) answers in
+        // its old shape — fill in what it doesn't send rather than crash.
+        setSummary({
+          ...body,
+          vehicles: body.vehicles ?? body.todaysVehicles ?? 0,
+          estimatesCount: body.estimatesCount ?? 0,
+          estimatesApproved: body.estimatesApproved ?? 0,
+          cancelled: body.cancelled ?? body.cancelledThisMonth ?? 0,
+          periodStart: body.periodStart ?? "",
+          upcomingServices: body.upcomingServices ?? null,
+        });
+        if (!body.periodStart) setLoadError("The server is running an older version — update it (setup.bat) to see everything here.");
+      })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Could not load the dashboard"));
     try {
       localStorage.setItem("mm-dashboard-period", period);
@@ -127,7 +140,7 @@ export default function DashboardPage() {
   }, [period]);
 
   const word = period === "today" ? "Today" : period === "month" ? "This Month" : "This FY";
-  const fyLabel = summary
+  const fyLabel = summary?.periodStart
     ? `FY ${summary.periodStart.slice(0, 4)}–${String(Number(summary.periodStart.slice(0, 4)) + 1).slice(2)}`
     : "";
   const graphLabel =
@@ -157,7 +170,7 @@ export default function DashboardPage() {
 
       {loadError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{loadError}</p>}
 
-      {loadError ? null : summary ? (
+      {loadError && !summary ? null : summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label={`Vehicles — ${word}`} value={summary.vehicles} href="/dashboard/jobcards" icon={Car} />
           <StatCard label="Open Job Cards" value={summary.openJobCards} href="/dashboard/jobcards?status=OPEN" icon={ClipboardList} />
