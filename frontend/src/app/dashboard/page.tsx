@@ -16,7 +16,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -98,6 +98,7 @@ function StatCard({
 export default function DashboardPage() {
   const { user } = useAuth();
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Remembered on this device between visits.
   const [period, setPeriod] = useState<Period | null>(null);
 
@@ -114,7 +115,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!period) return;
     setSummary(null);
-    apiFetch(`/reports/dashboard?period=${period}`).then(setSummary);
+    setLoadError(null);
+    apiFetch(`/reports/dashboard?period=${period}`)
+      .then(setSummary)
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Could not load the dashboard"));
     try {
       localStorage.setItem("mm-dashboard-period", period);
     } catch {
@@ -151,7 +155,9 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {summary ? (
+      {loadError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{loadError}</p>}
+
+      {loadError ? null : summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label={`Vehicles — ${word}`} value={summary.vehicles} href="/dashboard/jobcards" icon={Car} />
           <StatCard label="Open Job Cards" value={summary.openJobCards} href="/dashboard/jobcards?status=OPEN" icon={ClipboardList} />

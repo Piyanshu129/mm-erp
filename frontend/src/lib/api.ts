@@ -46,6 +46,9 @@ export class ApiError extends Error {
   }
 }
 
+export const SERVER_DOWN =
+  "The server isn't reachable right now — the servers may be stopped, or the internet is down. Start the servers (start-servers.bat) and try again.";
+
 async function parseJson(res: Response) {
   const text = await res.text();
   return text ? JSON.parse(text) : null;
@@ -68,11 +71,17 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
   // forwards the request instead of returning its browser-warning page.
   headers.set("ngrok-skip-browser-warning", "true");
 
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    // No response at all: no internet, or the tunnel is down.
+    throw new ApiError(0, SERVER_DOWN);
+  }
 
   if (res.status === 401 && !isRetry && path !== "/auth/refresh") {
     const refreshed = await tryRefresh();
@@ -81,7 +90,14 @@ export async function apiFetch(path: string, options: RequestInit = {}, isRetry 
     }
   }
 
-  const body = await parseJson(res);
+  let body: any;
+  try {
+    body = await parseJson(res);
+  } catch {
+    // Not our server's JSON — e.g. the tunnel's "endpoint is offline" page
+    // when the servers are stopped.
+    throw new ApiError(res.status || 503, SERVER_DOWN);
+  }
   if (!res.ok) {
     throw new ApiError(res.status, formatErrorMessage(body));
   }
