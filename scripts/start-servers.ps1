@@ -42,24 +42,25 @@ if (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyC
 # Double-clicking again while it's running must not start second copies (a
 # second backend can't get the port; a second tunnel can't get the address).
 
-# 2. Backend, in its own window
+# 2. Backend, in its own window — started minimized (it's in the taskbar;
+#    click it there to see its output).
 if (Get-NetTCPConnection -LocalPort $AppPort -State Listen -ErrorAction SilentlyContinue) {
   Write-Host "Backend already running."
 } else {
-  Start-Process powershell -ArgumentList "-NoExit", "-Command",
+  Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command",
     "`$host.UI.RawUI.WindowTitle = 'MM ERP backend - keep open'; `$env:Path = '$NodeDir;' + `$env:Path; cd '$Backend'; `$env:NODE_ENV = 'production'; npm start"
 }
 
-# 3. Public tunnel, in its own window
+# 3. Public tunnel, in its own window — also minimized
 if (Get-Process ngrok -ErrorAction SilentlyContinue) {
   Write-Host "Tunnel already running."
 } else {
-  Start-Process powershell -ArgumentList "-NoExit", "-Command",
+  Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command",
     "`$host.UI.RawUI.WindowTitle = 'MM ERP tunnel - keep open'; & '$Ngrok' http --config '$NgrokConfig' --url=$PublicUrl $AppPort"
 }
 
 Write-Host ""
-Write-Host "MM ERP is running (backend and tunnel windows)." -ForegroundColor Green
+Write-Host "MM ERP is running. The backend and tunnel windows are minimized in the taskbar." -ForegroundColor Green
 Write-Host "If the tunnel window says the endpoint 'is already online', another PC is still using the address - close its tunnel first."
 Write-Host "Public backend address: $PublicUrl"
-Write-Host "Keep both windows open. Closing them takes the site offline."
+Write-Host "Leave them running (minimized is fine) - closing them takes the site offline. Use stop-servers.bat to stop."

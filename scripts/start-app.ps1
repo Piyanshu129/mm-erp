@@ -13,8 +13,8 @@ Pop-Location
 
 $NgrokExe = "C:\Users\pisaini\AppData\Local\Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe"
 
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; `$env:NODE_ENV='production'; npm start"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$NgrokExe' http --url=https://les-unhesitative-blandishingly.ngrok-free.dev 4000"
+Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; `$env:NODE_ENV='production'; npm start"
+Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command", "& '$NgrokExe' http --url=https://les-unhesitative-blandishingly.ngrok-free.dev 4000"
 
 Write-Host ""
 Write-Host "Started in separate windows: backend (production mode) and the ngrok tunnel."
