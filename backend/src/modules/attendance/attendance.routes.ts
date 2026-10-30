@@ -11,6 +11,7 @@ attendanceRouter.use(authenticate, requirePermission("ATTENDANCE"));
 
 attendanceRouter.get("/", asyncHandler(attendanceController.forDate));
 attendanceRouter.get("/summary", asyncHandler(attendanceController.summary));
+attendanceRouter.get("/month-summary", asyncHandler(attendanceController.monthSummary));
 attendanceRouter.post(
   "/",
   validateBody(attendanceController.markAttendanceSchema),

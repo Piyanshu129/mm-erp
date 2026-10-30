@@ -146,6 +146,7 @@ export async function getDailyReport(from: string, to: string = from) {
       payments: inv.payments.map((p) => ({
         id: p.id,
         amount: Number(p.amount),
+        discount: Number(p.discount),
         paymentDate: p.paymentDate,
         paymentMode: p.paymentMode,
         reference: p.reference,
@@ -205,6 +206,7 @@ export async function getDailyReport(from: string, to: string = from) {
       salesOutstanding: sum(finalised, (s) => s.outstanding),
       beingRevisedCount: sales.length - finalised.length,
       collectionsTotal: sum(collections, (c) => Number(c.amount)),
+      collectionsDiscount: sum(collections, (c) => Number(c.discount)),
       collectionsByMode: [...byMode.entries()].map(([mode, amount]) => ({ mode, amount })),
       purchaseCount: purchaseRows.length,
       purchaseTotal: sum(purchaseRows, (p) => p.amount),
@@ -216,6 +218,7 @@ export async function getDailyReport(from: string, to: string = from) {
     collections: collections.map((c) => ({
       id: c.id,
       amount: Number(c.amount),
+      discount: Number(c.discount),
       paymentDate: c.paymentDate,
       paymentMode: c.paymentMode,
       reference: c.reference,

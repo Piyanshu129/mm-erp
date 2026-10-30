@@ -161,6 +161,8 @@ export function paymentStatusFor(total: number, paid: number): "PENDING" | "PART
 
 export interface InvoicePaymentInput {
   amount: number;
+  // Settlement discount given with this payment — written off the balance.
+  discount?: number;
   paymentDate?: string;
   paymentMode?: string;
   reference?: string;
@@ -168,28 +170,35 @@ export interface InvoicePaymentInput {
   notes?: string;
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+function checkAmounts(amount: number, discount: number) {
+  if (amount < 0 || discount < 0) throw new ConflictError("Amounts can't be negative");
+  if (amount + discount <= 0) throw new ConflictError("Enter the amount received, a discount, or both");
+}
+
 // Records one payment: a history row, plus the invoice's running total
 // moved on by the same amount, in one transaction. `amount` is what's being
-// paid now, never a running total. The invoice row is locked for the length
-// of the check-and-write, so two payments entered at the same moment can't
-// both pass the overpay check and together overpay.
+// paid now, never a running total. A discount given with it comes off the
+// invoice (its discount goes up and its total down by the same amount), so
+// every "amount due" stays simply total − paid. The invoice row is locked
+// for the length of the check-and-write, so two payments entered at the
+// same moment can't both pass the overpay check and together overpay.
 export async function recordInvoicePayment(invoiceId: number, input: InvoicePaymentInput, createdById: number) {
-  if (input.amount <= 0) {
-    throw new ConflictError("Payment amount must be greater than zero");
-  }
+  const discount = input.discount ?? 0;
+  checkAmounts(input.amount, discount);
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
 
-    const alreadyPaid = Number(invoice.paymentAmount);
-    const due = Number(invoice.totalAmount) - alreadyPaid;
-    if (input.amount > due + 0.005) {
+    const due = Number(invoice.totalAmount) - Number(invoice.paymentAmount);
+    if (input.amount + discount > due + 0.005) {
       throw new ConflictError(
         due <= 0
           ? `${invoice.invoiceNumber} is already fully paid`
-          : `That would overpay ${invoice.invoiceNumber} — only ₹${due.toFixed(2)} is still due`
+          : `That would overpay ${invoice.invoiceNumber} — only ₹${due.toFixed(2)} is still due (payment + discount)`
       );
     }
 
@@ -197,6 +206,7 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
       data: {
         invoiceId,
         amount: input.amount,
+        discount,
         paymentDate: input.paymentDate ? new Date(input.paymentDate) : new Date(),
         paymentMode: input.paymentMode,
         reference: input.reference,
@@ -207,22 +217,28 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
     });
     return tx.invoice.update({
       where: { id: invoiceId },
-      data: { paymentAmount: { increment: input.amount } },
+      data: {
+        paymentAmount: r2(Number(invoice.paymentAmount) + input.amount),
+        discount: r2(Number(invoice.discount) + discount),
+        totalAmount: r2(Number(invoice.totalAmount) - discount),
+      },
       include: detailInclude,
     });
   });
 }
 
-// Admin correction of a recorded payment (wrong amount, date, mode...). The
-// invoice's running total moves by the difference, in the same transaction
-// with the invoice row locked, and can't end up above the invoice total.
+// Admin correction of a recorded payment (wrong amount, discount, date,
+// mode...). The invoice's paid total, discount and total move by the
+// differences, in the same transaction with the invoice row locked, and it
+// can't end up overpaid.
 export async function updateInvoicePayment(
   invoiceId: number,
   paymentId: number,
   input: InvoicePaymentInput,
   changedById: number
 ) {
-  if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
+  const discount = input.discount ?? 0;
+  checkAmounts(input.amount, discount);
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
@@ -231,16 +247,21 @@ export async function updateInvoicePayment(
     const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
 
+    const discountChange = discount - Number(payment.discount);
+    const newTotal = Number(invoice.totalAmount) - discountChange;
     const newPaid = Number(invoice.paymentAmount) - Number(payment.amount) + input.amount;
-    if (newPaid > Number(invoice.totalAmount) + 0.005) {
-      const max = Number(invoice.totalAmount) - (Number(invoice.paymentAmount) - Number(payment.amount));
-      throw new ConflictError(`That would overpay ${invoice.invoiceNumber} — this payment can be at most ₹${max.toFixed(2)}`);
+    if (newPaid > newTotal + 0.005) {
+      const max = Number(invoice.totalAmount) + Number(payment.discount) - (Number(invoice.paymentAmount) - Number(payment.amount));
+      throw new ConflictError(
+        `That would overpay ${invoice.invoiceNumber} — this payment plus its discount can be at most ₹${max.toFixed(2)}`
+      );
     }
 
     const updated = await tx.invoicePayment.update({
       where: { id: paymentId },
       data: {
         amount: input.amount,
+        discount,
         paymentDate: input.paymentDate ? new Date(input.paymentDate) : payment.paymentDate,
         paymentMode: input.paymentMode ?? null,
         reference: input.reference ?? null,
@@ -259,17 +280,22 @@ export async function updateInvoicePayment(
     });
     return tx.invoice.update({
       where: { id: invoiceId },
-      data: { paymentAmount: Math.round(newPaid * 100) / 100 },
+      data: {
+        paymentAmount: r2(newPaid),
+        discount: r2(Number(invoice.discount) + discountChange),
+        totalAmount: r2(newTotal),
+      },
       include: detailInclude,
     });
   });
 }
 
-// Admin removal of a payment recorded by mistake.
+// Admin removal of a payment recorded by mistake — its discount is undone too.
 export async function deleteInvoicePayment(invoiceId: number, paymentId: number, changedById: number) {
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
 
@@ -284,7 +310,11 @@ export async function deleteInvoicePayment(invoiceId: number, paymentId: number,
     });
     return tx.invoice.update({
       where: { id: invoiceId },
-      data: { paymentAmount: { decrement: payment.amount } },
+      data: {
+        paymentAmount: r2(Number(invoice.paymentAmount) - Number(payment.amount)),
+        discount: r2(Number(invoice.discount) - Number(payment.discount)),
+        totalAmount: r2(Number(invoice.totalAmount) + Number(payment.discount)),
+      },
       include: detailInclude,
     });
   });

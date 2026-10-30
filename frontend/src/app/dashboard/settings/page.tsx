@@ -7,6 +7,7 @@ import { apiFetch, apiDownloadFile, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
+import { BusinessDetailsCard } from "@/components/BusinessDetailsCard";
 
 function SettingsContent() {
   const [downloading, setDownloading] = useState(false);
@@ -50,7 +51,9 @@ function SettingsContent() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Backups and data export." />
+      <PageHeader title="Settings" description="Business details, backups and data export." />
+
+      <BusinessDetailsCard />
 
       <Card className="max-w-xl">
         <CardBody>

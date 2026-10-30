@@ -24,7 +24,9 @@ export const setActiveSchema = z.object({ isActive: z.boolean() });
 // Multipart (it can carry a photo of the transaction), so fields arrive as
 // strings — hence z.coerce for the amount.
 export const recordPaymentSchema = z.object({
-  amount: z.coerce.number().positive(),
+  // Either may be 0 (all discount, or no discount) but not both.
+  amount: z.coerce.number().min(0),
+  discount: z.coerce.number().min(0).optional(),
   paymentDate: optionalString,
   paymentMode: optionalString,
   reference: optionalString,

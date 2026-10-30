@@ -13,7 +13,10 @@ export const ESTIMATE_LINE_TYPES = ["PART", "LABOUR"] as const;
 
 const detailInclude = {
   jobCard: { include: { vehicle: { include: { customer: true } } } },
-  lines: { include: { item: { select: { id: true, itemCode: true, name: true, uom: true } } }, orderBy: { id: "asc" as const } },
+  lines: {
+    include: { item: { select: { id: true, itemCode: true, name: true, uom: true, hsnCode: true, gstRate: true } } },
+    orderBy: { id: "asc" as const },
+  },
   createdBy: { select: { id: true, name: true } },
 } satisfies Prisma.EstimateInclude;
 
@@ -56,8 +59,15 @@ async function assertDraft(tx: Prisma.TransactionClient, estimateId: number) {
   if (estimate.status === "APPROVED") {
     throw new ConflictError(`${estimate.estimateNumber} is approved by the customer — it can't be changed`);
   }
+  if (estimate.gstInvoiceNumber) {
+    throw new ConflictError(`GST invoice ${estimate.gstInvoiceNumber} has been made from this estimate — it can't be changed`);
+  }
   return estimate;
 }
+
+// Labour is a service: GST 18% unless changed. Parts take their item's
+// HSN and GST % when the item has them.
+const LABOUR_GST_RATE = 18;
 
 export async function getEstimate(id: number) {
   return loadEstimate(prisma, id);
@@ -89,6 +99,8 @@ export async function createEstimate(jobCardId: number, createdById: number) {
               quantity: p.quantity,
               rate: p.rate,
               amount: p.amount,
+              hsnCode: p.item?.hsnCode ?? null,
+              gstRate: p.item?.gstRate ?? null,
             })),
             ...jobCard.labour.map((l) => ({
               lineType: "LABOUR",
@@ -96,6 +108,7 @@ export async function createEstimate(jobCardId: number, createdById: number) {
               quantity: l.quantity,
               rate: l.rate,
               amount: l.amount,
+              gstRate: LABOUR_GST_RATE,
             })),
           ],
         },
@@ -145,6 +158,8 @@ export async function addLine(estimateId: number, input: EstimateLineInput) {
     let description = input.description?.trim();
     let rate = input.rate;
     let itemId: number | undefined;
+    let hsnCode: string | null = null;
+    let gstRate: number | null = input.lineType === "LABOUR" ? LABOUR_GST_RATE : null;
 
     if (input.lineType === "PART" && input.itemId) {
       const item = await tx.item.findUnique({ where: { id: input.itemId } });
@@ -152,6 +167,8 @@ export async function addLine(estimateId: number, input: EstimateLineInput) {
       itemId = item.id;
       description = description || item.name;
       rate = rate ?? Number(item.sellingPrice);
+      hsnCode = item.hsnCode;
+      gstRate = item.gstRate != null ? Number(item.gstRate) : null;
     }
     if (!description) throw new ConflictError("Enter a description for this line");
     if (rate == null || rate < 0) throw new ConflictError("Enter a rate for this line");
@@ -165,6 +182,8 @@ export async function addLine(estimateId: number, input: EstimateLineInput) {
         quantity: input.quantity,
         rate,
         amount: round2(rate * input.quantity),
+        hsnCode,
+        gstRate,
       },
     });
     await syncJobCard(tx, estimateId);
@@ -200,6 +219,85 @@ export async function approveEstimate(estimateId: number, photoUrl: string) {
       },
     });
     await syncJobCard(tx, estimateId);
+  });
+  return loadEstimate(prisma, estimateId);
+}
+
+// ---- GST tax invoice ---------------------------------------------------------
+
+export const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28] as const;
+
+export interface GstDetailsInput {
+  supplyType?: "INTRA" | "INTER";
+  pricesIncludeGst?: boolean;
+  customerGstin?: string | null;
+  lines?: { id: number; hsnCode?: string | null; gstRate?: number | null }[];
+}
+
+async function assertNoGstInvoice(tx: Prisma.TransactionClient, estimateId: number) {
+  const estimate = await tx.estimate.findUnique({ where: { id: estimateId } });
+  if (!estimate) throw new NotFoundError("Estimate not found");
+  if (estimate.gstInvoiceNumber) {
+    throw new ConflictError(`GST invoice ${estimate.gstInvoiceNumber} is already made — its details can't be changed`);
+  }
+  return estimate;
+}
+
+// HSN/SAC and GST % per line, intra/inter-state, whether rates include GST,
+// and the customer's GSTIN. Editable (even on an approved estimate — these
+// don't change what the customer agreed to pay) until the GST invoice is made.
+export async function updateGstDetails(estimateId: number, input: GstDetailsInput) {
+  await prisma.$transaction(async (tx) => {
+    await assertNoGstInvoice(tx, estimateId);
+    await tx.estimate.update({
+      where: { id: estimateId },
+      data: {
+        ...(input.supplyType ? { supplyType: input.supplyType } : {}),
+        ...(input.pricesIncludeGst !== undefined ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
+        ...(input.customerGstin !== undefined ? { customerGstin: input.customerGstin || null } : {}),
+      },
+    });
+    for (const line of input.lines ?? []) {
+      const existing = await tx.estimateLine.findUnique({ where: { id: line.id } });
+      if (!existing || existing.estimateId !== estimateId) throw new NotFoundError("Line not found on this estimate");
+      await tx.estimateLine.update({
+        where: { id: line.id },
+        data: {
+          ...(line.hsnCode !== undefined ? { hsnCode: line.hsnCode?.trim() || null } : {}),
+          ...(line.gstRate !== undefined ? { gstRate: line.gstRate } : {}),
+        },
+      });
+    }
+  });
+  return loadEstimate(prisma, estimateId);
+}
+
+// Indian financial year label for a date: April–March, e.g. "2026-27".
+function financialYear(d: Date): string {
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${y}-${String(y + 1).slice(2)}`;
+}
+
+// Makes the GST tax invoice: numbered GST/<FY>/0001, 0002, ... in order
+// within each financial year (an advisory lock makes two at once take
+// different numbers), dated today, and locked from then on.
+export async function generateGstInvoice(estimateId: number) {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(7311)`;
+    const estimate = await assertNoGstInvoice(tx, estimateId);
+    const lines = await tx.estimateLine.findMany({ where: { estimateId } });
+    if (lines.length === 0) throw new ConflictError("The estimate has no lines to invoice");
+    const missing = lines.filter((l) => l.gstRate == null).map((l) => l.description);
+    if (missing.length) {
+      throw new ConflictError(`Set the GST % for: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`);
+    }
+    const now = new Date();
+    const prefix = `GST/${financialYear(now)}/`;
+    const count = await tx.estimate.count({ where: { gstInvoiceNumber: { startsWith: prefix } } });
+    await tx.estimate.update({
+      where: { id: estimate.id },
+      data: { gstInvoiceNumber: `${prefix}${String(count + 1).padStart(4, "0")}`, gstInvoiceDate: now },
+    });
   });
   return loadEstimate(prisma, estimateId);
 }

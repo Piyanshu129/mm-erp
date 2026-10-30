@@ -22,6 +22,8 @@ const lineSchema = z.object({
       // Optional details that identify the exact part for reordering.
       brand: optionalString,
       specification: optionalString,
+      hsnCode: z.string().trim().regex(/^[0-9]{4,8}$/, "HSN is 4–8 digits").optional(),
+      gstRate: z.coerce.number().min(0).max(28).optional(),
       category: z.enum(ITEM_CATEGORIES),
       uom: z.string().trim().min(1),
       minStock: z.coerce.number().int().min(0).optional(),
@@ -85,6 +87,8 @@ const FIELD_LABELS: Record<string, string> = {
   name: "item name",
   brand: "brand name",
   specification: "specification",
+  hsnCode: "HSN",
+  gstRate: "GST %",
   category: "category",
   uom: "unit of measure",
   minStock: "minimum stock",

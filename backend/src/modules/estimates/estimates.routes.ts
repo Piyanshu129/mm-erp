@@ -27,3 +27,11 @@ estimatesRouter.post(
 );
 estimatesRouter.delete("/:id/lines/:lineId", asyncHandler(estimatesController.removeLine));
 estimatesRouter.post("/:id/approval", uploadApprovalPhoto, asyncHandler(estimatesController.approve));
+// GST tax invoice made from the estimate: HSN/SAC + GST % per line, then
+// generate (numbers and locks it).
+estimatesRouter.patch(
+  "/:id/gst",
+  validateBody(estimatesController.gstDetailsSchema),
+  asyncHandler(estimatesController.updateGst)
+);
+estimatesRouter.post("/:id/gst-invoice", asyncHandler(estimatesController.generateGstInvoice));

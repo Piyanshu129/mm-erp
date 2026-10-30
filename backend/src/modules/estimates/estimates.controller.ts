@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import * as estimatesService from "./estimates.service";
-import { ESTIMATE_LINE_TYPES } from "./estimates.service";
+import { ESTIMATE_LINE_TYPES, GST_RATES } from "./estimates.service";
 import { publicUrlFor } from "../../middleware/upload";
 import { AppError } from "../../lib/errors";
 
@@ -59,5 +59,36 @@ export async function approve(req: Request, res: Response) {
   if (!req.file) throw new AppError(400, "Upload a photo of the customer-signed estimate");
   const url = publicUrlFor(ESTIMATE_APPROVAL_FOLDER, req.file.filename);
   const estimate = await estimatesService.approveEstimate(Number(req.params.id), url);
+  res.json({ estimate });
+}
+
+export const gstDetailsSchema = z.object({
+  supplyType: z.enum(["INTRA", "INTER"]).optional(),
+  pricesIncludeGst: z.boolean().optional(),
+  customerGstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === "" || /^[0-9]{2}[A-Z0-9]{13}$/.test(v), "Customer GSTIN must be 15 characters, starting with the 2-digit state code")
+    .nullable()
+    .optional(),
+  lines: z
+    .array(
+      z.object({
+        id: z.coerce.number().int().positive(),
+        hsnCode: z.string().trim().max(10, "HSN/SAC is at most 10 digits").nullable().optional(),
+        gstRate: z.coerce.number().refine((r) => (GST_RATES as readonly number[]).includes(r), "GST % must be 0, 0.25, 3, 5, 12, 18 or 28").nullable().optional(),
+      })
+    )
+    .optional(),
+});
+
+export async function updateGst(req: Request, res: Response) {
+  const estimate = await estimatesService.updateGstDetails(Number(req.params.id), req.body as z.infer<typeof gstDetailsSchema>);
+  res.json({ estimate });
+}
+
+export async function generateGstInvoice(req: Request, res: Response) {
+  const estimate = await estimatesService.generateGstInvoice(Number(req.params.id));
   res.json({ estimate });
 }

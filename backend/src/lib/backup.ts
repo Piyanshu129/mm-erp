@@ -28,6 +28,7 @@ export const BACKUP_TABLES = [
   "employeeAdvance",
   "odometerReading",
   "paymentAudit",
+  "appSetting",
 ] as const;
 
 export type BackupTable = (typeof BACKUP_TABLES)[number];
@@ -237,6 +238,7 @@ function tableNameFor(table: BackupTable): string {
     employeeAdvance: "employee_advances",
     odometerReading: "odometer_readings",
     paymentAudit: "payment_audits",
+    appSetting: "app_settings",
   };
   return map[table];
 }

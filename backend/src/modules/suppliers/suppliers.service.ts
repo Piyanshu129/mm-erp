@@ -16,6 +16,8 @@ export interface SupplierInput {
 export interface SupplierAccount {
   totalPurchased: number;
   totalPaid: number;
+  // Settlement discounts the supplier gave with payments.
+  totalDiscount: number;
   balanceDue: number;
 }
 
@@ -43,17 +45,19 @@ export async function accountsFor(
     db.supplierPayment.groupBy({
       by: ["supplierId"],
       where: { supplierId: { in: supplierIds } },
-      _sum: { amount: true },
+      _sum: { amount: true, discount: true },
     }),
   ]);
 
   const purchasedBy = new Map(purchased.map((r) => [r.supplier_id, Number(r.total)]));
   const paidBy = new Map(paid.map((r) => [r.supplierId, Number(r._sum.amount ?? 0)]));
+  const discountBy = new Map(paid.map((r) => [r.supplierId, Number(r._sum.discount ?? 0)]));
 
   for (const id of supplierIds) {
     const totalPurchased = round2(purchasedBy.get(id) ?? 0);
     const totalPaid = round2(paidBy.get(id) ?? 0);
-    accounts.set(id, { totalPurchased, totalPaid, balanceDue: round2(totalPurchased - totalPaid) });
+    const totalDiscount = round2(discountBy.get(id) ?? 0);
+    accounts.set(id, { totalPurchased, totalPaid, totalDiscount, balanceDue: round2(totalPurchased - totalPaid - totalDiscount) });
   }
   return accounts;
 }
@@ -116,6 +120,8 @@ export async function getSupplierPayments(id: number) {
 
 export interface SupplierPaymentInput {
   amount: number;
+  // Settlement discount the supplier gave — comes off the balance too.
+  discount?: number;
   paymentDate?: string;
   paymentMode?: string;
   reference?: string;
@@ -138,7 +144,9 @@ export async function updateSupplierPayment(
   input: SupplierPaymentInput,
   changedById: number
 ) {
-  if (input.amount <= 0) throw new ConflictError("Payment amount must be greater than zero");
+  const discount = input.discount ?? 0;
+  if (input.amount < 0 || discount < 0) throw new ConflictError("Amounts can't be negative");
+  if (input.amount + discount <= 0) throw new ConflictError("Enter the amount paid, a discount, or both");
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${supplierId} FOR UPDATE`;
@@ -147,15 +155,16 @@ export async function updateSupplierPayment(
     if (!payment || payment.supplierId !== supplierId) throw new NotFoundError("Payment not found for this supplier");
 
     const account = (await accountsFor([supplierId], tx)).get(supplierId)!;
-    const dueWithoutThis = account.balanceDue + Number(payment.amount);
-    if (input.amount > dueWithoutThis + 0.005) {
-      throw new ConflictError(`That would overpay this supplier — this payment can be at most ₹${dueWithoutThis.toFixed(2)}`);
+    const dueWithoutThis = account.balanceDue + Number(payment.amount) + Number(payment.discount);
+    if (input.amount + discount > dueWithoutThis + 0.005) {
+      throw new ConflictError(`That would overpay this supplier — this payment plus its discount can be at most ₹${dueWithoutThis.toFixed(2)}`);
     }
 
     const updated = await tx.supplierPayment.update({
       where: { id: paymentId },
       data: {
         amount: input.amount,
+        discount,
         paymentDate: input.paymentDate ? new Date(input.paymentDate) : payment.paymentDate,
         paymentMode: input.paymentMode ?? null,
         reference: input.reference ?? null,
@@ -195,20 +204,20 @@ export async function deleteSupplierPayment(supplierId: number, paymentId: numbe
 }
 
 export async function recordSupplierPayment(id: number, input: SupplierPaymentInput, createdById: number) {
-  if (input.amount <= 0) {
-    throw new ConflictError("Payment amount must be greater than zero");
-  }
+  const discount = input.discount ?? 0;
+  if (input.amount < 0 || discount < 0) throw new ConflictError("Amounts can't be negative");
+  if (input.amount + discount <= 0) throw new ConflictError("Enter the amount paid, a discount, or both");
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${id} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Supplier not found");
 
     const account = (await accountsFor([id], tx)).get(id)!;
-    if (input.amount > account.balanceDue + 0.005) {
+    if (input.amount + discount > account.balanceDue + 0.005) {
       throw new ConflictError(
         account.balanceDue <= 0
           ? "Nothing is due to this supplier"
-          : `That would overpay this supplier — only ₹${account.balanceDue.toFixed(2)} is due`
+          : `That would overpay this supplier — only ₹${account.balanceDue.toFixed(2)} is due (payment + discount)`
       );
     }
 
@@ -216,6 +225,7 @@ export async function recordSupplierPayment(id: number, input: SupplierPaymentIn
       data: {
         supplierId: id,
         amount: input.amount,
+        discount,
         paymentDate: input.paymentDate ? new Date(input.paymentDate) : new Date(),
         paymentMode: input.paymentMode,
         reference: input.reference,

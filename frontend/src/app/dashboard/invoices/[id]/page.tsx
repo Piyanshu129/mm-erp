@@ -347,7 +347,7 @@ function InvoiceDetailPageContent() {
             <p className="mb-2 text-sm font-semibold text-gray-900">Payment history</p>
             <InvoicePaymentHistory payments={invoice.payments} onChanged={() => load(true)} />
           </div>
-          <PaymentChangeLog url={`/invoices/${invoice.id}/payment-audits`} refreshKey={invoice.paymentAmount + invoice.payments.length} />
+          <PaymentChangeLog url={`/invoices/${invoice.id}/payment-audits`} refreshKey={`${invoice.paymentAmount}:${invoice.totalAmount}:${invoice.payments.length}`} />
         </CardBody>
       </Card>
 

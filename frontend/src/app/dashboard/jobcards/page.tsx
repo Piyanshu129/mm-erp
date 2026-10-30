@@ -48,6 +48,8 @@ interface JobCardDraft {
   complaint: string;
   requiredWork: string;
   expectedDelivery: string;
+  insuranceCompany?: string;
+  claimNumber?: string;
 }
 
 function draftKey(vehicleId: number): string {
@@ -80,6 +82,8 @@ function JobCardsPageContent() {
   const [complaint, setComplaint] = useState("");
   const [requiredWork, setRequiredWork] = useState("");
   const [expectedDelivery, setExpectedDelivery] = useState("");
+  const [insuranceCompany, setInsuranceCompany] = useState("");
+  const [claimNumber, setClaimNumber] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<{ id: number; jobCardNumber: string; registrationNumber: string } | null>(null);
@@ -107,6 +111,8 @@ function JobCardsPageContent() {
           setComplaint(draft.complaint);
           setRequiredWork(draft.requiredWork);
           setExpectedDelivery(draft.expectedDelivery);
+          setInsuranceCompany(draft.insuranceCompany ?? "");
+          setClaimNumber(draft.claimNumber ?? "");
           setDraftRestored(true);
         }
       });
@@ -120,7 +126,7 @@ function JobCardsPageContent() {
   const [draftRestored, setDraftRestored] = useState(false);
   useEffect(() => {
     if (!selectedVehicle) return;
-    const draft = { jobType, km, complaint, requiredWork, expectedDelivery };
+    const draft = { jobType, km, complaint, requiredWork, expectedDelivery, insuranceCompany, claimNumber };
     const empty = Object.values(draft).every((v) => v === "");
     try {
       if (empty) window.localStorage.removeItem(draftKey(selectedVehicle.id));
@@ -128,7 +134,7 @@ function JobCardsPageContent() {
     } catch {
       // Storage unavailable (private mode) — the form still works, just unsaved.
     }
-  }, [selectedVehicle, jobType, km, complaint, requiredWork, expectedDelivery]);
+  }, [selectedVehicle, jobType, km, complaint, requiredWork, expectedDelivery, insuranceCompany, claimNumber]);
 
   async function handleFilter(e: FormEvent) {
     e.preventDefault();
@@ -154,6 +160,9 @@ function JobCardsPageContent() {
           complaint: complaint || undefined,
           requiredWork: requiredWork || undefined,
           expectedDelivery: expectedDelivery || undefined,
+          ...(jobType === "ACCIDENTAL_CLAIM"
+            ? { insuranceCompany: insuranceCompany.trim() || undefined, claimNumber: claimNumber.trim() || undefined }
+            : {}),
         }),
       });
       // Back to the plain list, with the new job card at the top and a link
@@ -176,6 +185,8 @@ function JobCardsPageContent() {
       setComplaint("");
       setRequiredWork("");
       setExpectedDelivery("");
+      setInsuranceCompany("");
+      setClaimNumber("");
       router.replace("/dashboard/jobcards");
       setStatusFilter("");
       setQ("");
@@ -233,6 +244,16 @@ function JobCardsPageContent() {
                   </option>
                 ))}
               </Select>
+              {jobType === "ACCIDENTAL_CLAIM" && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Input
+                    placeholder="Insurance company (optional)"
+                    value={insuranceCompany}
+                    onChange={(e) => setInsuranceCompany(e.target.value)}
+                  />
+                  <Input placeholder="Claim number (optional)" value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} />
+                </div>
+              )}
               <Input type="number" placeholder="Current KM" value={km} onChange={(e) => setKm(e.target.value)} />
               <Textarea placeholder="Customer complaint" value={complaint} onChange={(e) => setComplaint(e.target.value)} rows={2} />
               <Textarea placeholder="Required work" value={requiredWork} onChange={(e) => setRequiredWork(e.target.value)} rows={2} />

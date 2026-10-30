@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import { AttendanceMonthSummary } from "@/components/AttendanceMonthSummary";
 
 interface Row {
   employee: { id: number; name: string; role: string | null };
@@ -117,6 +118,8 @@ function AttendancePageContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  // Bumped after each mark so the month summary reloads.
+  const [marks, setMarks] = useState(0);
 
   const month = date.slice(0, 7);
   // Only an admin can add or change attendance for a past date (the server
@@ -148,6 +151,7 @@ function AttendancePageContent() {
     setSavingId(employeeId);
     try {
       await apiFetch("/attendance", { method: "POST", body: JSON.stringify({ employeeId, date, status, ...times }) });
+      setMarks((n) => n + 1);
       await load(date);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save attendance");
@@ -414,6 +418,8 @@ function AttendancePageContent() {
           </tbody>
         </Table>
       )}
+
+      <AttendanceMonthSummary month={month} refreshKey={marks} />
     </div>
   );
 }

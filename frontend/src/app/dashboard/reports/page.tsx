@@ -5,7 +5,8 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronUp, Download, MessageCircle } from "lucide-react";
-import { apiFetch, assetUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { AssetLink } from "@/components/AuthedMedia";
 import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { useAuth } from "@/context/AuthContext";
 import { downloadRowsAsExcel } from "@/lib/excel";
@@ -357,14 +358,12 @@ function PurchasesTab() {
                         <td className="py-1.5 pr-3">
                           {p.item ? `${p.item.itemCode} — ${p.item.name}` : p.description}
                           {p.billUrl && (
-                            <a
-                              href={assetUrl(p.billUrl)}
-                              target="_blank"
-                              rel="noreferrer"
+                            <AssetLink
+                              href={p.billUrl}
                               className="ml-2 text-xs text-blue-600 hover:underline"
                             >
                               Bill
-                            </a>
+                            </AssetLink>
                           )}
                         </td>
                         <td className="py-1.5 pr-3">{p.supplier?.name ?? "-"}</td>

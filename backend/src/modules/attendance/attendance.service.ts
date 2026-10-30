@@ -116,3 +116,55 @@ export async function getMonthlySummary(employeeId: number, month: number, year:
 
   return { employee, presentDays, halfDays, absentDays, leaveDays, workedMinutes, days: rows };
 }
+
+// Every active employee's day counts for one calendar month, for the
+// attendance sheet's month total. Days not marked = days of the month so
+// far (up to today) with no mark at all.
+export async function getMonthSummaryForAll(month: number, year: number) {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const today = todayLocalISO();
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  const daysSoFar =
+    monthKey < today.slice(0, 7) ? daysInMonth : monthKey === today.slice(0, 7) ? Number(today.slice(8, 10)) : 0;
+
+  const [employees, counts] = await Promise.all([
+    prisma.employee.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.attendance.groupBy({
+      by: ["employeeId", "status"],
+      where: { date: { gte: start, lt: end } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  return {
+    month,
+    year,
+    daysInMonth,
+    daysSoFar,
+    rows: employees.map((employee) => {
+      const n = (status: string) =>
+        counts.find((c) => c.employeeId === employee.id && c.status === status)?._count._all ?? 0;
+      const presentDays = n("PRESENT");
+      const halfDays = n("HALF_DAY");
+      const absentDays = n("ABSENT");
+      const leaveDays = n("LEAVE");
+      const marked = presentDays + halfDays + absentDays + leaveDays;
+      return {
+        employee,
+        presentDays,
+        halfDays,
+        absentDays,
+        leaveDays,
+        // A half day counts as half a day present.
+        effectivePresent: presentDays + halfDays / 2,
+        notMarked: Math.max(0, daysSoFar - marked),
+      };
+    }),
+  };
+}

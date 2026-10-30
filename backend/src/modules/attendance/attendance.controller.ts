@@ -46,3 +46,14 @@ export async function summary(req: Request, res: Response) {
   const result = await attendanceService.getMonthlySummary(employeeId, month, year);
   res.json(result);
 }
+
+export const monthQuerySchema = z.object({
+  month: z.coerce.number().int().min(1).max(12),
+  year: z.coerce.number().int().min(2000),
+});
+
+// Month totals for every active employee (the attendance sheet's summary).
+export async function monthSummary(req: Request, res: Response) {
+  const { month, year } = monthQuerySchema.parse(req.query);
+  res.json(await attendanceService.getMonthSummaryForAll(month, year));
+}

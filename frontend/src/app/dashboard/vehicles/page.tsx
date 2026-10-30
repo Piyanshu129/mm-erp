@@ -476,12 +476,15 @@ function VehiclesPageContent() {
                 <InvoiceAccountCells account={v.account} />
                 <Td>
                   <div className="flex items-center justify-end gap-3 whitespace-nowrap">
-                    <Link
-                      href={`/dashboard/jobcards?vehicleId=${v.id}`}
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-                    >
-                      <ClipboardPlus className="h-3 w-3" /> New job card
-                    </Link>
+                    {/* Only when picking a vehicle for a new job card (Dashboard → New job card). */}
+                    {forJobCard && (
+                      <Link
+                        href={`/dashboard/jobcards?vehicleId=${v.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <ClipboardPlus className="h-3 w-3" /> New job card
+                      </Link>
+                    )}
                     <InvoiceAccountActions
                       account={v.account}
                       onPay={() => setAccountFor({ vehicle: v, focusPay: true })}

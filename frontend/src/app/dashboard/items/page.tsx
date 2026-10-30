@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Plus, Search, Package } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { apiFetch, ApiError } from "@/lib/api";
+import { GST_RATES } from "@/lib/gst";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
@@ -52,6 +53,8 @@ function ItemsPageContent() {
   const [sellingPrice, setSellingPrice] = useState("");
   const [minStock, setMinStock] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
+  const [hsnCode, setHsnCode] = useState("");
+  const [gstRate, setGstRate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -86,6 +89,8 @@ function ItemsPageContent() {
       if (purchaseCost) formData.set("purchaseCost", purchaseCost);
       if (sellingPrice) formData.set("sellingPrice", sellingPrice);
       if (minStock) formData.set("minStock", minStock);
+      if (hsnCode.trim()) formData.set("hsnCode", hsnCode.trim());
+      if (gstRate) formData.set("gstRate", gstRate);
       if (photo) formData.set("photo", await compressImage(photo));
 
       await apiFetch("/items", { method: "POST", body: formData });
@@ -95,6 +100,8 @@ function ItemsPageContent() {
       setPurchaseCost("");
       setSellingPrice("");
       setMinStock("");
+      setHsnCode("");
+      setGstRate("");
       setPhoto(null);
       setShowForm(false);
       await load(q, category);
@@ -156,6 +163,29 @@ function ItemsPageContent() {
               <div>
                 <Label>Minimum stock</Label>
                 <Input type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>HSN code (optional)</Label>
+                  <Input
+                    inputMode="numeric"
+                    maxLength={8}
+                    placeholder="e.g. 8708"
+                    value={hsnCode}
+                    onChange={(e) => setHsnCode(e.target.value.replace(/\D/g, ""))}
+                  />
+                </div>
+                <div>
+                  <Label>GST % (optional)</Label>
+                  <Select value={gstRate} onChange={(e) => setGstRate(e.target.value)}>
+                  <option value="">Not set</option>
+                  {GST_RATES.map((r) => (
+                    <option key={r} value={String(r)}>
+                      {r}%
+                    </option>
+                  ))}
+                </Select>
+                </div>
               </div>
               <div>
                 <Label>Photo (optional)</Label>

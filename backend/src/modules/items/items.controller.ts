@@ -16,6 +16,9 @@ export const itemFieldsSchema = z.object({
   partNumber: optionalString,
   brand: optionalString,
   specification: optionalString,
+  // Defaults for GST invoices made from estimates.
+  hsnCode: z.string().trim().regex(/^[0-9]{4,8}$/, "HSN/SAC is 4–8 digits").optional(),
+  gstRate: z.coerce.number().min(0).max(28).optional(),
   vehicleMake: optionalString,
   vehicleModel: optionalString,
   variant: optionalString,

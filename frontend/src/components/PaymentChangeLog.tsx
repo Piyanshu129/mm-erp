@@ -7,6 +7,7 @@ import { formatINR } from "@/lib/format";
 
 interface Snapshot {
   amount: number;
+  discount?: number;
   paymentDate: string;
   paymentMode: string | null;
   reference: string | null;
@@ -27,6 +28,7 @@ interface Audit {
 
 const LABELS: Record<keyof Snapshot, string> = {
   amount: "Amount",
+  discount: "Discount",
   paymentDate: "Date",
   paymentMode: "Mode",
   reference: "Reference",
@@ -37,7 +39,7 @@ const LABELS: Record<keyof Snapshot, string> = {
 
 function show(field: keyof Snapshot, value: unknown): string {
   if (value == null || value === "") return "—";
-  if (field === "amount") return formatINR(value as number);
+  if (field === "amount" || field === "discount") return formatINR(value as number);
   if (field === "paymentDate") return new Date(value as string).toLocaleDateString();
   if (field === "paymentMode") return String(value).replace("_", " ");
   return String(value);

@@ -8,12 +8,11 @@ export function invoiceFileName(registrationNumber: string, invoiceDate: string)
   return `${reg}_${dd}-${mm}-${d.getFullYear()}`;
 }
 
-// Renders the on-screen invoice itself into an A4 PDF and downloads it, so
-// the PDF always matches what the invoice page shows. The library is loaded
-// only when a download is actually requested — it's browser-only and large.
-export async function downloadElementAsPdf(element: HTMLElement, fileName: string): Promise<void> {
+// The library is loaded only when a PDF is actually requested — it's
+// browser-only and large.
+async function pdfWorker(element: HTMLElement, fileName: string) {
   const html2pdf = (await import("html2pdf.js")).default;
-  await html2pdf()
+  return html2pdf()
     .set({
       margin: 10,
       filename: `${fileName}.pdf`,
@@ -21,6 +20,17 @@ export async function downloadElementAsPdf(element: HTMLElement, fileName: strin
       html2canvas: { scale: 2, backgroundColor: "#ffffff" },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
     })
-    .from(element)
-    .save();
+    .from(element);
+}
+
+// Renders the on-screen invoice itself into an A4 PDF and downloads it, so
+// the PDF always matches what the invoice page shows.
+export async function downloadElementAsPdf(element: HTMLElement, fileName: string): Promise<void> {
+  await (await pdfWorker(element, fileName)).save();
+}
+
+// The same PDF as a File, for sharing (e.g. on WhatsApp).
+export async function elementToPdfFile(element: HTMLElement, fileName: string): Promise<File> {
+  const blob: Blob = await (await pdfWorker(element, fileName)).outputPdf("blob");
+  return new File([blob], `${fileName}.pdf`, { type: "application/pdf" });
 }

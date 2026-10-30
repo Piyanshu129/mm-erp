@@ -16,6 +16,8 @@ export const createJobCardSchema = z.object({
   requiredWork: optionalString,
   expectedDelivery: z.coerce.date().optional(),
   notes: optionalString,
+  insuranceCompany: optionalString,
+  claimNumber: optionalString,
 });
 
 // The job card page auto-saves as it's filled, so an update can also clear
@@ -41,6 +43,9 @@ export const updateJobCardSchema = z.object({
   assignedEmployeeId: z.coerce.number().int().positive().optional(),
   finalInspectionStatus: z.enum(["DONE", "NOT_DONE"]).optional(),
   finalInspectionBy: clearableString,
+  // Accidental repairs (optional).
+  insuranceCompany: clearableString,
+  claimNumber: clearableString,
 });
 
 export async function list(req: Request, res: Response) {

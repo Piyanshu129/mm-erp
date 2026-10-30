@@ -5,7 +5,8 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useEffect, useState } from "react";
 import { Plus, Wallet, Paperclip, Download } from "lucide-react";
 import { exportPurchasesToExcel } from "@/lib/purchaseExport";
-import { apiFetch, assetUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { AssetLink } from "@/components/AuthedMedia";
 import { formatINR } from "@/lib/format";
 import { EXPENSE_TYPES, TYPE_LABELS, PurchaseTotals } from "@/lib/purchaseTypes";
 import { MonthNav, TotalTile, FilterHeaderSelect, currentMonth, monthLabel } from "@/components/PurchaseListControls";
@@ -183,14 +184,12 @@ function ExpensesPageContent() {
                   {x.description}
                   {x.supplier && <span className="block text-xs text-gray-500">Supplier: {x.supplier.name}</span>}
                   {x.billUrl && (
-                    <a
-                      href={assetUrl(x.billUrl)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <AssetLink
+                      href={x.billUrl}
                       className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-blue-600 hover:underline"
                     >
                       <Paperclip className="h-3 w-3" /> Bill
-                    </a>
+                    </AssetLink>
                   )}
                 </Td>
                 <Td className="text-gray-500">{x.remarks ?? "-"}</Td>

@@ -33,11 +33,13 @@ Payments are made against the supplier's running account, not a specific purchas
 
 A payment can't exceed the current balance due, which catches a mistyped extra zero. To check that safely, `recordSupplierPayment` locks the supplier row (`SELECT … FOR UPDATE`) for the whole check-and-insert. Without the lock, two payments entered at the same moment could each pass the check and together overpay. Like the other payment endpoints, `amount` is what's being paid *now*, never a running total.
 
+A payment can also carry a **discount** the supplier gave (`discount`, default 0). It comes off the balance along with the amount, so the account is `balanceDue = totalPurchased − totalPaid − totalDiscount`. The amount can be 0 for a discount-only settlement, but not both. The overpay check covers payment + discount; editing a payment re-checks against the balance without that payment's old amount and discount.
+
 Payment routes follow the Suppliers page's own permission (`SUPPLIERS`). Searching and adding suppliers also accepts `PURCHASES`, because the purchase form's supplier box can add a missing supplier inline.
 
 ## 2c. Starting a job card: find or add the vehicle
 
-Dashboard → **New Job Card** → `/dashboard/vehicles?for=jobcard`. Search the vehicle number first; capitals are forced as you type. **New vehicle** is offered only when no vehicle has exactly that number, and the searched number carries into the form, so it isn't typed twice. An RC photo is required. A vehicle added this way continues straight to the job card form, `/dashboard/jobcards?vehicleId=…`. That form keeps a draft on the device per vehicle until the job card is created. Once created, the job card's detail page **auto-saves** its details, findings and estimate about a second after typing stops. Blank fields clear on the server, since the update schema turns `""` into `null`.
+Dashboard → **New Job Card** → `/dashboard/vehicles?for=jobcard`. The Vehicles list shows each row's **New job card** link only in this flow (`?for=jobcard`), not on the plain Vehicles tab. Search the vehicle number first; capitals are forced as you type. **New vehicle** is offered only when no vehicle has exactly that number, and the searched number carries into the form, so it isn't typed twice. An RC photo is required. A vehicle added this way continues straight to the job card form, `/dashboard/jobcards?vehicleId=…`. That form keeps a draft on the device per vehicle until the job card is created. Once created, the job card's detail page **auto-saves** its details, findings and estimate about a second after typing stops. Blank fields clear on the server, since the update schema turns `""` into `null`. For an **Accidental Claim** job type, both the new job card form and the detail page also ask for the optional **insurance company** and **claim number** (`JobCard.insuranceCompany` / `claimNumber`). They print on the estimate and the GST invoice.
 
 ## 2d. Service schedule
 
@@ -77,7 +79,17 @@ The migration `20260930110000_simplify_job_card_statuses` converted existing job
 
 `/dashboard/jobcards/[id]` → *Create estimate* → `POST /job-cards/:jobCardId/estimate` → [`estimates.service.ts`](../backend/src/modules/estimates/estimates.service.ts), then `/dashboard/estimates/[id]`.
 
-Creating copies the job card's parts and labour so far into `EstimateLine`s (calling it again returns the existing estimate). While it's a `DRAFT`: `POST /estimates/:id/lines` adds an inventory part (`itemId`; name and MRP fill in), a part not in inventory (`description` + `rate`) or labour; `DELETE /estimates/:id/lines/:lineId` removes one; `PATCH /estimates/:id` sets `taxRate`/`notes`. Lines never touch stock. The page is printable and downloads as `EST-000123_<car number>_<date>.pdf`, with signature spaces for the customer and the workshop. `POST /estimates/:id/approval` (multipart `photo` of the signed copy) marks it `APPROVED` and locks it; the photo can be replaced later. The job card, the vehicle's service history (`GET /vehicles/:id/service-history` includes `estimate`) and the backup/Excel export all link to it. Every change also updates the job card's `estimateAmount`/`estimateApproved`/`estimateApprovedAt`.
+Creating copies the job card's parts and labour so far into `EstimateLine`s (calling it again returns the existing estimate). While it's a `DRAFT`: `POST /estimates/:id/lines` adds an inventory part (`itemId`; name and MRP fill in), a part not in inventory (`description` + `rate`) or labour; `DELETE /estimates/:id/lines/:lineId` removes one; `PATCH /estimates/:id` sets `taxRate`/`notes`. Lines never touch stock. The page is printable and downloads as `EST-000123_<car number>_<date>.pdf`, with signature spaces for the customer and the workshop. `POST /estimates/:id/approval` (multipart `photo` of the signed copy) marks it `APPROVED` and locks it; the photo can be replaced later. The job card, the vehicle's service history (`GET /vehicles/:id/service-history` includes `estimate`) and the backup/Excel export all link to it. Every change also updates the job card's `estimateAmount`/`estimateApproved`/`estimateApprovedAt`. **Share on WhatsApp** (`components/SharePdfButton.tsx`) makes the same PDF. On a phone it opens the share sheet with the PDF attached. On a computer it downloads the PDF and opens WhatsApp to the customer with a message ready, and the PDF is attached there by hand.
+
+#### GST invoice tab
+
+The estimate page has a second tab, **GST Invoice** (`components/GstInvoice.tsx`). It turns the estimate into a tax invoice with **HSN/SAC** and **GST %** per line, plus **CGST, SGST and IGST** columns per item. Lines take their HSN and GST % from the item (`Item.hsnCode`/`gstRate`, set on the Items form or a purchase's new-item form). Labour defaults to 18% and SAC 998714. All of them can be changed on the tab: `PATCH /estimates/:id/gst` saves `{supplyType: INTRA|INTER, pricesIncludeGst, customerGstin, lines:[{id, hsnCode, gstRate}]}`.
+
+- **Within the state**, a line's GST splits half CGST and half SGST.
+- **To another state**, it's all IGST.
+- If **prices include GST**, the taxable value is `amount ÷ (1 + rate)`. Otherwise GST is added on top.
+
+The tab also shows a tax summary by rate, a rounded total and the amount in words. **Generate GST invoice number** (`POST /estimates/:id/gst-invoice`) needs a GST % on every line. It assigns `GST/<FY>/0001`, numbered in sequence within the April–March financial year, under an advisory lock. After that the GST details and the estimate's lines are locked. The invoice header comes from **Settings → Business details** (`GET/PUT /settings/business`, stored in `AppSetting`; anyone can read it, only an admin can change it).
 
 ### Parts: by item code and quantity
 
@@ -121,6 +133,8 @@ Invoice math is worth knowing precisely if you ever touch this: `Parts + Labour 
 - the **Customers** and **Vehicles** pages: each row shows Invoiced / Paid / Due, and **Pay** or **Payment history** opens an account panel (`components/InvoiceAccountPanel.tsx`) with a payment form against a chosen unpaid invoice, every invoice with what's due, and the full payment history (`GET /customers/:id/account`, `GET /vehicles/:id/account`);
 - the **customer detail page**, where the same panel sits permanently.
 
+A payment can carry a **discount** (`InvoicePayment.discount`), for example ₹950 received and ₹50 let go. The discount is written off the invoice: `Invoice.discount` goes up and `totalAmount` goes down by the same amount, so every "due" stays `totalAmount − paymentAmount`. Editing or deleting the payment moves those numbers back. The amount can be 0 for a discount-only settlement, and payment + discount can't exceed what's due. The payment history, the change log, the daily report and the Excel export all show the discount.
+
 A payment always belongs to one specific invoice, so each invoice's Pending/Partial/Paid stays exact. Recording one therefore accepts any of the `INVOICES`, `CUSTOMERS` or `VEHICLES` permissions, while opening the invoice itself still needs `INVOICES`.
 
 `SalaryPayment` still uses the older single-snapshot pattern: a running `paymentAmount` on the row, with `Pending`/`Partial`/`Paid` computed.
@@ -137,7 +151,11 @@ The Reports page's CSV export ([`lib/csv.ts`](../frontend/src/lib/csv.ts)) is en
 
 Two ways attendance gets marked, writing to the **same** `Attendance` table (`@@unique([employeeId, date])`):
 
-- **Admin marking** (`/dashboard/attendance` → `POST /attendance` `{employeeId, date, status}`): first mark of the day creates the row (`markedBy: "ADMIN"`); a second call for the same day is treated as a *correction* (`correctedById` set to the acting admin).
+- **Admin marking** (`/dashboard/attendance` → `POST /attendance` `{employeeId, date, status}`): first mark of the day creates the row (`markedBy: "ADMIN"`); a second call for the same day is treated as a *correction* (`correctedById` set to the acting admin). Below the day's sheet, a **Month summary** (`GET /attendance/month-summary?month&year`) shows each active employee's columns for the month of the chosen date:
+  - total days in the month;
+  - present, half day, absent and leave counts;
+  - days not marked so far;
+  - total present, with a half day counting ½.
 - **Employee self-punch** (`/portal` → `POST /employee-portal/attendance/punch`, employee-token auth): captures GPS coordinates (browser Geolocation API) and an optional selfie, sets `status: "PRESENT"`, `markedBy: "SELF"`. Refuses a second punch the same day (`punchedAt` already set → `ConflictError`).
 
 **An admin correction always wins**: `markAttendance()` always writes `markedBy: "ADMIN"` and the new status, but explicitly preserves the *original* punch's `punchedAt`/`latitude`/`longitude`/`selfieUrl` as an audit trail of what the employee actually did before being overridden. The reverse also happens naturally: if an admin pre-marks someone `ABSENT` before they arrive, their later self-punch overwrites it back to `PRESENT` with `markedBy: "SELF"` — the live punch is treated as the more authoritative signal that they're actually here.

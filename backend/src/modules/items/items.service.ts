@@ -10,6 +10,8 @@ export interface ItemInput {
   partNumber?: string;
   brand?: string;
   specification?: string;
+  hsnCode?: string;
+  gstRate?: number;
   vehicleMake?: string;
   vehicleModel?: string;
   variant?: string;

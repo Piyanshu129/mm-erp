@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Download, MessageCircle, Printer } from "lucide-react";
-import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { AssetLink } from "@/components/AuthedMedia";
 import { fmtQty, formatINR } from "@/lib/format";
 import { downloadExcel, ExcelSheet } from "@/lib/excel";
 import { shareReport } from "@/lib/shareReport";
@@ -28,6 +29,7 @@ interface SalePayment {
   paymentMode: string | null;
   reference: string | null;
   receivedBy: string | null;
+  discount?: number;
 }
 interface Sale {
   id: number;
@@ -52,6 +54,7 @@ interface Sale {
 interface Collection {
   id: number;
   amount: number;
+  discount?: number;
   paymentDate: string;
   paymentMode: string | null;
   reference: string | null;
@@ -109,6 +112,7 @@ interface Daily {
     salesOutstanding: number;
     beingRevisedCount: number;
     collectionsTotal: number;
+    collectionsDiscount?: number;
     collectionsByMode: { mode: string; amount: number }[];
     purchaseCount: number;
     purchaseTotal: number;
@@ -205,7 +209,7 @@ function SaleCard({ s }: { s: Sale }) {
           {s.payments
             .map(
               (p) =>
-                `${formatINR(p.amount)} ${mode(p.paymentMode)} on ${new Date(p.paymentDate).toLocaleDateString()}${p.reference ? ` (ref ${p.reference})` : ""}`
+                `${formatINR(p.amount)}${p.discount ? ` + ${formatINR(p.discount)} discount` : ""} ${mode(p.paymentMode)} on ${new Date(p.paymentDate).toLocaleDateString()}${p.reference ? ` (ref ${p.reference})` : ""}`
             )
             .join("; ")}
         </p>
@@ -397,12 +401,13 @@ export function DailyReport() {
         },
         {
           name: "Payments Received",
-          columns: ["Draft Invoice", "Customer", "Vehicle", "Amount", "Mode", "Reference", "Received By", "Notes"],
+          columns: ["Draft Invoice", "Customer", "Vehicle", "Amount", "Discount", "Mode", "Reference", "Received By", "Notes"],
           rows: data.collections.map((c) => ({
             "Draft Invoice": c.invoiceNumber,
             Customer: c.customerName,
             Vehicle: c.registrationNumber,
             Amount: c.amount,
+            Discount: c.discount ?? 0,
             Mode: mode(c.paymentMode),
             Reference: c.reference,
             "Received By": c.receivedBy,
@@ -548,7 +553,12 @@ export function DailyReport() {
             <Tile
               label="Payments received"
               value={formatINR(s.collectionsTotal)}
-              sub={s.collectionsByMode.map((m) => `${mode(m.mode)} ${formatINR(m.amount)}`).join(" · ") || undefined}
+              sub={
+                [
+                  ...s.collectionsByMode.map((m) => `${mode(m.mode)} ${formatINR(m.amount)}`),
+                  ...(s.collectionsDiscount ? [`Discount ${formatINR(s.collectionsDiscount)}`] : []),
+                ].join(" · ") || undefined
+              }
             />
             <Tile label={`Purchases (${s.purchaseCount} lines)`} value={formatINR(s.purchaseTotal)} />
             <Tile label="Inventory" value={formatINR(s.inventoryPurchaseTotal)} />
@@ -610,7 +620,10 @@ export function DailyReport() {
                           </td>
                           <td className="py-1.5 pr-2">{mode(c.paymentMode)}</td>
                           <td className="py-1.5 pr-2">{c.reference ?? "—"}</td>
-                          <td className="py-1.5 text-right font-medium">{formatINR(c.amount)}</td>
+                          <td className="py-1.5 text-right font-medium">
+                            {formatINR(c.amount)}
+                            {!!c.discount && <span className="block text-xs font-normal text-amber-700">+ {formatINR(c.discount)} discount</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -652,9 +665,9 @@ export function DailyReport() {
                               <span className="block text-xs text-gray-500">{[p.brand, p.specification].filter(Boolean).join(" · ")}</span>
                             )}
                             {p.billUrl && (
-                              <a href={assetUrl(p.billUrl)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline print:hidden">
+                              <AssetLink href={p.billUrl} className="text-xs text-blue-600 hover:underline print:hidden">
                                 View bill
-                              </a>
+                              </AssetLink>
                             )}
                           </td>
                           <td className="py-1.5 pr-2 text-right">

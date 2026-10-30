@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 // The fields of a payment that an audit entry records, as plain JSON.
 export function paymentSnapshot(p: {
   amount: Prisma.Decimal | number;
+  discount?: Prisma.Decimal | number;
   paymentDate: Date;
   paymentMode: string | null;
   reference: string | null;
@@ -13,6 +14,7 @@ export function paymentSnapshot(p: {
 }) {
   return {
     amount: Number(p.amount),
+    discount: Number(p.discount ?? 0),
     paymentDate: p.paymentDate.toISOString(),
     paymentMode: p.paymentMode,
     reference: p.reference,

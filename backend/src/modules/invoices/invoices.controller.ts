@@ -11,7 +11,9 @@ export const createInvoiceSchema = z.object({
 const optionalString = z.string().trim().min(1).optional();
 
 export const recordPaymentSchema = z.object({
-  amount: z.coerce.number().positive(),
+  // Either may be 0 (all discount, or no discount) but not both.
+  amount: z.coerce.number().min(0),
+  discount: z.coerce.number().min(0).optional(),
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "paymentDate must be YYYY-MM-DD").optional(),
   paymentMode: optionalString,
   reference: optionalString,

@@ -21,8 +21,8 @@ import {
   UserCog,
   ShieldCheck,
 } from "lucide-react";
-import { AuthedImage, AuthedVideo } from "@/components/AuthedMedia";
-import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { AuthedImage, AuthedVideo, AssetLink } from "@/components/AuthedMedia";
+import { apiFetch, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Textarea, Label } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -46,6 +46,8 @@ function autoSavePayload(f: {
   expectedDelivery: string;
   notes: string;
   findings: string;
+  insuranceCompany: string;
+  claimNumber: string;
 }) {
   return {
     jobType: f.jobType || null,
@@ -55,6 +57,8 @@ function autoSavePayload(f: {
     expectedDelivery: f.expectedDelivery || null,
     notes: f.notes.trim() || null,
     inspectionFindings: f.findings.trim() || null,
+    insuranceCompany: f.insuranceCompany.trim() || null,
+    claimNumber: f.claimNumber.trim() || null,
   };
 }
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
@@ -92,6 +96,9 @@ interface JobCardDetail {
   expectedDelivery: string | null;
   notes: string | null;
   inspectionFindings: string | null;
+  // Accidental repairs (optional).
+  insuranceCompany?: string | null;
+  claimNumber?: string | null;
   assignedEmployeeId: number | null;
   assignedEmployee: { id: number; name: string } | null;
   finalInspectionStatus: string | null;
@@ -175,6 +182,8 @@ function JobCardDetailPageContent() {
   const [notes, setNotes] = useState("");
 
   const [findings, setFindings] = useState("");
+  const [insuranceCompany, setInsuranceCompany] = useState("");
+  const [claimNumber, setClaimNumber] = useState("");
 
   const [creatingEstimate, setCreatingEstimate] = useState(false);
 
@@ -224,6 +233,8 @@ function JobCardDetailPageContent() {
         expectedDelivery: jc.expectedDelivery ? jc.expectedDelivery.slice(0, 10) : "",
         notes: jc.notes ?? "",
         findings: jc.inspectionFindings ?? "",
+        insuranceCompany: jc.insuranceCompany ?? "",
+        claimNumber: jc.claimNumber ?? "",
       };
       setJobType(fields.jobType);
       setKm(fields.km);
@@ -232,6 +243,8 @@ function JobCardDetailPageContent() {
       setExpectedDelivery(fields.expectedDelivery);
       setNotes(fields.notes);
       setFindings(fields.findings);
+      setInsuranceCompany(fields.insuranceCompany);
+      setClaimNumber(fields.claimNumber);
       lastSavedRef.current = JSON.stringify(autoSavePayload(fields));
       formInitialised.current = true;
     }
@@ -245,7 +258,17 @@ function JobCardDetailPageContent() {
   const lastSavedRef = useRef("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const currentPayload = autoSavePayload({ jobType, km, complaint, requiredWork, expectedDelivery, notes, findings });
+  const currentPayload = autoSavePayload({
+    jobType,
+    km,
+    complaint,
+    requiredWork,
+    expectedDelivery,
+    notes,
+    findings,
+    insuranceCompany,
+    claimNumber,
+  });
   const currentPayloadJson = JSON.stringify(currentPayload);
 
   useEffect(() => {
@@ -265,6 +288,8 @@ function JobCardDetailPageContent() {
                 jobType: currentPayload.jobType,
                 kmAtService: currentPayload.kmAtService,
                 expectedDelivery: currentPayload.expectedDelivery,
+                insuranceCompany: currentPayload.insuranceCompany,
+                claimNumber: currentPayload.claimNumber,
               }
             : prev
         );
@@ -602,6 +627,11 @@ function JobCardDetailPageContent() {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <JobCardStatusBadge status={jobCard.status} label={STATUS_LABELS[jobCard.status]} />
           {jobCard.jobType && <Badge tone="blue">{JOB_TYPE_LABELS[jobCard.jobType] ?? jobCard.jobType}</Badge>}
+          {jobCard.jobType === "ACCIDENTAL_CLAIM" && (jobCard.insuranceCompany || jobCard.claimNumber) && (
+            <span className="text-sm text-gray-600">
+              {[jobCard.insuranceCompany, jobCard.claimNumber && `Claim ${jobCard.claimNumber}`].filter(Boolean).join(" · ")}
+            </span>
+          )}
           {jobCard.expectedDelivery && (
             <span className="text-sm text-gray-500">
               Expected delivery: {new Date(jobCard.expectedDelivery).toLocaleDateString()}
@@ -717,6 +747,18 @@ function JobCardDetailPageContent() {
                     ))}
                   </Select>
                 </div>
+                {jobType === "ACCIDENTAL_CLAIM" && (
+                  <div className="grid grid-cols-1 gap-3 rounded-md bg-blue-50 p-3 sm:grid-cols-2">
+                    <div>
+                      <Label>Insurance company (optional)</Label>
+                      <Input value={insuranceCompany} onChange={(e) => setInsuranceCompany(e.target.value)} placeholder="e.g. ICICI Lombard" />
+                    </div>
+                    <div>
+                      <Label>Claim number (optional)</Label>
+                      <Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} />
+                    </div>
+                  </div>
+                )}
                 <div>
                   <Label>Current KM</Label>
                   <Input type="number" value={km} onChange={(e) => setKm(e.target.value)} />
@@ -786,14 +828,12 @@ function JobCardDetailPageContent() {
                 {creatingEstimate ? "Creating..." : jobCard.estimate ? "Open estimate" : "Create estimate"}
               </Button>
               {jobCard.estimate?.approvalPhotoUrl && (
-                <a
-                  href={assetUrl(jobCard.estimate.approvalPhotoUrl)}
-                  target="_blank"
-                  rel="noreferrer"
+                <AssetLink
+                  href={jobCard.estimate.approvalPhotoUrl}
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
                 >
                   <FileText className="h-4 w-4" /> Signed estimate photo
-                </a>
+                </AssetLink>
               )}
             </div>
           </CardBody>

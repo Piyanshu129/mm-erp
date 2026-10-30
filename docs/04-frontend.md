@@ -37,6 +37,8 @@ Simpler on purpose, matching the backend's simpler token (see [03-backend.md](03
 
 Plain `<img src="...">` / `<video src="...">` tags can't send custom headers, but the ngrok tunnel used in production shows its browser-warning interstitial to *any* request missing `ngrok-skip-browser-warning` — images and videos included. [`components/AuthedMedia.tsx`](../frontend/src/components/AuthedMedia.tsx) works around this by fetching the bytes itself (`fetchAssetBlob()` in `lib/api.ts`, which sends the header) and handing back an object URL. Used for item photos, job card inspection media, and portal attendance selfies. Harmless against a normal host too (Render, R2, etc.) — it's used everywhere by default, not conditionally.
 
+Links to uploaded files (purchase and expense bills, signed estimate photos) use `AssetLink` from the same file, for the same reason. A plain `<a href>` opened ngrok's warning page instead of the bill. On click, `AssetLink` opens a tab straight away, so it isn't blocked as a pop-up, fetches the file with the header, then points the tab at the downloaded copy.
+
 ## `lib/permissions.ts`
 
 A deliberate mirror of [`backend/src/lib/permissions.ts`](../backend/src/lib/permissions.ts) (same `PERMISSIONS` array) plus `PERMISSION_LABELS` (display names) and `hasPermission(user, permission)` — `true` for Admin unconditionally, otherwise checks `user.permissions.includes(permission)`. Used to both hide sidebar links and gate pages via `RequireAuth`'s `permission` prop — but this is a **UX convenience only**; the actual enforcement is server-side (`requirePermission()` on every route), so a hidden link is not a security boundary by itself.

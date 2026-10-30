@@ -5,7 +5,9 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Plus, ShoppingCart, Paperclip, Trash2, Printer, Download } from "lucide-react";
-import { apiFetch, ApiError, assetUrl } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { GST_RATES } from "@/lib/gst";
+import { AssetLink } from "@/components/AuthedMedia";
 import { fmtQty, formatINR, todayISO } from "@/lib/format";
 import {
   INVENTORY_TYPES,
@@ -135,6 +137,8 @@ interface LineDraft {
   newItemName: string;
   newItemBrand: string;
   newItemSpec: string;
+  newItemHsn: string;
+  newItemGst: string;
   newItemCategory: string;
   newItemUom: string;
   newItemMinStock: string;
@@ -169,6 +173,8 @@ function emptyLine(itemType: string): LineDraft {
     newItemName: "",
     newItemBrand: "",
     newItemSpec: "",
+    newItemHsn: "",
+    newItemGst: "",
     newItemCategory: ITEM_CATEGORIES[0],
     newItemUom: "PCS",
     newItemMinStock: "",
@@ -386,6 +392,24 @@ function LineEditor({
               </Field>
               <Field label="Specification (optional)" hint="e.g. 5W-30, 12V 35Ah, 1 L">
                 <Input value={line.newItemSpec} onChange={(e) => onChange({ newItemSpec: e.target.value })} />
+              </Field>
+              <Field label="HSN code (optional)" hint="From the supplier's bill, e.g. 8708">
+                <Input
+                  inputMode="numeric"
+                  maxLength={8}
+                  value={line.newItemHsn}
+                  onChange={(e) => onChange({ newItemHsn: e.target.value.replace(/\D/g, "") })}
+                />
+              </Field>
+              <Field label="GST % (optional)">
+                <Select value={line.newItemGst} onChange={(e) => onChange({ newItemGst: e.target.value })}>
+                  <option value="">Not set</option>
+                  {GST_RATES.map((r) => (
+                    <option key={r} value={String(r)}>
+                      {r}%
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
                 <Field label="Car maker (optional)" hint="e.g. Maruti">
@@ -770,6 +794,8 @@ function PurchasesPageContent() {
                 name: line.newItemName.trim(),
                 ...(line.newItemBrand.trim() ? { brand: line.newItemBrand.trim() } : {}),
                 ...(line.newItemSpec.trim() ? { specification: line.newItemSpec.trim() } : {}),
+                ...(line.newItemHsn.trim() ? { hsnCode: line.newItemHsn.trim() } : {}),
+                ...(line.newItemGst ? { gstRate: Number(line.newItemGst) } : {}),
                 category: line.newItemCategory,
                 uom: line.newItemUom.trim(),
                 ...(line.newItemMinStock ? { minStock: Number(line.newItemMinStock) } : {}),
@@ -1153,14 +1179,12 @@ function PurchasesPageContent() {
                     p.description
                   )}
                   {p.billUrl && (
-                    <a
-                      href={assetUrl(p.billUrl)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <AssetLink
+                      href={p.billUrl}
                       className="ml-2 inline-flex items-center gap-0.5 text-xs text-blue-600 hover:underline"
                     >
                       <Paperclip className="h-3 w-3" /> Bill
-                    </a>
+                    </AssetLink>
                   )}
                 </Td>
                 <Td>{p.supplier?.name ?? "-"}</Td>

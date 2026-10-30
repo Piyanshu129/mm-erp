@@ -19,6 +19,8 @@ export interface JobCardInput {
   requiredWork?: string;
   expectedDelivery?: Date;
   notes?: string;
+  insuranceCompany?: string;
+  claimNumber?: string;
 }
 
 const detailInclude = {
@@ -116,6 +118,8 @@ export interface JobCardUpdateInput {
   assignedEmployeeId?: number;
   finalInspectionStatus?: string;
   finalInspectionBy?: string | null;
+  insuranceCompany?: string | null;
+  claimNumber?: string | null;
 }
 
 // Every photo taken for a phase must cover all four mandatory angles — this

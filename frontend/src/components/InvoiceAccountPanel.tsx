@@ -34,6 +34,8 @@ export interface InvoicePaymentRow {
   id: number;
   invoiceId: number;
   amount: string;
+  // Settlement discount given with this payment (older servers don't send it).
+  discount?: string;
   paymentDate: string;
   paymentMode: string | null;
   reference: string | null;
@@ -131,6 +133,7 @@ function EditPaymentRow({
   onDone: (changed: boolean) => void;
 }) {
   const [amount, setAmount] = useState(String(Number(payment.amount)));
+  const [discount, setDiscount] = useState(Number(payment.discount ?? 0) ? String(Number(payment.discount)) : "");
   const [date, setDate] = useState(payment.paymentDate.slice(0, 10));
   const [mode, setMode] = useState(payment.paymentMode ?? "CASH");
   const [reference, setReference] = useState(payment.reference ?? "");
@@ -142,13 +145,17 @@ function EditPaymentRow({
   async function save(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!(Number(amount) > 0)) return setError("Amount must be more than 0");
+    const value = Number(amount || 0);
+    const disc = Number(discount || 0);
+    if (value < 0 || disc < 0) return setError("Amounts can't be negative");
+    if (!(value + disc > 0)) return setError("Enter the amount received, a discount, or both");
     setSaving(true);
     try {
       await apiFetch(`/invoices/${payment.invoiceId}/payments/${payment.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          amount: Number(amount),
+          amount: value,
+          discount: disc,
           paymentDate: date,
           paymentMode: mode,
           reference: reference.trim() || undefined,
@@ -170,6 +177,10 @@ function EditPaymentRow({
           <div>
             <Label>Amount</Label>
             <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <Label>Discount</Label>
+            <Input type="number" min={0} step="0.01" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
           </div>
           <div>
             <Label>Date</Label>
@@ -285,7 +296,14 @@ export function InvoicePaymentHistory({
                     {p.invoice && <span className="block text-xs text-gray-500">{p.invoice.jobCard.vehicle.registrationNumber}</span>}
                   </Td>
                 )}
-                <Td className="text-right font-medium text-gray-900">{formatINR(p.amount)}</Td>
+                <Td className="text-right font-medium text-gray-900">
+                  {formatINR(p.amount)}
+                  {Number(p.discount ?? 0) > 0 && (
+                    <span className="block whitespace-nowrap text-xs font-normal text-amber-700">
+                      + {formatINR(p.discount!)} discount
+                    </span>
+                  )}
+                </Td>
                 <Td>{modeLabel(p.paymentMode)}</Td>
                 <Td>{p.reference ?? "-"}</Td>
                 <Td>{p.receivedBy ?? "-"}</Td>
@@ -327,6 +345,7 @@ export function RecordInvoicePaymentForm({
   const [invoiceId, setInvoiceId] = useState<number | null>(unpaid[0]?.id ?? null);
   const selected = unpaid.find((i) => i.id === invoiceId) ?? null;
   const [amount, setAmount] = useState(selected ? String(selected.due) : "");
+  const [discount, setDiscount] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayISO());
   const [paymentMode, setPaymentMode] = useState("");
   const [reference, setReference] = useState("");
@@ -347,6 +366,18 @@ export function RecordInvoicePaymentForm({
     setInvoiceId(id);
     const inv = unpaid.find((i) => i.id === id);
     setAmount(inv ? String(inv.due) : "");
+    setDiscount("");
+  }
+
+  // While the amount is still the suggested "rest of the due", a discount
+  // brings it down to match — so a ₹50 discount on ₹1,000 due suggests ₹950.
+  function changeDiscount(value: string) {
+    if (selected) {
+      const r2 = (n: number) => String(Math.round(n * 100) / 100);
+      const suggested = r2(selected.due - Number(discount || 0));
+      if (amount === suggested) setAmount(r2(Math.max(0, selected.due - Number(value || 0))));
+    }
+    setDiscount(value);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -356,13 +387,18 @@ export function RecordInvoicePaymentForm({
       setError("Choose the draft invoice this payment is for");
       return;
     }
-    const value = Number(amount);
-    if (!(value > 0)) {
-      setError("Enter the amount being paid");
+    const value = Number(amount || 0);
+    const disc = Number(discount || 0);
+    if (value < 0 || disc < 0) {
+      setError("Amounts can't be negative");
       return;
     }
-    if (value > selected.due) {
-      setError(`That's more than is due on ${selected.invoiceNumber} (${formatINR(selected.due)})`);
+    if (!(value + disc > 0)) {
+      setError("Enter the amount being paid (and any discount)");
+      return;
+    }
+    if (value + disc > selected.due + 0.005) {
+      setError(`Payment + discount is more than is due on ${selected.invoiceNumber} (${formatINR(selected.due)})`);
       return;
     }
     setSubmitting(true);
@@ -371,6 +407,7 @@ export function RecordInvoicePaymentForm({
         method: "POST",
         body: JSON.stringify({
           amount: value,
+          ...(disc > 0 ? { discount: disc } : {}),
           paymentDate,
           paymentMode: paymentMode || undefined,
           reference: reference.trim() || undefined,
@@ -378,6 +415,7 @@ export function RecordInvoicePaymentForm({
         }),
       });
       setReference("");
+      setDiscount("");
       await onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not record payment");
@@ -404,6 +442,11 @@ export function RecordInvoicePaymentForm({
         <Label>Amount received now (₹)</Label>
         <Input ref={amountRef} type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
         {selected && <p className="mt-1 text-xs text-gray-500">Due on {selected.invoiceNumber}: {formatINR(selected.due)}</p>}
+      </div>
+      <div>
+        <Label>Discount (₹, optional)</Label>
+        <Input type="number" min={0} step="0.01" placeholder="0" value={discount} onChange={(e) => changeDiscount(e.target.value)} />
+        <p className="mt-1 text-xs text-gray-500">Written off the bill — the balance goes down by payment + discount.</p>
       </div>
       <div>
         <Label>Payment date</Label>

@@ -20,6 +20,8 @@ export interface NewItemInput {
   name: string;
   brand?: string;
   specification?: string;
+  hsnCode?: string;
+  gstRate?: number;
   category: string;
   uom: string;
   minStock?: number;
@@ -211,6 +213,8 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
             name: line.newItem.name,
             brand: line.newItem.brand,
             specification: line.newItem.specification,
+            hsnCode: line.newItem.hsnCode,
+            gstRate: line.newItem.gstRate,
             category: line.newItem.category,
             uom: line.newItem.uom,
             minStock: line.newItem.minStock,

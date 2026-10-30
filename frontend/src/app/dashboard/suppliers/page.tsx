@@ -23,6 +23,8 @@ import { TableSkeleton } from "@/components/ui/Skeleton";
 interface SupplierAccount {
   totalPurchased: number;
   totalPaid: number;
+  // Discounts the supplier gave with payments (older servers don't send it).
+  totalDiscount?: number;
   balanceDue: number;
 }
 
@@ -38,6 +40,7 @@ interface SupplierRow {
 interface SupplierPayment {
   id: number;
   amount: string;
+  discount?: string;
   paymentDate: string;
   paymentMode: string | null;
   reference: string | null;
@@ -77,6 +80,9 @@ function AccountSummary({ account }: { account: SupplierAccount }) {
       <div className="rounded-md bg-green-50 px-2 py-2">
         <p className="text-xs text-green-700">Paid</p>
         <p className="text-sm font-semibold text-green-800">{formatINR(account.totalPaid)}</p>
+        {(account.totalDiscount ?? 0) > 0 && (
+          <p className="text-xs text-amber-700">+ {formatINR(account.totalDiscount!)} discount</p>
+        )}
       </div>
       <div className={`rounded-md px-2 py-2 ${account.balanceDue > 0 ? "bg-red-50" : "bg-gray-50"}`}>
         <p className={`text-xs ${account.balanceDue > 0 ? "text-red-700" : "text-gray-500"}`}>Balance due</p>
@@ -98,6 +104,7 @@ function RecordPaymentCard({
   onSaved: () => void;
 }) {
   const [amount, setAmount] = useState("");
+  const [discount, setDiscount] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayISO());
   const [paymentMode, setPaymentMode] = useState("");
   const [reference, setReference] = useState("");
@@ -121,18 +128,24 @@ function RecordPaymentCard({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const value = Number(amount);
-    if (!(value > 0)) {
-      setError("Enter the amount being paid");
+    const value = Number(amount || 0);
+    const disc = Number(discount || 0);
+    if (value < 0 || disc < 0) {
+      setError("Amounts can't be negative");
       return;
     }
-    if (value > supplier.account.balanceDue) {
-      setError(`That's more than the balance due (${formatINR(supplier.account.balanceDue)})`);
+    if (!(value + disc > 0)) {
+      setError("Enter the amount being paid (and any discount)");
+      return;
+    }
+    if (value + disc > supplier.account.balanceDue + 0.005) {
+      setError(`Payment + discount is more than the balance due (${formatINR(supplier.account.balanceDue)})`);
       return;
     }
 
     const formData = new FormData();
     formData.set("amount", String(value));
+    if (disc > 0) formData.set("discount", String(disc));
     formData.set("paymentDate", paymentDate);
     if (paymentMode) formData.set("paymentMode", paymentMode);
     if (reference.trim()) formData.set("reference", reference.trim());
@@ -166,6 +179,9 @@ function RecordPaymentCard({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Amount paid now (₹)" hint={`Balance due: ${formatINR(supplier.account.balanceDue)}`}>
               <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </Field>
+            <Field label="Discount from supplier (₹, optional)" hint="Comes off the balance along with the payment.">
+              <Input type="number" min={0} step="0.01" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
             </Field>
             <Field label="Payment date">
               <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
@@ -229,6 +245,7 @@ function EditSupplierPaymentRow({
   onDone: (changed: boolean) => void;
 }) {
   const [amount, setAmount] = useState(String(Number(payment.amount)));
+  const [discount, setDiscount] = useState(Number(payment.discount ?? 0) ? String(Number(payment.discount)) : "");
   const [date, setDate] = useState(payment.paymentDate.slice(0, 10));
   const [mode, setMode] = useState(payment.paymentMode ?? "CASH");
   const [reference, setReference] = useState(payment.reference ?? "");
@@ -240,13 +257,17 @@ function EditSupplierPaymentRow({
   async function save(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!(Number(amount) > 0)) return setError("Amount must be more than 0");
+    const value = Number(amount || 0);
+    const disc = Number(discount || 0);
+    if (value < 0 || disc < 0) return setError("Amounts can't be negative");
+    if (!(value + disc > 0)) return setError("Enter the amount paid, a discount, or both");
     setSaving(true);
     try {
       await apiFetch(`/suppliers/${supplierId}/payments/${payment.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          amount: Number(amount),
+          amount: value,
+          discount: disc,
           paymentDate: date,
           paymentMode: mode,
           reference: reference.trim() || undefined,
@@ -268,6 +289,10 @@ function EditSupplierPaymentRow({
           <div>
             <Label>Amount</Label>
             <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <Label>Discount</Label>
+            <Input type="number" min={0} step="0.01" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
           </div>
           <div>
             <Label>Date</Label>
@@ -377,7 +402,7 @@ function PaymentHistoryCard({
         ) : (
           <>
             {supplier && <AccountSummary account={supplier.account} />}
-            <PaymentChangeLog url={`/suppliers/${supplierId}/payment-audits`} refreshKey={payments.map((p) => `${p.id}:${p.amount}`).join()} />
+            <PaymentChangeLog url={`/suppliers/${supplierId}/payment-audits`} refreshKey={payments.map((p) => `${p.id}:${p.amount}:${p.discount ?? 0}`).join()} />
             {payments.length === 0 ? (
               <p className="text-sm text-gray-500">No payments recorded for this supplier yet.</p>
             ) : (
@@ -409,7 +434,14 @@ function PaymentHistoryCard({
                     ) : (
                     <Tr key={p.id}>
                       <Td className="whitespace-nowrap">{new Date(p.paymentDate).toLocaleDateString()}</Td>
-                      <Td className="text-right font-medium text-gray-900">{formatINR(p.amount)}</Td>
+                      <Td className="text-right font-medium text-gray-900">
+                        {formatINR(p.amount)}
+                        {Number(p.discount ?? 0) > 0 && (
+                          <span className="block whitespace-nowrap text-xs font-normal text-amber-700">
+                            + {formatINR(p.discount!)} discount
+                          </span>
+                        )}
+                      </Td>
                       <Td>{modeLabel(p.paymentMode)}</Td>
                       <Td>{p.reference ?? "-"}</Td>
                       <Td>{p.paidBy ?? "-"}</Td>
