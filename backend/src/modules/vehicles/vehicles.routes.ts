@@ -23,6 +23,7 @@ vehiclesRouter.patch(
   validateBody(vehiclesController.updateVehicleSchema),
   asyncHandler(vehiclesController.update)
 );
+vehiclesRouter.post("/:id/rc-photo", uploadRcPhoto, asyncHandler(vehiclesController.replaceRcPhoto));
 vehiclesRouter.patch(
   "/:id/status",
   validateBody(vehiclesController.setActiveSchema),

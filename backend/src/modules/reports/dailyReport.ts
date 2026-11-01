@@ -6,22 +6,28 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// A bill is known by its estimate's number; an insurance company's bill says so.
+function billLabel(number: string, payer: string): string {
+  return payer === "INSURANCE" ? `${number} (Insurance)` : number;
+}
+
 // Everything that happened in a date range (one day by default), in full
 // detail:
 //   * estimates — every estimate dated in the range, with its lines, tax,
 //     total and whether the customer approved it;
-//   * sales — every draft invoice dated in the range, with its line items,
-//     labour, discount, tax, total, amount received, outstanding and the
-//     payments against it;
+//   * sales — every bill (a closed job card's estimate: the customer's, and
+//     the insurance company's on a claim) dated in the range, with its
+//     lines, discount, total, amount received, outstanding and the payments
+//     against it;
 //   * collections — every customer payment received that day (whichever
 //     invoice it was for);
 //   * purchases — every purchase line dated that day, with item details and
 //     the supplier's payment position.
 //
-// Only invoices whose job card is Invoiced count as finalised. An invoice
-// whose job card has been set back to Open (being changed) is listed
-// separately and left out of the totals until it's invoiced again. Cancelled
-// job cards can't have invoices, and there are no returns in this system.
+// Only bills whose job card is Closed count as finalised. A bill whose job
+// card has been set back to Open (being changed) is listed separately and
+// left out of the totals until it's closed again. Cancelled job cards can't
+// have bills, and there are no returns in this system.
 //
 // `from` and `to` are YYYY-MM-DD on the workshop's own calendar, both
 // days included.
@@ -49,8 +55,7 @@ export async function getDailyReport(from: string, to: string = from) {
         jobCard: {
           include: {
             vehicle: { include: { customer: true } },
-            parts: { include: { item: true }, orderBy: { id: "asc" } },
-            labour: { orderBy: { id: "asc" } },
+            estimate: { include: { lines: { include: { item: true }, orderBy: { id: "asc" } } } },
           },
         },
         payments: { orderBy: [{ paymentDate: "asc" }, { id: "asc" }] },
@@ -64,7 +69,13 @@ export async function getDailyReport(from: string, to: string = from) {
           select: {
             id: true,
             invoiceNumber: true,
-            jobCard: { select: { vehicle: { select: { registrationNumber: true, customer: { select: { name: true } } } } } },
+            payer: true,
+            jobCard: {
+              select: {
+                estimate: { select: { estimateNumber: true } },
+                vehicle: { select: { registrationNumber: true, customer: { select: { name: true } } } },
+              },
+            },
           },
         },
       },
@@ -110,9 +121,17 @@ export async function getDailyReport(from: string, to: string = from) {
     const jc = inv.jobCard;
     const total = Number(inv.totalAmount);
     const received = Number(inv.paymentAmount);
+    const claim = jc.jobType === "ACCIDENTAL_CLAIM";
+    // This payer's lines of the estimate.
+    const lines = (jc.estimate?.lines ?? []).filter(
+      (l) => (claim && l.scope === "INSURANCE" ? "INSURANCE" : "CUSTOMER") === inv.payer
+    );
     return {
       id: inv.id,
-      invoiceNumber: inv.invoiceNumber,
+      // Shown as the estimate number (the bill), with the payer on a claim.
+      invoiceNumber: billLabel(jc.estimate?.estimateNumber ?? inv.invoiceNumber, inv.payer),
+      payer: inv.payer,
+      estimateId: jc.estimate?.id ?? null,
       invoiceDate: inv.invoiceDate,
       finalised: jc.status === "INVOICED",
       jobCardId: jc.id,
@@ -120,22 +139,13 @@ export async function getDailyReport(from: string, to: string = from) {
       customerName: jc.vehicle.customer.name,
       customerMobile: jc.vehicle.customer.mobile,
       registrationNumber: jc.vehicle.registrationNumber,
-      lines: [
-        ...jc.parts.map((p) => ({
-          kind: p.item ? "Part" : "Non-inventory",
-          description: p.item ? `${p.item.itemCode} — ${p.item.name}` : p.description ?? "",
-          quantity: p.quantity,
-          rate: Number(p.rate),
-          amount: Number(p.amount),
-        })),
-        ...jc.labour.map((l) => ({
-          kind: "Labour",
-          description: l.description,
-          quantity: l.quantity,
-          rate: Number(l.rate),
-          amount: Number(l.amount),
-        })),
-      ],
+      lines: lines.map((l) => ({
+        kind: l.lineType === "LABOUR" ? "Labour" : l.item ? "Part" : "Non-inventory",
+        description: l.item ? `${l.item.itemCode} — ${l.description}` : l.description,
+        quantity: l.quantity,
+        rate: Number(l.rate),
+        amount: Number(l.amount),
+      })),
       partsTotal: Number(inv.partsTotal),
       labourTotal: Number(inv.labourTotal),
       discount: Number(inv.discount),
@@ -225,7 +235,7 @@ export async function getDailyReport(from: string, to: string = from) {
       receivedBy: c.receivedBy,
       notes: c.notes,
       invoiceId: c.invoice.id,
-      invoiceNumber: c.invoice.invoiceNumber,
+      invoiceNumber: billLabel(c.invoice.jobCard.estimate?.estimateNumber ?? c.invoice.invoiceNumber, c.invoice.payer),
       registrationNumber: c.invoice.jobCard.vehicle.registrationNumber,
       customerName: c.invoice.jobCard.vehicle.customer.name,
     })),

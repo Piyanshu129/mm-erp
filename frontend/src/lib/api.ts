@@ -124,6 +124,17 @@ function formatErrorMessage(body: any): string {
 // For endpoints that return a raw file (e.g. the Excel export) rather than
 // JSON — triggers a browser download with the given filename.
 export async function apiDownloadFile(path: string, filename: string): Promise<void> {
+  const file = await apiFetchFile(path, filename);
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// The same file, kept in memory (e.g. to share it).
+export async function apiFetchFile(path: string, filename: string): Promise<File> {
   const headers = new Headers();
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   headers.set("ngrok-skip-browser-warning", "true");
@@ -139,12 +150,7 @@ export async function apiDownloadFile(path: string, filename: string): Promise<v
   }
 
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  return new File([blob], filename, { type: blob.type || "application/octet-stream" });
 }
 
 export async function tryRefresh(): Promise<boolean> {

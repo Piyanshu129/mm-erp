@@ -20,6 +20,8 @@ import {
   Calculator,
   UserCog,
   ShieldCheck,
+  Car,
+  LogOut,
 } from "lucide-react";
 import { AuthedImage, AuthedVideo, AssetLink } from "@/components/AuthedMedia";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -33,6 +35,9 @@ import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
 import { EstimateCheck } from "@/components/EstimateCheck";
+import { SignOffSlip, SignatureLines } from "@/components/SignOffSlip";
+import { JOB_TYPE_LABELS } from "@/lib/jobTypes";
+import { formatINR } from "@/lib/format";
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
@@ -63,13 +68,6 @@ function autoSavePayload(f: {
 }
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
 
-const JOB_TYPE_LABELS: Record<string, string> = {
-  GENERAL_SERVICE: "General Service",
-  ACCIDENTAL_CLAIM: "Accidental Claim",
-  AC: "AC",
-  DENT_PAINT: "Dent & Paint",
-  MECHANICAL: "Mechanical",
-};
 
 const MEDIA_ANGLES = [
   { value: "FRONT", label: "Front" },
@@ -104,6 +102,13 @@ interface JobCardDetail {
   finalInspectionStatus: string | null;
   finalInspectionBy: string | null;
   deliveredAt: string | null;
+  // Vehicle trial and gate pass (older servers don't send these).
+  trialBy?: string | null;
+  trialRemarks?: string | null;
+  trialPhotoUrl?: string | null;
+  trialAt?: string | null;
+  gatePassPhotoUrl?: string | null;
+  gatePassAt?: string | null;
   createdAt: string;
   vehicle: {
     registrationNumber: string;
@@ -126,13 +131,24 @@ interface JobCardDetail {
   partsTotal: number;
   labourTotal: number;
   grandTotal: number;
-  invoice: { id: number; invoiceNumber: string; discount: string; paymentAmount: string } | null;
+  // The bills made when it was closed: the customer's, plus the insurance
+  // company's on an accidental claim.
+  invoices?: {
+    id: number;
+    invoiceNumber: string;
+    payer: "CUSTOMER" | "INSURANCE";
+    discount: string;
+    totalAmount: string;
+    paymentAmount: string;
+  }[];
   estimate: {
     id: number;
     estimateNumber: string;
     status: "DRAFT" | "APPROVED";
     approvalPhotoUrl: string | null;
     approvedAt: string | null;
+    gstInvoiceNumber?: string | null;
+    insuranceGstInvoiceNumber?: string | null;
   } | null;
 }
 
@@ -170,9 +186,13 @@ function JobCardDetailPageContent() {
 
   const [discount, setDiscount] = useState("0");
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
-  // Choosing "Invoiced" opens this confirmation instead of just changing a
-  // label — marking a job card Invoiced means generating its draft invoice.
+  // Choosing "Closed" opens this confirmation instead of just changing a
+  // label — closing a job card makes its estimate the bill.
   const [showInvoicePrompt, setShowInvoicePrompt] = useState(false);
+
+  const [trialBy, setTrialBy] = useState("");
+  const [trialRemarks, setTrialRemarks] = useState("");
+  const [savingTrial, setSavingTrial] = useState(false);
 
   const [jobType, setJobType] = useState("");
   const [km, setKm] = useState("");
@@ -249,6 +269,8 @@ function JobCardDetailPageContent() {
       formInitialised.current = true;
     }
     setAssignEmployeeId(jc.assignedEmployeeId?.toString() ?? "");
+    setTrialBy(jc.trialBy ?? "");
+    setTrialRemarks(jc.trialRemarks ?? "");
     setFinalStatus(jc.finalInspectionStatus ?? "");
     setFinalBy(jc.finalInspectionBy ?? "");
     setLoading(false);
@@ -308,23 +330,31 @@ function JobCardDetailPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // An invoiced job card can be set back to Open to change it; its draft
-  // invoice is brought up to date when it's invoiced again.
+  // A closed job card can be set back to Open to change it; its estimate
+  // and bills are brought up to date when it's closed again.
   const locked = jobCard ? LOCKED_STATUSES.includes(jobCard.status) : false;
+  const billed = (jobCard?.invoices?.length ?? 0) > 0;
+
+  // After closing: the estimate, which is now the bill.
+  function openBill(body: { estimateId?: number; invoice?: { id: number } }) {
+    if (body.estimateId) router.push(`/dashboard/estimates/${body.estimateId}`);
+    else if (body.invoice) router.push(`/dashboard/invoices/${body.invoice.id}`);
+    else router.refresh();
+  }
 
   async function handleStatusChange(status: string) {
     setActionError(null);
-    // Choosing Invoiced generates the draft invoice right away (or updates
-    // the existing one, keeping its discount) and opens it. If something is
-    // missing, the server says what (labour line, photos).
+    // Choosing Closed closes the job card right away (keeping the bill's
+    // discount if it was closed before) and opens the estimate. If something
+    // is missing, the server says what (labour line, photos).
     if (status === "INVOICED") {
       setShowInvoicePrompt(false);
       setGeneratingInvoice(true);
       try {
         const body = await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-        router.push(`/dashboard/invoices/${body.invoice.id}`);
+        openBill(body);
       } catch (err) {
-        setActionError(err instanceof ApiError ? err.message : "Could not generate the draft invoice");
+        setActionError(err instanceof ApiError ? err.message : "Could not close the job card");
         setGeneratingInvoice(false);
         await load();
       }
@@ -335,7 +365,7 @@ function JobCardDetailPageContent() {
       jobCard?.status === "INVOICED" &&
       status === "OPEN" &&
       !window.confirm(
-        `Set ${jobCard.jobCardNumber} back to Open to make changes? Its draft invoice ${jobCard.invoice?.invoiceNumber ?? ""} keeps its number and payments, and is updated when you mark the job card Invoiced again.`
+        `Set ${jobCard.jobCardNumber} back to Open to make changes? Its estimate ${jobCard.estimate?.estimateNumber ?? ""} keeps its payments, and is updated when you close the job card again.`
       )
     ) {
       return;
@@ -550,14 +580,31 @@ function JobCardDetailPageContent() {
     setActionError(null);
     setGeneratingInvoice(true);
     try {
-      const body = await apiFetch(`/job-cards/${id}/invoice`, {
+      const body = await apiFetch(`/job-cards/${id}/close`, {
         method: "POST",
         body: JSON.stringify({ discount: Number(discount) || 0 }),
       });
-      router.push(`/dashboard/invoices/${body.invoice.id}`);
+      openBill(body);
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Could not generate the draft invoice");
+      setActionError(err instanceof ApiError ? err.message : "Could not close the job card");
       setGeneratingInvoice(false);
+    }
+  }
+
+  async function handleSaveTrial(e: FormEvent) {
+    e.preventDefault();
+    setSavingTrial(true);
+    setActionError(null);
+    try {
+      await apiFetch(`/job-cards/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ trialBy: trialBy.trim() || null, trialRemarks: trialRemarks.trim() || null }),
+      });
+      await load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Could not save the trial details");
+    } finally {
+      setSavingTrial(false);
     }
   }
 
@@ -575,7 +622,7 @@ function JobCardDetailPageContent() {
     jobCard.media.filter((m) => m.phase === uploadPhase && m.mediaType === "PHOTO").map((m) => m.angle)
   );
 
-  // What invoicing needs (the backend checks the same): at least one labour
+  // What closing needs (the backend checks the same): at least one labour
   // line, and the four mandatory photos both before and after the work.
   const missingPhotos = (phase: "BEFORE" | "AFTER") => {
     const have = new Set(jobCard.media.filter((m) => m.phase === phase && m.mediaType === "PHOTO").map((m) => m.angle));
@@ -606,8 +653,8 @@ function JobCardDetailPageContent() {
           </div>
           <div>
             <Label>Status</Label>
-            {/* An invoiced job card can go back to Open (to change it), but
-                one with a draft invoice can't be cancelled. */}
+            {/* A closed job card can go back to Open (to change it), but
+                one that's been billed can't be cancelled. */}
             <Select
               value={showInvoicePrompt || generatingInvoice ? "INVOICED" : jobCard.status}
               onChange={(e) => handleStatusChange(e.target.value)}
@@ -615,7 +662,7 @@ function JobCardDetailPageContent() {
               className="w-auto"
             >
               {Object.entries(STATUS_LABELS)
-                .filter(([value]) => !(value === "CANCELLED" && jobCard.invoice))
+                .filter(([value]) => !(value === "CANCELLED" && billed))
                 .map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
@@ -640,7 +687,7 @@ function JobCardDetailPageContent() {
           {locked && (
             <span className="text-sm text-amber-700">
               {jobCard.status === "INVOICED"
-                ? "Invoiced — set the status back to Open to change parts or labour."
+                ? "Closed — set the status back to Open to change parts or labour."
                 : "Cancelled — set the status back to Open to make changes."}
             </span>
           )}
@@ -648,7 +695,7 @@ function JobCardDetailPageContent() {
       </div>
 
       {generatingInvoice && !showInvoicePrompt && (
-        <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">Generating the draft invoice...</p>
+        <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">Closing the job card...</p>
       )}
       {actionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
@@ -656,17 +703,22 @@ function JobCardDetailPageContent() {
         <Card className="max-w-md border-blue-200">
           <CardBody>
             <form onSubmit={handleGenerateInvoice} className="space-y-3">
-              <p className="text-base font-semibold text-gray-900">Mark as Invoiced</p>
+              <p className="text-base font-semibold text-gray-900">Close job card</p>
               <p className="text-sm text-gray-600">
-                {jobCard.invoice ? (
+                {billed ? (
                   <>
-                    This updates draft invoice {jobCard.invoice.invoiceNumber} to match {jobCard.jobCardNumber} as it is now
-                    (same number; payments already received stay on it).
+                    This brings estimate {jobCard.estimate?.estimateNumber} up to date with {jobCard.jobCardNumber} as it is
+                    now (payments already received stay on it).
                   </>
                 ) : (
-                  <>This generates the draft invoice for {jobCard.jobCardNumber}. It will appear in the Draft Invoices tab.</>
+                  <>
+                    The estimate{jobCard.estimate ? ` ${jobCard.estimate.estimateNumber}` : " (made now)"} becomes the bill, with
+                    exactly this job card&apos;s parts and labour. It&apos;s in the Estimates tab, where payments are taken.
+                  </>
                 )}{" "}
                 To change parts or labour afterwards, set the status back to Open.
+                {jobCard.jobType === "ACCIDENTAL_CLAIM" &&
+                  " On the estimate, choose which lines the insurance company pays (Customer / Insurance tab)."}
               </p>
               <ul className="space-y-1 text-sm">
                 {invoiceChecks.map((c) => (
@@ -693,7 +745,7 @@ function JobCardDetailPageContent() {
                   <span>− ₹{(Number(discount) || 0).toFixed(2)}</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-gray-200 pt-1 font-semibold text-gray-900">
-                  <span>Draft invoice total</span>
+                  <span>Bill total</span>
                   <span>₹{Math.max(0, jobCard.grandTotal - (Number(discount) || 0)).toFixed(2)}</span>
                 </div>
               </div>
@@ -703,7 +755,7 @@ function JobCardDetailPageContent() {
               </div>
               <div className="flex gap-2">
                 <Button type="submit" disabled={generatingInvoice || !invoiceReady}>
-                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Saving..." : jobCard.invoice ? "Update draft invoice" : "Generate draft invoice"}
+                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Closing..." : "Close job card"}
                 </Button>
                 <Button type="button" variant="secondary" onClick={() => setShowInvoicePrompt(false)}>
                   Cancel
@@ -886,7 +938,7 @@ function JobCardDetailPageContent() {
           </button>
         </div>
         <p className="mb-2 text-xs text-gray-500">
-          Front, Rear, Left and Right are mandatory for both phases before the draft invoice can be generated.
+          Front, Rear, Left and Right are mandatory for both phases before the job card can be closed.
         </p>
         <div className="flex flex-wrap gap-2">
           {MEDIA_ANGLES.map((a) => {
@@ -1219,6 +1271,89 @@ function JobCardDetailPageContent() {
         )}
       </div>
 
+      {/* Vehicle trial with the customer */}
+      <div>
+        <SectionHeading icon={Car}>Vehicle Trial Sign-off</SectionHeading>
+        <Card className="max-w-2xl">
+          <CardBody className="space-y-4">
+            <form onSubmit={handleSaveTrial} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
+              <div>
+                <Label>Trial taken by</Label>
+                <Input value={trialBy} onChange={(e) => setTrialBy(e.target.value)} placeholder="Staff name" />
+              </div>
+              <div>
+                <Label>Remarks (printed on the slip)</Label>
+                <Input value={trialRemarks} onChange={(e) => setTrialRemarks(e.target.value)} placeholder="e.g. Brakes, steering and AC checked" />
+              </div>
+              <Button
+                type="submit"
+                size="sm"
+                variant="secondary"
+                disabled={savingTrial || (trialBy.trim() === (jobCard.trialBy ?? "") && trialRemarks.trim() === (jobCard.trialRemarks ?? ""))}
+              >
+                {savingTrial ? "Saving..." : "Save"}
+              </Button>
+            </form>
+            <SignOffSlip
+              jobCardId={jobCard.id}
+              kind="trial"
+              fileName={`Trial_${jobCard.jobCardNumber}_${jobCard.vehicle.registrationNumber}`}
+              shareMobile={jobCard.vehicle.customer.mobile}
+              shareText={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the vehicle trial sign-off for ${jobCard.vehicle.registrationNumber} (job card ${jobCard.jobCardNumber}).\n— Motors Mitra`}
+              photoUrl={jobCard.trialPhotoUrl}
+              signedAt={jobCard.trialAt}
+              disabledReason={jobCard.status === "CANCELLED" ? "This job card is cancelled." : undefined}
+              onUploaded={load}
+            >
+              <div className="mb-4 flex items-start justify-between border-b border-gray-200 pb-3">
+                <div>
+                  <p className="text-lg font-bold">Motors Mitra</p>
+                  <p className="text-xs text-gray-500">Multibrand Car Workshop</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold tracking-wide">VEHICLE TRIAL SIGN-OFF</p>
+                  <p className="font-mono">{jobCard.jobCardNumber}</p>
+                  <p className="text-gray-500">Date: {new Date(jobCard.trialAt ?? Date.now()).toLocaleDateString()}</p>
+                </div>
+              </div>
+              <div className="mb-4 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="font-semibold">Customer</p>
+                  <p>{jobCard.vehicle.customer.name}</p>
+                  <p>Mobile: {jobCard.vehicle.customer.mobile}</p>
+                </div>
+                <div>
+                  <p className="font-semibold">Vehicle</p>
+                  <p>Reg. No.: {jobCard.vehicle.registrationNumber}</p>
+                  <p>
+                    {jobCard.vehicle.make} {jobCard.vehicle.model}
+                  </p>
+                  <p>KM reading: {jobCard.kmAtService ?? "—"}</p>
+                </div>
+              </div>
+              <p>
+                <span className="font-semibold">Trial taken by: </span>
+                {jobCard.trialBy || "________________"}
+              </p>
+              {jobCard.trialRemarks && (
+                <p className="mt-1">
+                  <span className="font-semibold">Remarks: </span>
+                  {jobCard.trialRemarks}
+                </p>
+              )}
+              <p className="mt-4">
+                I have taken a trial of my vehicle with the workshop&apos;s representative. The work done is to my
+                satisfaction.
+              </p>
+              <SignatureLines
+                left={["Customer Signature", "Name & date"]}
+                right={["For Motors Mitra", "Trial taken by"]}
+              />
+            </SignOffSlip>
+          </CardBody>
+        </Card>
+      </div>
+
       {/* Final inspection */}
       <div>
         <SectionHeading icon={ShieldCheck}>Final Inspection Sign-off</SectionHeading>
@@ -1267,41 +1402,112 @@ function JobCardDetailPageContent() {
           </div>
 
           <div className="mt-3 border-t border-gray-200 pt-3">
-            {jobCard.invoice && (
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {billed && jobCard.estimate && (
+              <div className="space-y-1">
                 <Link
-                  href={`/dashboard/invoices/${jobCard.invoice.id}`}
+                  href={`/dashboard/estimates/${jobCard.estimate.id}`}
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
                 >
-                  <Receipt className="h-4 w-4" /> View draft invoice {jobCard.invoice.invoiceNumber}
+                  <Receipt className="h-4 w-4" /> Estimate &amp; bill {jobCard.estimate.estimateNumber}
                 </Link>
-                <Link
-                  href={`/dashboard/invoices/${jobCard.invoice.id}?download=1`}
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
-                >
-                  Download PDF
-                </Link>
+                {jobCard.invoices!.map((b) => (
+                  <p key={b.id} className="flex justify-between text-xs text-gray-600">
+                    <span>{b.payer === "INSURANCE" ? "Insurance company" : "Customer"}</span>
+                    <span>
+                      {formatINR(b.totalAmount)} · due {formatINR(Math.max(0, Number(b.totalAmount) - Number(b.paymentAmount)))}
+                    </span>
+                  </p>
+                ))}
               </div>
             )}
             {jobCard.status === "OPEN" ? (
               <Button
                 type="button"
-                className={jobCard.invoice ? "mt-2 w-full" : "w-full"}
+                className={billed ? "mt-2 w-full" : "w-full"}
                 onClick={() => {
                   setActionError(null);
-                  if (jobCard.invoice) setDiscount(String(Number(jobCard.invoice.discount)));
+                  const customerBill = jobCard.invoices?.find((b) => b.payer === "CUSTOMER");
+                  if (customerBill) setDiscount(String(Number(customerBill.discount)));
                   setShowInvoicePrompt(true);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
               >
-                <Receipt className="h-4 w-4" /> {jobCard.invoice ? "Update draft invoice" : "Mark as Invoiced"}
+                <Receipt className="h-4 w-4" /> Close job card
               </Button>
             ) : jobCard.status === "CANCELLED" ? (
-              <p className="text-xs text-gray-500">This job card is cancelled. Set it back to Open to invoice it.</p>
+              <p className="text-xs text-gray-500">This job card is cancelled. Set it back to Open to close it.</p>
             ) : null}
           </div>
         </CardBody>
       </Card>
+
+      {/* Gate pass — once the job card is closed */}
+      <div>
+        <SectionHeading icon={LogOut}>Gate Pass</SectionHeading>
+        <Card className="max-w-2xl">
+          <CardBody>
+            <SignOffSlip
+              jobCardId={jobCard.id}
+              kind="gate-pass"
+              fileName={`GatePass_${jobCard.jobCardNumber}_${jobCard.vehicle.registrationNumber}`}
+              shareMobile={jobCard.vehicle.customer.mobile}
+              shareText={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the gate pass for your vehicle ${jobCard.vehicle.registrationNumber} (job card ${jobCard.jobCardNumber}).\n— Motors Mitra`}
+              photoUrl={jobCard.gatePassPhotoUrl}
+              signedAt={jobCard.gatePassAt}
+              disabledReason={jobCard.status !== "INVOICED" ? "The gate pass is issued once the job card is closed." : undefined}
+              onUploaded={load}
+            >
+              <div className="mb-4 flex items-start justify-between border-b border-gray-200 pb-3">
+                <div>
+                  <p className="text-lg font-bold">Motors Mitra</p>
+                  <p className="text-xs text-gray-500">Multibrand Car Workshop</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold tracking-wide">GATE PASS</p>
+                  <p className="font-mono">{jobCard.jobCardNumber}</p>
+                  <p className="text-gray-500">{new Date(jobCard.gatePassAt ?? Date.now()).toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="mb-4 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="font-semibold">Customer</p>
+                  <p>{jobCard.vehicle.customer.name}</p>
+                  <p>Mobile: {jobCard.vehicle.customer.mobile}</p>
+                </div>
+                <div>
+                  <p className="font-semibold">Vehicle</p>
+                  <p>Reg. No.: {jobCard.vehicle.registrationNumber}</p>
+                  <p>
+                    {jobCard.vehicle.make} {jobCard.vehicle.model}
+                  </p>
+                  <p>KM reading: {jobCard.kmAtService ?? "—"}</p>
+                </div>
+              </div>
+              {billed && (
+                <div className="mb-3 max-w-xs space-y-0.5">
+                  {jobCard.invoices!.map((b) => {
+                    const due = Math.max(0, Number(b.totalAmount) - Number(b.paymentAmount));
+                    return (
+                      <p key={b.id} className="flex justify-between">
+                        <span>{b.payer === "INSURANCE" ? "Insurance company" : "Bill"} {jobCard.estimate?.estimateNumber}</span>
+                        <span>{due > 0.005 ? `${formatINR(due)} due` : "Paid"}</span>
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+              <p>The above vehicle is allowed to leave the workshop premises.</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Customer: I have received my vehicle in good condition, along with its belongings.
+              </p>
+              <SignatureLines
+                left={["Customer Signature", "Vehicle received"]}
+                right={["For Motors Mitra", "Authorised signatory"]}
+              />
+            </SignOffSlip>
+          </CardBody>
+        </Card>
+      </div>
     </div>
   );
 }

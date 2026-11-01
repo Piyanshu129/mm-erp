@@ -14,6 +14,7 @@ const uploadApprovalPhoto = uploadImage(estimatesController.ESTIMATE_APPROVAL_FO
 
 estimatesRouter.use(authenticate, requirePermission("JOB_CARDS"));
 
+estimatesRouter.get("/", asyncHandler(estimatesController.list));
 estimatesRouter.get("/:id", asyncHandler(estimatesController.get));
 estimatesRouter.patch(
   "/:id",
@@ -27,11 +28,15 @@ estimatesRouter.post(
 );
 estimatesRouter.delete("/:id/lines/:lineId", asyncHandler(estimatesController.removeLine));
 estimatesRouter.post("/:id/approval", uploadApprovalPhoto, asyncHandler(estimatesController.approve));
-// GST tax invoice made from the estimate: HSN/SAC + GST % per line, then
-// generate (numbers and locks it).
+// GST tax invoice(s) made from the estimate: HSN/SAC + GST % (and who pays,
+// on an accidental claim) per line, then generate (numbers and locks it).
 estimatesRouter.patch(
   "/:id/gst",
   validateBody(estimatesController.gstDetailsSchema),
   asyncHandler(estimatesController.updateGst)
 );
-estimatesRouter.post("/:id/gst-invoice", asyncHandler(estimatesController.generateGstInvoice));
+estimatesRouter.post(
+  "/:id/gst-invoice",
+  validateBody(estimatesController.generateGstInvoiceSchema),
+  asyncHandler(estimatesController.generateGstInvoice)
+);

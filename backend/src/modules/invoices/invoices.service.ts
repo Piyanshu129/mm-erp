@@ -4,6 +4,7 @@ import { ConflictError, NotFoundError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { assertMandatoryPhotos } from "../jobCards/jobCards.service";
 import { paymentSnapshot, recordPaymentAudit } from "../../lib/paymentAudit";
+import { syncBills, syncEstimateWithJobCard } from "../estimates/estimates.service";
 
 const paymentInclude = {
   createdBy: { select: { id: true, name: true } },
@@ -15,6 +16,7 @@ const detailInclude = {
       vehicle: { include: { customer: true } },
       parts: { include: { item: true }, orderBy: { id: "asc" as const } },
       labour: { orderBy: { id: "asc" as const } },
+      estimate: { select: { id: true, estimateNumber: true } },
     },
   },
   createdBy: { select: { id: true, name: true } },
@@ -47,24 +49,23 @@ export async function listInvoices(page: PageParams, q: string | undefined) {
 
 export async function getInvoice(id: number) {
   const invoice = await prisma.invoice.findUnique({ where: { id }, include: detailInclude });
-  if (!invoice) throw new NotFoundError("Draft invoice not found");
+  if (!invoice) throw new NotFoundError("Bill not found");
   return invoice;
 }
 
-// Deliberately does NOT copy parts/labour into the invoice — it reads them
-// live from the job card, which is safe because the job card is locked
-// (status -> INVOICED, set in this same transaction) the moment this runs.
-// This is the only way a job card becomes Invoiced.
+// Closing a job card (the only way it becomes Closed — status INVOICED):
+// its estimate is brought in step with the final parts and labour and
+// becomes the bill, and the bills behind it — the customer's, plus the
+// insurance company's on an accidental claim — are made or brought up to
+// date (estimates.service.ts). There's no separate draft invoice any more.
 //
-// A job card that was invoiced and then set back to Open (to change it)
-// keeps its draft invoice: invoicing it again brings that same invoice —
-// same number, same payments — up to date with the job card, rather than
-// creating a second one.
+// A closed job card that was set back to Open (to change it) keeps its
+// bills: closing it again updates them — same numbers, same payments.
 //
-// discount left undefined (marking Invoiced from the status dropdown) keeps
-// the existing draft invoice's discount, or none for a first invoice.
-export async function createInvoice(jobCardId: number, discount: number | undefined, createdById: number) {
-  // Status first, so a cancelled or already-invoiced job card gets that
+// discount (the customer's) left undefined, as when closing from the status
+// dropdown, keeps the bill's current discount, or none the first time.
+export async function closeJobCard(jobCardId: number, discount: number | undefined, createdById: number) {
+  // Status first, so a cancelled or already-closed job card gets that
   // reason rather than a list of missing photos. (Re-checked inside the
   // transaction below.)
   const current = await prisma.jobCard.findUnique({ where: { id: jobCardId } });
@@ -72,15 +73,15 @@ export async function createInvoice(jobCardId: number, discount: number | undefi
   if (current.status !== "OPEN") {
     throw new ConflictError(
       current.status === "INVOICED"
-        ? "This job card is already invoiced"
-        : "Only an open job card can be invoiced — set it back to Open first if it was cancelled"
+        ? "This job card is already closed"
+        : "Only an open job card can be closed — set it back to Open first if it was cancelled"
     );
   }
 
-  // Every draft invoice bills at least one labour/service line.
+  // Every bill has at least one labour/service line.
   const labourLines = await prisma.jobCardLabour.count({ where: { jobCardId } });
   if (labourLines === 0) {
-    throw new ConflictError("Add at least one labour / service line before generating the draft invoice");
+    throw new ConflictError("Add at least one labour / service line before closing the job card");
   }
 
   // The workshop's before/after comparison photos must be done before the
@@ -89,67 +90,22 @@ export async function createInvoice(jobCardId: number, discount: number | undefi
   await assertMandatoryPhotos(jobCardId, "AFTER");
 
   return prisma.$transaction(async (tx) => {
-    // The job card row is locked for the whole generation, so two clicks
-    // (or two people) at the same moment can't both create a draft invoice:
-    // the second waits, then sees the status is already INVOICED.
+    // The job card row is locked for the whole close, so two clicks (or two
+    // people) at the same moment can't both make bills: the second waits,
+    // then sees the job card is already closed.
     await tx.$queryRaw`SELECT id FROM job_cards WHERE id = ${jobCardId} FOR UPDATE`;
-    const jobCard = await tx.jobCard.findUnique({
-      where: { id: jobCardId },
-      include: { parts: true, labour: true, invoice: true },
-    });
+    const jobCard = await tx.jobCard.findUnique({ where: { id: jobCardId } });
     if (!jobCard) throw new NotFoundError("Job card not found");
     if (jobCard.status !== "OPEN") {
-      throw new ConflictError(
-        jobCard.status === "INVOICED" ? "This job card is already invoiced" : "Only an open job card can be invoiced"
-      );
+      throw new ConflictError(jobCard.status === "INVOICED" ? "This job card is already closed" : "Only an open job card can be closed");
     }
 
-    const partsTotal = jobCard.parts.reduce((sum, p) => sum + Number(p.amount), 0);
-    const labourTotal = jobCard.labour.reduce((sum, l) => sum + Number(l.amount), 0);
-    const subtotal = partsTotal + labourTotal;
-    discount = discount ?? Number(jobCard.invoice?.discount ?? 0);
-
-    if (discount < 0 || discount > subtotal) {
-      throw new ConflictError(`Discount must be between 0 and ${subtotal.toFixed(2)}`);
-    }
-
-    const totalAmount = subtotal - discount;
-    let invoiceId: number;
-
-    if (jobCard.invoice) {
-      // Re-invoicing after the job card was reopened: update the same draft
-      // invoice. It can't drop below what the customer has already paid.
-      const paid = Number(jobCard.invoice.paymentAmount);
-      if (totalAmount < paid) {
-        throw new ConflictError(
-          `The new total ₹${totalAmount.toFixed(2)} is less than the ₹${paid.toFixed(2)} already paid on ${jobCard.invoice.invoiceNumber}`
-        );
-      }
-      await tx.invoice.update({
-        where: { id: jobCard.invoice.id },
-        data: { partsTotal, labourTotal, discount, totalAmount },
-      });
-      invoiceId = jobCard.invoice.id;
-    } else {
-      const created = await tx.invoice.create({
-        data: {
-          invoiceNumber: `PENDING-${jobCardId}`,
-          jobCardId,
-          partsTotal,
-          labourTotal,
-          discount,
-          totalAmount,
-          createdById,
-        },
-      });
-      const invoiceNumber = `INV-${String(created.id).padStart(6, "0")}`;
-      await tx.invoice.update({ where: { id: created.id }, data: { invoiceNumber } });
-      invoiceId = created.id;
-    }
-
+    const estimateId = await syncEstimateWithJobCard(tx, jobCardId, createdById);
+    await syncBills(tx, jobCardId, createdById, discount);
     await tx.jobCard.update({ where: { id: jobCardId }, data: { status: "INVOICED" } });
 
-    return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: detailInclude });
+    const invoices = await tx.invoice.findMany({ where: { jobCardId }, include: detailInclude, orderBy: { id: "asc" } });
+    return { estimateId, invoices };
   });
 }
 
@@ -190,7 +146,7 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
-    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    if (locked.length === 0) throw new NotFoundError("Bill not found");
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
 
     const due = Number(invoice.totalAmount) - Number(invoice.paymentAmount);
@@ -242,10 +198,10 @@ export async function updateInvoicePayment(
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
-    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    if (locked.length === 0) throw new NotFoundError("Bill not found");
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
+    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this bill");
 
     const discountChange = discount - Number(payment.discount);
     const newTotal = Number(invoice.totalAmount) - discountChange;
@@ -294,10 +250,10 @@ export async function updateInvoicePayment(
 export async function deleteInvoicePayment(invoiceId: number, paymentId: number, changedById: number) {
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
-    if (locked.length === 0) throw new NotFoundError("Draft invoice not found");
+    if (locked.length === 0) throw new NotFoundError("Bill not found");
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this draft invoice");
+    if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this bill");
 
     await tx.invoicePayment.delete({ where: { id: paymentId } });
     await recordPaymentAudit(tx, {
@@ -321,8 +277,10 @@ export async function deleteInvoicePayment(invoiceId: number, paymentId: number,
 }
 
 // ---- Customer / vehicle accounts -------------------------------------------
-// What a customer (or one vehicle) has been invoiced, what they've paid, and
-// what's still due — always computed from the invoices themselves.
+// What a customer (or one vehicle) has been billed, what they've paid, and
+// what's still due — always computed from the bills themselves. Only the
+// customer's own bills: what an insurance company owes on a claim is on that
+// estimate, not on the customer's account.
 
 export interface InvoiceAccount {
   invoiceCount: number;
@@ -359,7 +317,7 @@ export async function accountsBy(kind: "customer" | "vehicle", ids: number[]): P
     FROM invoices i
     JOIN job_cards jc ON jc.id = i.job_card_id
     JOIN vehicles v ON v.id = jc.vehicle_id
-    WHERE ${key} IN (${Prisma.join(ids)})
+    WHERE ${key} IN (${Prisma.join(ids)}) AND i.payer = 'CUSTOMER'
     GROUP BY ${key}
   `;
   const byOwner = new Map(rows.map((r) => [r.owner_id, r]));
@@ -372,7 +330,7 @@ export async function accountsBy(kind: "customer" | "vehicle", ids: number[]): P
 // payment is against), and the full payment history across them.
 export async function accountDetail(kind: "customer" | "vehicle", id: number) {
   const vehicleWhere: Prisma.VehicleWhereInput = kind === "customer" ? { customerId: id } : { id };
-  const invoiceWhere: Prisma.InvoiceWhereInput = { jobCard: { vehicle: vehicleWhere } };
+  const invoiceWhere: Prisma.InvoiceWhereInput = { jobCard: { vehicle: vehicleWhere }, payer: "CUSTOMER" };
 
   const [invoices, payments] = await Promise.all([
     prisma.invoice.findMany({
@@ -383,7 +341,13 @@ export async function accountDetail(kind: "customer" | "vehicle", id: number) {
         invoiceDate: true,
         totalAmount: true,
         paymentAmount: true,
-        jobCard: { select: { jobCardNumber: true, vehicle: { select: { registrationNumber: true } } } },
+        jobCard: {
+          select: {
+            jobCardNumber: true,
+            vehicle: { select: { registrationNumber: true } },
+            estimate: { select: { id: true, estimateNumber: true } },
+          },
+        },
       },
       orderBy: [{ invoiceDate: "asc" }, { id: "asc" }],
     }),
@@ -392,7 +356,13 @@ export async function accountDetail(kind: "customer" | "vehicle", id: number) {
       include: {
         ...paymentInclude,
         invoice: {
-          select: { id: true, invoiceNumber: true, jobCard: { select: { vehicle: { select: { registrationNumber: true } } } } },
+          select: {
+            id: true,
+            invoiceNumber: true,
+            jobCard: {
+              select: { vehicle: { select: { registrationNumber: true } }, estimate: { select: { id: true, estimateNumber: true } } },
+            },
+          },
         },
       },
       orderBy: [{ paymentDate: "desc" }, { id: "desc" }],

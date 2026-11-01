@@ -51,35 +51,67 @@ Since 2026-10-20 the due date is **estimated from average running**. Readings ar
 
 This is the central workflow — `/dashboard/jobcards/[id]` is the most complex page in the app because it's driving all of the following through one status field plus several sub-resources.
 
-### Statuses: Open, Invoiced, Cancelled
+### Statuses: Open, Closed, Cancelled
 
-Defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts), enforced in [`jobCards.service.ts#updateJobCard`](../backend/src/modules/jobCards/jobCards.service.ts) and [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). On 2026-09-30 they were simplified from an eleven-step workflow (Draft → … → Completed → Invoiced → Ready for Delivery → Delivered → Closed):
+Defined in [`lib/jobCardStatus.ts`](../backend/src/lib/jobCardStatus.ts), enforced in [`jobCards.service.ts#updateJobCard`](../backend/src/modules/jobCards/jobCards.service.ts) and [`invoices.service.ts#closeJobCard`](../backend/src/modules/invoices/invoices.service.ts). On 2026-09-30 they were simplified from an eleven-step workflow (Draft → … → Completed → Invoiced → Ready for Delivery → Delivered → Closed). Since 2026-11-01 the app calls the second one **Closed**. It's still stored as `INVOICED`, and there's no separate draft invoice any more: **closing the job card makes its estimate the bill** (see *Closing* below).
 
 ```
-OPEN ──(generate draft invoice)──> INVOICED
-  ↑ ↓          <──(set back to Open)──
+OPEN ──(close job card)──> INVOICED (shown "Closed")
+  ↑ ↓      <──(set back to Open)──
 CANCELLED
 ```
 
-- **Invoiced always comes with a draft invoice.** `PATCH` with `status: "INVOICED"` (choosing *Invoiced* in the status dropdown) generates the draft invoice — or updates the existing one for a reopened job card, keeping its discount — in the same transaction as the status change (`jobCards.controller.ts#update` → `createInvoice`). *Mark as Invoiced* does the same through `POST /job-cards/:id/invoice` with an optional discount. The job card row is locked during generation, so two at once still produce one invoice. A job card therefore can't say Invoiced without an invoice behind it.
-- **Invoiced can be set back to Open** (since 2026-10-11) to change parts or labour; the page asks for confirmation. The draft invoice stays. Invoicing again (`POST /job-cards/:id/invoice`) **updates that same invoice** — same number, same payments — with the new parts, labour and discount, and refuses a total below what's already been paid. A job card with an invoice can't be cancelled.
-- **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be invoiced.
-- **At least one labour / service line** is required to invoice.
-- **Mandatory before/after photos** are checked at invoicing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`. Before the simplification it guarded the old in-progress/Completed statuses; invoicing was only possible from Completed, so the rule's effect is unchanged.
+- **Closed always comes with its bills.** `PATCH` with `status: "INVOICED"` (choosing *Closed* in the status dropdown) closes the job card. Closing makes or updates the bills, keeping the customer's discount for a reopened job card, in the same transaction as the status change (`jobCards.controller.ts#update` → `closeJobCard`). **Close job card** does the same through `POST /job-cards/:id/close` with an optional discount (`/invoice` is the old name, still accepted). The job card row is locked while closing, so two closes at once can't make bills twice.
+- **Closed can be set back to Open** to change parts or labour; the page asks for confirmation. The bills stay. Closing again **updates the same bills**: same numbers, same payments. It refuses a bill total below what's already been paid on it. **Not once a GST invoice has been made** from the estimate: that's final. A billed job card can't be cancelled.
+- **Cancelled can be reopened** to Open. While cancelled, parts and labour are locked and it can't be closed.
+- **At least one labour / service line** is required to close.
+- **Mandatory before/after photos** are checked at closing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`.
+- **Job types**: General Service, Accidental Claim, AC, Dent & Paint, Mechanical, Detailing (`DETAILING`) and Setting & Adjustment (`SETTING_ADJUSTMENT`); the last two were added 2026-11-01. The labels are shared in `frontend/src/lib/jobTypes.ts`. On a closed job card, switching to or from Accidental Claim moves lines between the customer's and insurance company's bills. This is refused once a GST invoice exists.
+
+#### Vehicle trial sign-off and gate pass
+
+The job card page has two printable slips, signed on paper, each with **Print**, **Download PDF** and **Share on WhatsApp** (`components/SignOffSlip.tsx`). A photo of the signed copy is uploaded back with `POST /job-cards/:id/sign-off/trial` or `/sign-off/gate-pass` (multipart `photo`, stored under `job-card-sign-offs`). A later photo replaces the earlier one, and the first sign-off time is kept.
+
+- **Vehicle trial sign-off**, any time before the job card is cancelled. It shows *Trial taken by* and *Remarks* (`trialBy`/`trialRemarks`, saved with `PATCH /job-cards/:id`), and the customer's statement that they took the trial and are satisfied. The photo sets `trialPhotoUrl`/`trialAt`.
+- **Gate pass**, only once the job card is closed. It shows each bill as paid or what's still due. It says the vehicle may leave, with the customer's receipt of the vehicle. The photo sets `gatePassPhotoUrl`/`gatePassAt` and marks the job card delivered (`deliveredAt`, if not already set).
 - **Assignment validation**: `assignedEmployeeId` must reference an active employee.
-- Side effects: `estimateAmount`/`estimateApproved`/`estimateApprovedAt` are kept in step by the estimate (below), and setting `finalInspectionStatus` stamps `finalInspectionAt`. (`deliveredAt` remains in the schema but is no longer set, since there is no Delivered status.)
+- Side effects: `estimateAmount`/`estimateApproved`/`estimateApprovedAt` are kept in step by the estimate (below), and setting `finalInspectionStatus` stamps `finalInspectionAt`. `deliveredAt` is set by the signed gate pass.
 
 The migration `20260930110000_simplify_job_card_statuses` converted existing job cards by what was actually true of them. Any job card with an invoice became Invoiced, a cancelled one without an invoice stayed Cancelled, and everything else became Open.
 
 ### The lock: the status
 
-`jobCardParts.service.ts#assertJobCardEditable` (also used for labour) refuses changes while the status is `INVOICED` or `CANCELLED`. Until 2026-10-11 it also refused whenever an invoice existed, because Invoiced was final; now an invoiced job card is edited by setting it back to Open, and its invoice catches up when it's invoiced again. The status can't be set to Invoiced except by generating the draft invoice, so the status is a reliable lock.
+`jobCardParts.service.ts#assertJobCardEditable` (also used for labour) refuses changes while the status is `INVOICED` (Closed) or `CANCELLED`. A closed job card is edited by setting it back to Open, and its estimate and bills catch up when it's closed again. The status can't be set to Closed except by closing the job card, so the status is a reliable lock. A closed job card's estimate is locked too: its lines follow the job card.
 
 ### Estimates
 
 `/dashboard/jobcards/[id]` → *Create estimate* → `POST /job-cards/:jobCardId/estimate` → [`estimates.service.ts`](../backend/src/modules/estimates/estimates.service.ts), then `/dashboard/estimates/[id]`.
 
 Creating copies the job card's parts and labour so far into `EstimateLine`s (calling it again returns the existing estimate). While it's a `DRAFT`: `POST /estimates/:id/lines` adds an inventory part (`itemId`; name and MRP fill in), a part not in inventory (`description` + `rate`) or labour; `DELETE /estimates/:id/lines/:lineId` removes one; `PATCH /estimates/:id` sets `taxRate`/`notes`. Lines never touch stock. The page is printable and downloads as `EST-000123_<car number>_<date>.pdf`, with signature spaces for the customer and the workshop. `POST /estimates/:id/approval` (multipart `photo` of the signed copy) marks it `APPROVED` and locks it; the photo can be replaced later. The job card, the vehicle's service history (`GET /vehicles/:id/service-history` includes `estimate`) and the backup/Excel export all link to it. Every change also updates the job card's `estimateAmount`/`estimateApproved`/`estimateApprovedAt`. **Share on WhatsApp** (`components/SharePdfButton.tsx`) makes the same PDF. On a phone it opens the share sheet with the PDF attached. On a computer it downloads the PDF and opens WhatsApp to the customer with a message ready, and the PDF is attached there by hand.
+
+#### Closing: the estimate becomes the bill
+
+`invoices.service.ts#closeJobCard` runs, in one transaction with the job card row locked:
+
+1. `estimates.service.ts#syncEstimateWithJobCard` makes the estimate exactly the job card's parts and labour, creating the estimate if there isn't one.
+   - Each estimate line remembers the job card line it was copied from (`EstimateLine.jobCardPartId`/`jobCardLabourId`), so a line keeps its HSN, GST % and who pays.
+   - Lines that aren't on the job card (quote-only lines) are dropped.
+   - If a GST invoice was already made from the estimate, its lines are left alone.
+2. `syncBills` makes or updates one `Invoice` row per payer. The customer's bill is the customer's lines minus the discount. On an accidental claim, the insurance company's bill is the insurance company's lines.
+3. The status becomes `INVOICED`.
+
+The page then opens the estimate. The **Estimates** tab (`/dashboard/estimates`, `GET /estimates?q=`) lists every estimate with each one's total, paid and due once closed. It replaces the Draft Invoices tab, and old draft invoice links open the estimate. The estimate page shows **Estimate & bill**: the lines (insurance lines tagged), the discount, the total, what the insurance company and the customer each pay, and what's paid and due. Each bill has its own payment form, history and change log (`components/EstimateBills.tsx`, still `POST /invoices/:id/payments`).
+
+The migration `20261101090000_estimate_is_the_bill` gave every job card that already had a draft invoice an estimate matching it. That estimate got the job card's parts and labour, unless a GST invoice had already been made from it. Existing invoices became the customer's bills, with the same amounts, numbers and payments.
+
+#### Accidental claims: customer scope and insurance scope
+
+On an Accidental Claim job card, the estimate has a **Customer / Insurance** tab. Each line is billed wholly to the customer or to the insurance company (`EstimateLine.scope`: `CUSTOMER` | `INSURANCE`, saved with `PATCH /estimates/:id/gst` `lines:[{id, scope}]`).
+
+- On a closed job card, saving moves the amounts between the two bills. The customer's discount stays on the customer's bill.
+- An insurance bill can't be emptied while payments are recorded on it.
+- Any other job type bills every line to the customer, and the server refuses `INSURANCE` there.
+- The customer and vehicle accounts (Customers and Vehicles pages) show only the customer's bills. The insurance company's share is on the estimate.
 
 #### GST invoice tab
 
@@ -89,7 +121,18 @@ The estimate page has a second tab, **GST Invoice** (`components/GstInvoice.tsx`
 - **To another state**, it's all IGST.
 - If **prices include GST**, the taxable value is `amount ÷ (1 + rate)`. Otherwise GST is added on top.
 
-The tab also shows a tax summary by rate, a rounded total and the amount in words. **Generate GST invoice number** (`POST /estimates/:id/gst-invoice`) needs a GST % on every line. It assigns `GST/<FY>/0001`, numbered in sequence within the April–March financial year, under an advisory lock. After that the GST details and the estimate's lines are locked. The invoice header comes from **Settings → Business details** (`GET/PUT /settings/business`, stored in `AppSetting`; anyone can read it, only an admin can change it).
+The tab also shows a tax summary by rate, a rounded total and the amount in words.
+
+**Generate GST invoice number** (`POST /estimates/:id/gst-invoice` `{payer?}`) needs the job card closed and a GST % on every line of that payer. It assigns `GST/<FY>/0001`, numbered in sequence within the April–March financial year across both kinds, under an advisory lock.
+
+On an accidental claim there are **two GST invoices**:
+- **The customer's**, covering the customer's lines (`gstInvoiceNumber`, `customerGstin`).
+- **The insurance company's**, covering its lines (`insuranceGstInvoiceNumber`, `insuranceGstin`). It's billed to the insurer, with the claim number and the insured customer.
+
+**Locks once an invoice is generated:**
+- A payer's GST invoice fixes that payer's HSN/GST % and GSTIN.
+- Either invoice fixes the supply type, whether prices include GST, and who pays for each line.
+- Either invoice also stops the job card from being reopened. The invoice header comes from **Settings → Business details** (`GET/PUT /settings/business`, stored in `AppSetting`; anyone can read it, only an admin can change it).
 
 ### Parts: by item code and quantity
 
@@ -110,15 +153,26 @@ Example: 10 available, use 2 → 8 available; trying to use 50 is refused with n
 
 Simple — `POST/DELETE /job-cards/:jobCardId/labour`, same lock check, `amount = quantity × rate` computed server-side, no stock implications.
 
+## 3a. Purchases: paying the supplier at the end of the entry
+
+A purchase entry from a supplier can carry a **Payment to supplier** section at the end: amount paid, discount, mode, reference and paid by. **Paid in full** fills in the entry's total. It's sent as a JSON `payment` field with the purchase (`POST /purchases`). It's saved in the same transaction as a `SupplierPayment`, dated the purchase date, through `suppliers.service.ts#recordSupplierPaymentTx`. The usual check applies: payment + discount can't exceed what's due to the supplier, including this purchase. If that check fails, nothing is saved, not even the purchase. Leave the section empty for a purchase on credit.
+
 ## 3b. Daily Sales & Purchases report
 
 `/dashboard/reports` → **Daily Sales & Purchases** (admin) → `GET /reports/daily?date=YYYY-MM-DD` → [`reports/dailyReport.ts`](../backend/src/modules/reports/dailyReport.ts). For one day on the workshop's calendar: every draft invoice dated that day with its parts, non-inventory and labour lines, discount, tax, total, received, outstanding and payments; every customer payment received that day (totals by mode); and every purchase line with item code, brand, specification, quantity, rate, amount and the supplier's balance (supplier payments go against the account, not a purchase). Only invoices whose job card is Invoiced count in the totals — one whose job card was set back to Open is listed as "being revised". Print hides the app chrome; **Export Excel** writes a workbook with Summary, Sales, Sale Lines, Payments Received and Purchases sheets in the browser (`lib/excel.ts`, ExcelJS loaded on demand). All report exports, and the Purchases and Expenses month lists, export to Excel.
 
+The range buttons are Today, This month and **All time** (from 2020-01-01). Bills are listed by their estimate number, and an insurance company's bill is marked *(Insurance)*. **Share on WhatsApp** (`lib/shareReport.ts#shareFile`) works like this:
+- On a phone, the share sheet opens with the Excel file and a summary.
+- On a computer, the Excel file downloads and WhatsApp opens with the summary, ready for the file to be attached.
+- If a phone refuses because preparing the file took too long after the tap, the button says *Ready — tap to share*.
+
+**Share complete data (Excel)** shares the full workbook of every table, kept fresh by the server (`GET /backup/excel`, admin).
+
 **Payment corrections** (admin): `PATCH`/`DELETE /invoices/:id/payments/:paymentId` and `/suppliers/:id/payments/:paymentId` adjust the running totals in the same transaction (an edit can't overpay) and write a `PaymentAudit` row with the before/after values. The change log shows under the payment history (`GET /invoices/:id/payment-audits`, `GET /suppliers/:id/payment-audits`) and in the full Excel export's *Payment Changes* sheet.
 
-## 4. Draft invoice generation & the payment-snapshot pattern
+## 4. Bills & the payment-snapshot pattern
 
-`/dashboard/jobcards/[id]` (an Open job card, choosing *Invoiced* in the status dropdown or clicking *Mark as Invoiced*) → `POST /job-cards/:jobCardId/invoice` `{discount}` → [`invoices.service.ts#createInvoice`](../backend/src/modules/invoices/invoices.service.ts). After generating, the page moves to the invoice. Invoices are labelled **Draft Invoice** throughout the app (sidebar, list, PDF title); routes and tables are still `invoices`.
+Since 2026-11-01 there's no draft invoice in the app. An `Invoice` row is the money side of a closed job card's estimate: one per payer, the customer and (on an accidental claim) the insurance company. Closing is described in §3 above. Routes and tables are still `invoices`. The rest of this section describes how those rows work. The old invoice page (`/dashboard/invoices/[id]`) now opens the estimate; it shows the old layout only for a bill without an estimate.
 
 **Viewing and downloading:** the invoice page (`/dashboard/invoices/[id]`) has *Print* and *Download PDF*. The Invoices list has *View* and *Download* on every row. Download renders the on-screen invoice to an A4 PDF in the browser (`lib/invoicePdf.ts`, using `html2pdf.js`, which loads only when a download is requested). The file is named `<car number>_<DD-MM-YYYY>.pdf`, for example `HR06AB1234_30-09-2026.pdf`. The page title is set to the same name, so the browser's own Print → Save as PDF suggests it too. `?download=1` on the invoice page starts the download automatically; that's how the list's Download link works.
 

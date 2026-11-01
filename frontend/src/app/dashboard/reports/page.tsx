@@ -143,6 +143,8 @@ function ExportButton({ onClick }: { onClick: () => void }) {
 // into WhatsApp — see lib/shareReport.ts.
 function ShareButton({ fileName, sheetName, rows, text }: { fileName: string; sheetName: string; rows: Record<string, unknown>[]; text: string }) {
   const [busy, setBusy] = useState(false);
+  // Kept when a phone refused the share (too slow after the tap) — tap again.
+  const [ready, setReady] = useState<File | null>(null);
   return (
     <Button
       size="sm"
@@ -151,13 +153,21 @@ function ShareButton({ fileName, sheetName, rows, text }: { fileName: string; sh
       onClick={async () => {
         setBusy(true);
         try {
-          await shareReport({ fileName, sheets: [{ name: sheetName, columns: rows.length ? Object.keys(rows[0]) : [], rows }], text });
+          const { result, file } = await shareReport({
+            fileName,
+            sheets: [{ name: sheetName, columns: rows.length ? Object.keys(rows[0]) : [], rows }],
+            text,
+            ready,
+          });
+          setReady(result === "retry" ? file ?? null : null);
+        } catch {
+          setReady(null);
         } finally {
           setBusy(false);
         }
       }}
     >
-      <MessageCircle className="h-3.5 w-3.5" /> {busy ? "Preparing..." : "Share on WhatsApp"}
+      <MessageCircle className="h-3.5 w-3.5" /> {busy ? "Preparing..." : ready ? "Ready — tap to share" : "Share on WhatsApp"}
     </Button>
   );
 }

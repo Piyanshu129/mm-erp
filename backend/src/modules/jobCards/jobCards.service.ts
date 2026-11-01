@@ -4,8 +4,17 @@ import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { JOB_CARD_STATUSES } from "../../lib/jobCardStatus";
 import { refreshVehicleService } from "../../lib/serviceSchedule";
+import { syncBills } from "../estimates/estimates.service";
 
-export const JOB_TYPES = ["GENERAL_SERVICE", "ACCIDENTAL_CLAIM", "AC", "DENT_PAINT", "MECHANICAL"] as const;
+export const JOB_TYPES = [
+  "GENERAL_SERVICE",
+  "ACCIDENTAL_CLAIM",
+  "AC",
+  "DENT_PAINT",
+  "MECHANICAL",
+  "DETAILING",
+  "SETTING_ADJUSTMENT",
+] as const;
 
 // The four sides every "before" and "after" comparison shot must cover,
 // regardless of which other optional angles staff also capture.
@@ -30,9 +39,20 @@ const detailInclude = {
   labour: { orderBy: { id: "asc" as const } },
   assignedEmployee: { select: { id: true, name: true, role: true } },
   createdBy: { select: { id: true, name: true } },
-  invoice: { select: { id: true, invoiceNumber: true, discount: true, paymentAmount: true } },
+  invoices: {
+    select: { id: true, invoiceNumber: true, payer: true, discount: true, totalAmount: true, paymentAmount: true },
+    orderBy: { id: "asc" as const },
+  },
   estimate: {
-    select: { id: true, estimateNumber: true, status: true, approvalPhotoUrl: true, approvedAt: true },
+    select: {
+      id: true,
+      estimateNumber: true,
+      status: true,
+      approvalPhotoUrl: true,
+      approvedAt: true,
+      gstInvoiceNumber: true,
+      insuranceGstInvoiceNumber: true,
+    },
   },
 } satisfies Prisma.JobCardInclude;
 
@@ -120,12 +140,14 @@ export interface JobCardUpdateInput {
   finalInspectionBy?: string | null;
   insuranceCompany?: string | null;
   claimNumber?: string | null;
+  trialBy?: string | null;
+  trialRemarks?: string | null;
 }
 
 // Every photo taken for a phase must cover all four mandatory angles — this
 // is what actually enforces the workshop's "before" and "after" comparison
 // shots, rather than just letting staff upload anything and call it done.
-// Checked when the job card is invoiced (invoices.service.ts).
+// Checked when the job card is closed (invoices.service.ts).
 export async function assertMandatoryPhotos(jobCardId: number, phase: "BEFORE" | "AFTER") {
   const media = await prisma.jobCardMedia.findMany({
     where: { jobCardId, phase, mediaType: "PHOTO" },
@@ -140,8 +162,8 @@ export async function assertMandatoryPhotos(jobCardId: number, phase: "BEFORE" |
   }
 }
 
-export async function updateJobCard(id: number, input: JobCardUpdateInput) {
-  const jobCard = await prisma.jobCard.findUnique({ where: { id }, include: { invoice: true } });
+export async function updateJobCard(id: number, input: JobCardUpdateInput, userId: number) {
+  const jobCard = await prisma.jobCard.findUnique({ where: { id }, include: { invoices: true, estimate: true } });
   if (!jobCard) throw new NotFoundError("Job card not found");
 
   if (input.jobType && !(JOB_TYPES as readonly string[]).includes(input.jobType)) {
@@ -152,21 +174,34 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
     throw new ConflictError(`Invalid status: ${input.status}`);
   }
 
-  // An invoiced job card can be set back to Open to change it; its draft
-  // invoice keeps its number and payments, and is brought up to date when
-  // the job card is invoiced again. It can't be cancelled while a draft
-  // invoice stands against it.
-  if (jobCard.invoice && input.status === "CANCELLED") {
+  // A closed job card can be set back to Open to change it; its bills keep
+  // their numbers and payments, and are brought up to date when it's closed
+  // again. Not once a GST invoice has been made from its estimate — that's
+  // final. It can't be cancelled while it has bills.
+  const gstInvoice = jobCard.estimate?.gstInvoiceNumber ?? jobCard.estimate?.insuranceGstInvoiceNumber;
+  if (jobCard.invoices.length > 0 && input.status === "CANCELLED") {
     throw new ConflictError(
-      `This job card has draft invoice ${jobCard.invoice.invoiceNumber} — it can't be cancelled`
+      `This job card has been closed and billed (${jobCard.estimate?.estimateNumber ?? "its estimate"}) — it can't be cancelled`
     );
   }
+  if (jobCard.status === "INVOICED" && input.status === "OPEN" && gstInvoice) {
+    throw new ConflictError(`GST invoice ${gstInvoice} has been made from this job card's estimate — it can't be reopened`);
+  }
 
-  // Invoiced is reached only by generating the draft invoice (which sets it
-  // in the same transaction), never by setting the status directly —
-  // otherwise a job card could say Invoiced with an out-of-date invoice.
+  // Closed is reached only by closing the job card (which makes the bills in
+  // the same transaction), never by setting the status directly — otherwise
+  // a job card could say Closed with out-of-date bills.
   if (input.status === "INVOICED" && jobCard.status !== "INVOICED") {
-    throw new ConflictError("Generate the draft invoice to mark this job card Invoiced");
+    throw new ConflictError("Use Close job card to close this job card");
+  }
+
+  // On a closed job card, changing to or from Accidental Claim moves lines
+  // between the customer's and the insurance company's bills.
+  const claimChanged =
+    input.jobType !== undefined && (input.jobType === "ACCIDENTAL_CLAIM") !== (jobCard.jobType === "ACCIDENTAL_CLAIM");
+  const rebill = jobCard.status === "INVOICED" && input.status === undefined && claimChanged;
+  if (rebill && gstInvoice) {
+    throw new ConflictError(`GST invoice ${gstInvoice} has been made — the job type can't be changed to or from Accidental Claim`);
   }
 
   if (input.assignedEmployeeId != null) {
@@ -183,13 +218,41 @@ export async function updateJobCard(id: number, input: JobCardUpdateInput) {
     data.finalInspectionAt = new Date();
   }
 
-  const updated = await prisma.jobCard.update({
-    where: { id },
-    data: data as Prisma.JobCardUpdateInput,
-    include: { vehicle: { include: { customer: true } }, assignedEmployee: { select: { id: true, name: true, role: true } } },
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.jobCard.update({
+      where: { id },
+      data: data as Prisma.JobCardUpdateInput,
+      include: { vehicle: { include: { customer: true } }, assignedEmployee: { select: { id: true, name: true, role: true } } },
+    });
+    if (rebill) await syncBills(tx, id, userId);
+    return row;
   });
   if (input.jobType !== undefined || input.kmAtService !== undefined || input.status !== undefined) {
     await refreshVehicleService(updated.vehicleId);
   }
   return updated;
+}
+
+// A photo of a signed slip. The vehicle trial is signed off with the
+// customer while the job card is open or closed; the gate pass only once
+// it's closed — and the vehicle leaving marks it delivered. A later photo
+// replaces the earlier one, keeping the first sign-off time.
+export async function recordSignOff(id: number, kind: "trial" | "gate-pass", photoUrl: string) {
+  const jobCard = await prisma.jobCard.findUnique({ where: { id } });
+  if (!jobCard) throw new NotFoundError("Job card not found");
+  if (jobCard.status === "CANCELLED") throw new ConflictError("This job card is cancelled");
+  if (kind === "gate-pass") {
+    if (jobCard.status !== "INVOICED") throw new ConflictError("Close the job card before issuing the gate pass");
+    const now = new Date();
+    await prisma.jobCard.update({
+      where: { id },
+      data: { gatePassPhotoUrl: photoUrl, gatePassAt: jobCard.gatePassAt ?? now, deliveredAt: jobCard.deliveredAt ?? now },
+    });
+  } else {
+    await prisma.jobCard.update({
+      where: { id },
+      data: { trialPhotoUrl: photoUrl, trialAt: jobCard.trialAt ?? new Date() },
+    });
+  }
+  return getJobCard(id);
 }

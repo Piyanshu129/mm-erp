@@ -58,6 +58,29 @@ export const createPurchaseSchema = z.object({
       }
     })
     .pipe(z.array(lineSchema).min(1, "Add at least one item").max(MAX_LINES, `At most ${MAX_LINES} items per purchase`)),
+  // Optional payment to the supplier, entered at the end of the purchase —
+  // JSON-encoded like the lines.
+  payment: z
+    .string()
+    .transform((raw, ctx) => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "payment must be valid JSON" });
+        return z.NEVER;
+      }
+    })
+    .pipe(
+      z.object({
+        amount: z.coerce.number().min(0),
+        discount: z.coerce.number().min(0).optional(),
+        paymentMode: optionalString,
+        reference: optionalString,
+        paidBy: optionalString,
+        notes: optionalString,
+      })
+    )
+    .optional(),
 });
 
 const listQuerySchema = z.object({
@@ -138,10 +161,11 @@ export async function create(req: Request, res: Response) {
     }
   });
 
-  const purchases = await purchasesService.createPurchaseEntry({
+  const { purchases, payment } = await purchasesService.createPurchaseEntry({
     supplierId: input.supplierId,
     purchaseDate: input.purchaseDate,
     remarks: input.remarks,
+    payment: input.payment,
     billUrl,
     lines: input.lines.map((line, i) => ({
       ...line,
@@ -149,5 +173,5 @@ export async function create(req: Request, res: Response) {
     })),
     createdById: req.user!.id,
   });
-  res.status(201).json({ purchases });
+  res.status(201).json({ purchases, payment });
 }

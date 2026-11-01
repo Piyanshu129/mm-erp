@@ -4,7 +4,7 @@ import * as invoicesService from "./invoices.service";
 import { listPaymentAudits } from "../../lib/paymentAudit";
 import { parsePageParams } from "../../lib/pagination";
 
-export const createInvoiceSchema = z.object({
+export const closeJobCardSchema = z.object({
   discount: z.coerce.number().min(0).optional(),
 });
 
@@ -33,14 +33,12 @@ export async function get(req: Request, res: Response) {
   res.json({ invoice });
 }
 
-export async function create(req: Request, res: Response) {
-  const { discount } = req.body as z.infer<typeof createInvoiceSchema>;
-  const invoice = await invoicesService.createInvoice(
-    Number(req.params.jobCardId),
-    discount ?? 0,
-    req.user!.id
-  );
-  res.status(201).json({ invoice });
+// Closes the job card: its estimate becomes the bill (see
+// invoices.service.ts#closeJobCard).
+export async function close(req: Request, res: Response) {
+  const { discount } = req.body as z.infer<typeof closeJobCardSchema>;
+  const result = await invoicesService.closeJobCard(Number(req.params.jobCardId), discount ?? 0, req.user!.id);
+  res.status(201).json(result);
 }
 
 export async function updatePayment(req: Request, res: Response) {

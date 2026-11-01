@@ -173,7 +173,8 @@ All paths are relative to `/api`. "Permission" is the module `requirePermission(
 | DELETE | `/:jobCardId/labour/:labourId` | remove one |
 | POST | `/:jobCardId/media` | upload one photo/video (multipart, `file` field) with `angle`/`phase` |
 | DELETE | `/:jobCardId/media/:mediaId` | remove one |
-| POST | `/:jobCardId/invoice` | generate the draft invoice, or update it for a reopened job card (delegates to the Invoices controller — see below) |
+| POST | `/:jobCardId/close` | close the job card: the estimate becomes the bill (one bill per payer), or the bills are updated for a reopened job card. `/:jobCardId/invoice` is the old name, still accepted (delegates to the Invoices controller — see below) |
+| POST | `/:jobCardId/sign-off/:kind` | photo (`photo`) of the signed vehicle trial slip (`trial`) or gate pass (`gate-pass`, closed job cards only; marks it delivered) |
 | POST | `/:jobCardId/estimate` | create the job card's estimate (pre-filled from its parts and labour), or return the existing one |
 
 ### Estimates — `/estimates` (permission `JOB_CARDS`, [routes](../backend/src/modules/estimates/estimates.routes.ts))
@@ -192,7 +193,7 @@ All of the parts/labour/media mutations are blocked once the job card is locked 
 **Accounts:** `GET /customers/:id/account` (permission `CUSTOMERS`) and `GET /vehicles/:id/account` (permission `VEHICLES`) return the invoiced / paid / due summary, every invoice with its amount due, and the full payment history. The `GET /customers` and `GET /vehicles` lists include each row's `account` summary.
 
 ### Invoices — `/invoices` ([routes](../backend/src/modules/invoices/invoices.routes.ts))
-`GET /` and `GET /:id` need `INVOICES`; the detail includes `payments`, newest first. `POST /:id/payments` takes `{amount, paymentDate?, paymentMode?, reference?, receivedBy?, notes?}` and accepts `INVOICES`, `CUSTOMERS` or `VEHICLES`. It records one payment and rejects overpayment. This replaced `PATCH /:id/payment`. Invoice creation happens via `POST /job-cards/:jobCardId/invoice` above, not a route on this router.
+`GET /` and `GET /:id` need `INVOICES`; the detail includes `payments`, newest first. `POST /:id/payments` takes `{amount, paymentDate?, paymentMode?, reference?, receivedBy?, notes?}` and accepts `INVOICES`, `CUSTOMERS` or `VEHICLES`. It records one payment and rejects overpayment. This replaced `PATCH /:id/payment`. Bills (invoices) are made by closing the job card (`POST /job-cards/:jobCardId/close` above), not a route on this router. There's one per payer (`payer`: `CUSTOMER`, or `INSURANCE` on an accidental claim). The customer and vehicle accounts count only the customer's.
 
 ### Employees — `/employees` (permission `EMPLOYEES`, [routes](../backend/src/modules/employees/employees.routes.ts))
 `GET /`, `GET /:id`, `POST /`, `PATCH /:id`, `PATCH /:id/status`.

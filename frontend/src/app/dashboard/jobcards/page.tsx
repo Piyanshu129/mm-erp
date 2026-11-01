@@ -15,6 +15,7 @@ import { JobCardStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { JOB_CARD_STATUS_LABELS } from "@/lib/jobCardStatus";
+import { JOB_TYPE_LABELS } from "@/lib/jobTypes";
 
 interface VehicleOption {
   id: number;
@@ -34,13 +35,6 @@ interface JobCardRow {
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
-const JOB_TYPE_LABELS: Record<string, string> = {
-  GENERAL_SERVICE: "General Service",
-  ACCIDENTAL_CLAIM: "Accidental Claim",
-  AC: "AC",
-  DENT_PAINT: "Dent & Paint",
-  MECHANICAL: "Mechanical",
-};
 
 interface JobCardDraft {
   jobType: string;

@@ -37,6 +37,7 @@ interface InvoiceDetail {
     jobCardNumber: string;
     kmAtService: number | null;
     complaint: string | null;
+    estimate?: { id: number } | null;
     vehicle: {
       registrationNumber: string;
       make: string;
@@ -91,6 +92,11 @@ function InvoiceDetailPageContent() {
   async function load(quiet = false) {
     if (!quiet) setLoading(true);
     const body = await apiFetch(`/invoices/${id}`);
+    // The bill is the job card's estimate now — show that page.
+    if (body.invoice.jobCard.estimate) {
+      router.replace(`/dashboard/estimates/${body.invoice.jobCard.estimate.id}`);
+      return;
+    }
     setInvoice(body.invoice);
     setLoading(false);
   }
@@ -150,8 +156,8 @@ function InvoiceDetailPageContent() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between print:hidden">
-        <Link href="/dashboard/invoices" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-          <ArrowLeft className="h-4 w-4" /> All draft invoices
+        <Link href="/dashboard/estimates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-4 w-4" /> All estimates
         </Link>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => window.print()}>
@@ -186,7 +192,7 @@ function InvoiceDetailPageContent() {
             <p className="text-sm text-gray-500">Multibrand Car Workshop</p>
           </div>
           <div className="text-right text-sm">
-            <p className="text-base font-bold tracking-wide">DRAFT INVOICE</p>
+            <p className="text-base font-bold tracking-wide">BILL</p>
             <p className="font-mono font-semibold">{invoice.invoiceNumber}</p>
             <p className="text-gray-500">{new Date(invoice.invoiceDate).toLocaleDateString()}</p>
           </div>

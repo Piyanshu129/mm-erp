@@ -393,7 +393,7 @@ function CustomerDetailPageContent() {
         )}
       </div>
 
-      <InvoiceAccountPanel accountUrl={`/customers/${customer.id}/account`} title="Draft invoices & payments" />
+      <InvoiceAccountPanel accountUrl={`/customers/${customer.id}/account`} title="Bills & payments" />
     </div>
   );
 }

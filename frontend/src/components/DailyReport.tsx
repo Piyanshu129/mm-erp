@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Download, MessageCircle, Printer } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchFile, ApiError } from "@/lib/api";
 import { AssetLink } from "@/components/AuthedMedia";
 import { fmtQty, formatINR } from "@/lib/format";
 import { downloadExcel, ExcelSheet } from "@/lib/excel";
-import { shareReport } from "@/lib/shareReport";
+import { shareFile, shareReport } from "@/lib/shareReport";
 import { TYPE_LABELS } from "@/lib/purchaseTypes";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -274,14 +274,18 @@ function EstimateCard({ e }: { e: EstimateRow }) {
   );
 }
 
+// "All time" starts here — before any data in the system.
+const ALL_TIME_FROM = "2020-01-01";
+
 function rangeLabel(from: string, to: string): string {
   const f = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   return from === to ? f(from) : `${f(from)} – ${f(to)}`;
 }
 
-// A date range (one day by default) in full: estimates with their lines,
-// draft invoices with their lines and payments, money received, and
-// purchases — with print, Excel export and WhatsApp share.
+// A date range (one day by default, or all time) in full: estimates with
+// their lines, bills (closed estimates) with their lines and payments, money
+// received, and purchases — with print, Excel export and WhatsApp share.
+// The complete data workbook (every table) can be shared from here too.
 export function DailyReport() {
   const today = new Date().toLocaleDateString("en-CA");
   const [from, setFrom] = useState(today);
@@ -291,6 +295,9 @@ export function DailyReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // A file a phone refused to share (too slow after the tap) — tap again.
+  const [readyFile, setReadyFile] = useState<{ kind: "report" | "all"; file: File } | null>(null);
+  const [sharingAll, setSharingAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,11 +324,11 @@ export function DailyReport() {
             { Item: "Estimates", Value: s.estimatesCount },
             { Item: "  Customer approved", Value: s.estimatesApproved },
             { Item: "Estimates value", Value: s.estimatesTotal },
-            { Item: "Draft invoices (finalised)", Value: s.salesCount },
+            { Item: "Bills (closed job cards)", Value: s.salesCount },
             { Item: "Sales total", Value: s.salesTotal },
             { Item: "Received against them", Value: s.salesReceived },
             { Item: "Outstanding on them", Value: s.salesOutstanding },
-            { Item: "Invoices being revised (not in totals)", Value: s.beingRevisedCount },
+            { Item: "Bills being revised (not in totals)", Value: s.beingRevisedCount },
             { Item: "Payments received", Value: s.collectionsTotal },
             ...s.collectionsByMode.map((m) => ({ Item: `  by ${mode(m.mode)}`, Value: m.amount })),
             { Item: "Purchase lines", Value: s.purchaseCount },
@@ -363,10 +370,10 @@ export function DailyReport() {
           ),
         },
         {
-          name: "Draft Invoices",
-          columns: ["Draft Invoice", "Time", "Status", "Job Card", "Customer", "Mobile", "Vehicle", "Parts", "Labour", "Discount", "Tax", "Total", "Received", "Outstanding", "Payments"],
+          name: "Bills",
+          columns: ["Estimate", "Time", "Status", "Job Card", "Customer", "Mobile", "Vehicle", "Parts", "Labour", "Discount", "Tax", "Total", "Received", "Outstanding", "Payments"],
           rows: data.sales.map((x) => ({
-            "Draft Invoice": x.invoiceNumber,
+            Estimate: x.invoiceNumber,
             Time: new Date(x.invoiceDate).toLocaleTimeString(),
             Status: x.finalised ? "Finalised" : "Being revised (not in totals)",
             "Job Card": x.jobCardNumber,
@@ -385,10 +392,10 @@ export function DailyReport() {
         },
         {
           name: "Sale Lines",
-          columns: ["Draft Invoice", "Customer", "Vehicle", "Type", "Item / Service", "Qty", "Rate", "Amount"],
+          columns: ["Estimate", "Customer", "Vehicle", "Type", "Item / Service", "Qty", "Rate", "Amount"],
           rows: data.sales.flatMap((x) =>
             x.lines.map((l) => ({
-              "Draft Invoice": x.invoiceNumber,
+              Estimate: x.invoiceNumber,
               Customer: x.customerName,
               Vehicle: x.registrationNumber,
               Type: l.kind,
@@ -401,9 +408,9 @@ export function DailyReport() {
         },
         {
           name: "Payments Received",
-          columns: ["Draft Invoice", "Customer", "Vehicle", "Amount", "Discount", "Mode", "Reference", "Received By", "Notes"],
+          columns: ["Estimate", "Customer", "Vehicle", "Amount", "Discount", "Mode", "Reference", "Received By", "Notes"],
           rows: data.collections.map((c) => ({
-            "Draft Invoice": c.invoiceNumber,
+            Estimate: c.invoiceNumber,
             Customer: c.customerName,
             Vehicle: c.registrationNumber,
             Amount: c.amount,
@@ -437,7 +444,12 @@ export function DailyReport() {
       ];
   }
 
-  const fileName = data ? `report-${data.from}${data.to !== data.from ? `-to-${data.to}` : ""}` : "report";
+  const allTime = from === ALL_TIME_FROM;
+  const fileName = data
+    ? allTime
+      ? `report-all-time-to-${data.to}`
+      : `report-${data.from}${data.to !== data.from ? `-to-${data.to}` : ""}`
+    : "report";
 
   async function exportExcel() {
     if (!data) return;
@@ -455,17 +467,43 @@ export function DailyReport() {
     if (!data) return;
     const s = data.summary;
     const text = [
-      `Motors Mitra — Report ${rangeLabel(data.from, data.to)}`,
+      `Motors Mitra — Report ${allTime ? `all time to ${rangeLabel(data.to, data.to)}` : rangeLabel(data.from, data.to)}`,
       `Estimates: ${s.estimatesCount} (${s.estimatesApproved} approved) — ${formatINR(s.estimatesTotal)}`,
-      `Draft invoices: ${s.salesCount} — ${formatINR(s.salesTotal)} (received ${formatINR(s.salesReceived)}, outstanding ${formatINR(s.salesOutstanding)})`,
+      `Bills: ${s.salesCount} — ${formatINR(s.salesTotal)} (received ${formatINR(s.salesReceived)}, outstanding ${formatINR(s.salesOutstanding)})`,
       `Payments received: ${formatINR(s.collectionsTotal)}`,
       `Purchases: ${formatINR(s.purchaseTotal)} (stock ${formatINR(s.inventoryPurchaseTotal)}, expenses ${formatINR(s.expenseTotal)})`,
     ].join("\n");
     setSharing(true);
     try {
-      await shareReport({ fileName, sheets: sheets(data), text });
+      const { result, file } = await shareReport({
+        fileName,
+        sheets: sheets(data),
+        text,
+        ready: readyFile?.kind === "report" ? readyFile.file : null,
+      });
+      setReadyFile(result === "retry" && file ? { kind: "report", file } : null);
+    } catch {
+      setError("Could not share the report — use Export Excel and send it on WhatsApp.");
     } finally {
       setSharing(false);
+    }
+  }
+
+  // Every table in the system, as one workbook (kept fresh by the server).
+  async function shareAllData() {
+    setError(null);
+    setSharingAll(true);
+    try {
+      const { result, file } = await shareFile({
+        makeFile: () => apiFetchFile("/backup/excel", `mm-erp-data-${today}.xlsx`),
+        text: `Motors Mitra — complete data, ${rangeLabel(today, today)}`,
+        ready: readyFile?.kind === "all" ? readyFile.file : null,
+      });
+      setReadyFile(result === "retry" && file ? { kind: "all", file } : null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not prepare the complete data file");
+    } finally {
+      setSharingAll(false);
     }
   }
 
@@ -519,9 +557,17 @@ export function DailyReport() {
         >
           This month
         </Button>
-        <div className="ml-auto flex gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => (setFrom(ALL_TIME_FROM), setTo(today))}>
+          All time
+        </Button>
+        <div className="ml-auto flex flex-wrap gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={share} disabled={!data || sharing}>
-            <MessageCircle className="h-4 w-4" /> {sharing ? "Preparing..." : "Share on WhatsApp"}
+            <MessageCircle className="h-4 w-4" />{" "}
+            {sharing ? "Preparing..." : readyFile?.kind === "report" ? "Ready — tap to share" : "Share on WhatsApp"}
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={shareAllData} disabled={sharingAll}>
+            <MessageCircle className="h-4 w-4" />{" "}
+            {sharingAll ? "Preparing..." : readyFile?.kind === "all" ? "Ready — tap to share" : "Share complete data (Excel)"}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => window.print()} disabled={!data}>
             <Printer className="h-4 w-4" /> Print
@@ -533,7 +579,7 @@ export function DailyReport() {
       </div>
 
       <h2 className="text-lg font-semibold text-gray-900">
-        Report — {rangeLabel(from, to)}
+        Report — {allTime ? `All time (to ${rangeLabel(to, to)})` : rangeLabel(from, to)}
       </h2>
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -547,7 +593,7 @@ export function DailyReport() {
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile label={`Estimates (${s.estimatesCount}, ${s.estimatesApproved} approved)`} value={formatINR(s.estimatesTotal)} />
-            <Tile label={`Draft invoices (${s.salesCount})`} value={formatINR(s.salesTotal)} />
+            <Tile label={`Bills (${s.salesCount})`} value={formatINR(s.salesTotal)} />
             <Tile label="Received against them" value={formatINR(s.salesReceived)} tone="green" />
             <Tile label="Outstanding on them" value={formatINR(s.salesOutstanding)} tone={s.salesOutstanding > 0 ? "red" : "gray"} />
             <Tile
@@ -564,7 +610,7 @@ export function DailyReport() {
             <Tile label="Inventory" value={formatINR(s.inventoryPurchaseTotal)} />
             <Tile label="Expenses" value={formatINR(s.expenseTotal)} />
             {s.beingRevisedCount > 0 && (
-              <Tile label="Invoices being revised" value={String(s.beingRevisedCount)} sub="Not in the sales totals" />
+              <Tile label="Bills being revised" value={String(s.beingRevisedCount)} sub="Job card reopened — not in the sales totals" />
             )}
           </div>
 
@@ -581,9 +627,9 @@ export function DailyReport() {
 
           <Card>
             <CardBody className="space-y-3">
-              <p className="text-base font-semibold text-gray-900">Draft invoices</p>
+              <p className="text-base font-semibold text-gray-900">Bills (closed estimates)</p>
               {data.sales.length === 0 ? (
-                <p className="text-sm text-gray-500">No draft invoices in this period.</p>
+                <p className="text-sm text-gray-500">No bills in this period.</p>
               ) : (
                 data.sales.map((sale) => <SaleCard key={sale.id} s={sale} />)
               )}
@@ -600,7 +646,7 @@ export function DailyReport() {
                   <table className="w-full min-w-[560px] text-sm">
                     <thead>
                       <tr className="text-left text-xs text-gray-500">
-                        <th className="py-1 pr-2">Draft Invoice</th>
+                        <th className="py-1 pr-2">Estimate</th>
                         <th className="py-1 pr-2">Customer</th>
                         <th className="py-1 pr-2">Mode</th>
                         <th className="py-1 pr-2">Reference</th>

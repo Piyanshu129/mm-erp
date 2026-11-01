@@ -349,13 +349,15 @@ async function jobCardLabourSheet(): Promise<SheetSpec> {
 
 async function invoicesSheet(): Promise<SheetSpec> {
   const invoices = await prisma.invoice.findMany({
-    include: { jobCard: { include: { vehicle: { include: { customer: true } } } }, createdBy: true },
+    include: { jobCard: { include: { vehicle: { include: { customer: true } }, estimate: true } }, createdBy: true },
     orderBy: { id: "asc" },
   });
   return {
-    name: "Invoices",
+    name: "Bills",
     columns: [
-      { header: "Invoice No.", key: "invoiceNumber", width: 14 },
+      { header: "Estimate No.", key: "estimateNumber", width: 14 },
+      { header: "Bill To", key: "payer", width: 12 },
+      { header: "Bill No.", key: "invoiceNumber", width: 14 },
       { header: "Date", key: "invoiceDate", width: 18 },
       { header: "Job Card No.", key: "jobCardNumber", width: 14 },
       { header: "Vehicle", key: "vehicleRegistration", width: 16 },
@@ -369,6 +371,8 @@ async function invoicesSheet(): Promise<SheetSpec> {
       { header: "Created By", key: "createdByName", width: 16 },
     ],
     rows: invoices.map((inv) => ({
+      estimateNumber: inv.jobCard.estimate?.estimateNumber ?? null,
+      payer: inv.payer === "INSURANCE" ? "Insurance" : "Customer",
       invoiceNumber: inv.invoiceNumber,
       invoiceDate: inv.invoiceDate,
       jobCardNumber: inv.jobCard.jobCardNumber,
@@ -388,16 +392,18 @@ async function invoicesSheet(): Promise<SheetSpec> {
 async function invoicePaymentsSheet(): Promise<SheetSpec> {
   const payments = await prisma.invoicePayment.findMany({
     include: {
-      invoice: { include: { jobCard: { include: { vehicle: { include: { customer: true } } } } } },
+      invoice: { include: { jobCard: { include: { vehicle: { include: { customer: true } }, estimate: true } } } },
       createdBy: true,
     },
     orderBy: [{ paymentDate: "asc" }, { id: "asc" }],
   });
   return {
-    name: "Invoice Payments",
+    name: "Bill Payments",
     columns: [
       { header: "Date", key: "paymentDate", width: 18 },
-      { header: "Invoice No.", key: "invoiceNumber", width: 14 },
+      { header: "Estimate No.", key: "estimateNumber", width: 14 },
+      { header: "Bill To", key: "payer", width: 12 },
+      { header: "Bill No.", key: "invoiceNumber", width: 14 },
       { header: "Vehicle", key: "vehicleRegistration", width: 16 },
       { header: "Customer", key: "customerName", width: 20 },
       { header: "Amount", key: "amount", width: 12 },
@@ -410,6 +416,8 @@ async function invoicePaymentsSheet(): Promise<SheetSpec> {
     ],
     rows: payments.map((p) => ({
       paymentDate: p.paymentDate,
+      estimateNumber: p.invoice.jobCard.estimate?.estimateNumber ?? null,
+      payer: p.invoice.payer === "INSURANCE" ? "Insurance" : "Customer",
       invoiceNumber: p.invoice.invoiceNumber,
       vehicleRegistration: p.invoice.jobCard.vehicle.registrationNumber,
       customerName: p.invoice.jobCard.vehicle.customer.name,
@@ -576,7 +584,7 @@ async function paymentAuditsSheet(): Promise<SheetSpec> {
       { header: "By", key: "changedBy", width: 16 },
       { header: "Payment Type", key: "paymentKind", width: 14 },
       { header: "Payment No.", key: "paymentId", width: 12 },
-      { header: "Draft Invoice ID", key: "invoiceId", width: 14 },
+      { header: "Bill ID", key: "invoiceId", width: 14 },
       { header: "Supplier ID", key: "supplierId", width: 12 },
       { header: "Action", key: "action", width: 10 },
       { header: "Before", key: "before", width: 60 },

@@ -98,7 +98,12 @@ export async function createVehicle(input: VehicleInput, rcPhotoUrl: string) {
   });
 }
 
-export async function updateVehicle(id: number, input: Partial<VehicleInput>) {
+// null clears an optional field (the edit form sends blanks as null).
+export type VehicleUpdateInput = {
+  [K in keyof VehicleInput]?: K extends "registrationNumber" | "make" | "model" | "customerId" ? VehicleInput[K] : VehicleInput[K] | null;
+};
+
+export async function updateVehicle(id: number, input: VehicleUpdateInput) {
   const vehicle = await prisma.vehicle.findUnique({ where: { id } });
   if (!vehicle) throw new NotFoundError("Vehicle not found");
 
@@ -122,10 +127,16 @@ export async function updateVehicle(id: number, input: Partial<VehicleInput>) {
     data: {
       ...input,
       registrationNumber,
-      nextServiceDue: input.nextServiceDue ? new Date(input.nextServiceDue) : undefined,
+      nextServiceDue: input.nextServiceDue === undefined ? undefined : input.nextServiceDue ? new Date(input.nextServiceDue) : null,
     },
     include: { customer: true },
   });
+}
+
+export async function setRcPhoto(id: number, rcPhotoUrl: string) {
+  const vehicle = await prisma.vehicle.findUnique({ where: { id } });
+  if (!vehicle) throw new NotFoundError("Vehicle not found");
+  return prisma.vehicle.update({ where: { id }, data: { rcPhotoUrl }, include: { customer: true } });
 }
 
 export async function setVehicleActive(id: number, isActive: boolean) {
@@ -147,7 +158,7 @@ export async function getVehicleServiceHistory(id: number) {
     include: {
       parts: true,
       labour: true,
-      invoice: { select: { id: true, invoiceNumber: true, totalAmount: true } },
+      invoices: { select: { id: true, invoiceNumber: true, payer: true, totalAmount: true } },
       estimate: { select: { id: true, estimateNumber: true, status: true, approvalPhotoUrl: true } },
     },
     orderBy: { id: "desc" },
@@ -167,7 +178,9 @@ export async function getVehicleServiceHistory(id: number) {
       partsTotal,
       labourTotal,
       grandTotal: partsTotal + labourTotal,
-      invoice: jc.invoice,
+      // What the closed job card was billed (customer + insurance company).
+      billedTotal: jc.invoices.length ? jc.invoices.reduce((sum, i) => sum + Number(i.totalAmount), 0) : null,
+      invoice: jc.invoices.find((i) => i.payer === "CUSTOMER") ?? null,
       estimate: jc.estimate,
     };
   });

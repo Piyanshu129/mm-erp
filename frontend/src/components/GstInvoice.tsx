@@ -13,15 +13,25 @@ import { downloadElementAsPdf, invoiceFileName } from "@/lib/invoicePdf";
 import { GST_RATES, LABOUR_SAC, gstForLine, rupeesInWords } from "@/lib/gst";
 import { fmtQty } from "@/lib/format";
 
+export type Payer = "CUSTOMER" | "INSURANCE";
+
+// Who pays for a line: only an accidental claim bills the insurance company.
+export function payerOf(line: { scope?: string }, jobType: string | null | undefined): Payer {
+  return jobType === "ACCIDENTAL_CLAIM" && line.scope === "INSURANCE" ? "INSURANCE" : "CUSTOMER";
+}
+
 export interface GstEstimate {
   id: number;
   estimateNumber: string;
   estimateDate: string;
   gstInvoiceNumber?: string | null;
   gstInvoiceDate?: string | null;
+  insuranceGstInvoiceNumber?: string | null;
+  insuranceGstInvoiceDate?: string | null;
   supplyType?: "INTRA" | "INTER";
   pricesIncludeGst?: boolean;
   customerGstin?: string | null;
+  insuranceGstin?: string | null;
   lines: {
     id: number;
     lineType: "PART" | "LABOUR";
@@ -31,10 +41,12 @@ export interface GstEstimate {
     amount: string;
     hsnCode?: string | null;
     gstRate?: string | null;
+    scope?: Payer;
     item: { itemCode: string } | null;
   }[];
   jobCard: {
     jobCardNumber: string;
+    status?: string;
     kmAtService: number | null;
     jobType?: string | null;
     insuranceCompany?: string | null;
@@ -64,13 +76,18 @@ const amt = (n: number) => n.toFixed(2);
 
 // The estimate as a GST tax invoice: HSN/SAC and GST % per line, CGST + SGST
 // (within the state) or IGST (to another state) worked out line by line.
-// The details can be changed until the invoice number is generated; after
-// that it's fixed and can be printed, downloaded or shared any time.
+// On an accidental claim there are two: the customer's lines and the
+// insurance company's lines (payer). The details can be changed until the
+// invoice number is generated — which needs the job card closed, since the
+// closed estimate is the final bill; after that it's fixed and can be
+// printed, downloaded or shared any time.
 export function GstInvoice({
   estimate,
+  payer = "CUSTOMER",
   onUpdated,
 }: {
   estimate: GstEstimate;
+  payer?: Payer;
   onUpdated: (estimate: GstEstimate) => void;
 }) {
   const { user } = useAuth();
@@ -82,15 +99,24 @@ export function GstInvoice({
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
-  const generated = !!estimate.gstInvoiceNumber;
+  const insurer = payer === "INSURANCE";
+  const shownLines = estimate.lines.filter((l) => payerOf(l, estimate.jobCard.jobType) === payer);
+  const invoiceNumber = insurer ? estimate.insuranceGstInvoiceNumber : estimate.gstInvoiceNumber;
+  const invoiceDate = insurer ? estimate.insuranceGstInvoiceDate : estimate.gstInvoiceDate;
+  const savedGstin = (insurer ? estimate.insuranceGstin : estimate.customerGstin) ?? "";
+  const generated = !!invoiceNumber;
+  // Either invoice fixes the supply type and whether prices include GST.
+  const sharedLocked = !!(estimate.gstInvoiceNumber || estimate.insuranceGstInvoiceNumber);
+  // Older servers don't send the status; they allowed generating any time.
+  const closed = estimate.jobCard.status === undefined || estimate.jobCard.status === "INVOICED";
   const [supplyType, setSupplyType] = useState<"INTRA" | "INTER">(estimate.supplyType ?? "INTRA");
   const [inclusive, setInclusive] = useState(!!estimate.pricesIncludeGst);
-  const [customerGstin, setCustomerGstin] = useState(estimate.customerGstin ?? "");
+  const [gstin, setGstin] = useState(savedGstin);
   // Per line: HSN/SAC and GST %. Labour without a code gets the motor
   // vehicle repair SAC; a line without a rate gets 18%.
   const initialLines = () =>
     Object.fromEntries(
-      estimate.lines.map((l) => [
+      shownLines.map((l) => [
         l.id,
         {
           hsn: l.hsnCode ?? (l.lineType === "LABOUR" ? LABOUR_SAC : ""),
@@ -110,14 +136,14 @@ export function GstInvoice({
   useEffect(() => {
     setSupplyType(estimate.supplyType ?? "INTRA");
     setInclusive(!!estimate.pricesIncludeGst);
-    setCustomerGstin(estimate.customerGstin ?? "");
+    setGstin(savedGstin);
     setLines(initialLines());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estimate]);
+  }, [estimate, payer]);
 
-  const fileName = `${(estimate.gstInvoiceNumber ?? `GST-${estimate.estimateNumber}`).replace(/\//g, "-")}_${invoiceFileName(
+  const fileName = `${(invoiceNumber ?? `GST-${estimate.estimateNumber}${insurer ? "-INS" : ""}`).replace(/\//g, "-")}_${invoiceFileName(
     estimate.jobCard.vehicle.registrationNumber,
-    estimate.gstInvoiceDate ?? estimate.estimateDate
+    invoiceDate ?? estimate.estimateDate
   )}`;
 
   useEffect(() => {
@@ -129,7 +155,7 @@ export function GstInvoice({
   }, [fileName]);
 
   const inter = supplyType === "INTER";
-  const rows = estimate.lines.map((l) => {
+  const rows = shownLines.map((l) => {
     const rate = Number(lines[l.id]?.rate ?? 18);
     return { line: l, hsn: lines[l.id]?.hsn ?? "", ...gstForLine(Number(l.amount), rate, { inclusive, inter }) };
   });
@@ -154,8 +180,8 @@ export function GstInvoice({
   const dirty =
     supplyType !== (estimate.supplyType ?? "INTRA") ||
     inclusive !== !!estimate.pricesIncludeGst ||
-    customerGstin.trim().toUpperCase() !== (estimate.customerGstin ?? "") ||
-    estimate.lines.some(
+    gstin.trim().toUpperCase() !== savedGstin ||
+    shownLines.some(
       (l) =>
         (lines[l.id]?.hsn.trim() || null) !== (l.hsnCode ?? null) ||
         Number(lines[l.id]?.rate) !== (l.gstRate != null ? Number(l.gstRate) : NaN)
@@ -171,8 +197,8 @@ export function GstInvoice({
         body: JSON.stringify({
           supplyType,
           pricesIncludeGst: inclusive,
-          customerGstin: customerGstin.trim(),
-          lines: estimate.lines.map((l) => ({
+          [insurer ? "insuranceGstin" : "customerGstin"]: gstin.trim(),
+          lines: shownLines.map((l) => ({
             id: l.id,
             hsnCode: lines[l.id]?.hsn.trim() || null,
             gstRate: Number(lines[l.id]?.rate),
@@ -192,16 +218,16 @@ export function GstInvoice({
   async function generate() {
     if (
       !window.confirm(
-        "Generate the GST invoice number? After this the HSN/SAC, GST % and the estimate's lines can't be changed."
+        `Generate the ${insurer ? "insurance company's " : ""}GST invoice number? After this its HSN/SAC and GST %, who pays for each line, and the estimate's lines can't be changed, and the job card can't be reopened.`
       )
     )
       return;
     if (dirty && !(await save())) return;
     setSaving(true);
     try {
-      const body = await apiFetch(`/estimates/${estimate.id}/gst-invoice`, { method: "POST" });
+      const body = await apiFetch(`/estimates/${estimate.id}/gst-invoice`, { method: "POST", body: JSON.stringify({ payer }) });
       onUpdated(body.estimate);
-      setNotice(`GST invoice ${body.estimate.gstInvoiceNumber} generated.`);
+      setNotice(`GST invoice ${insurer ? body.estimate.insuranceGstInvoiceNumber : body.estimate.gstInvoiceNumber} generated.`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not generate the GST invoice");
     } finally {
@@ -224,9 +250,11 @@ export function GstInvoice({
 
   const { jobCard } = estimate;
   const customer = jobCard.vehicle.customer;
-  const shareText = `Dear ${customer.name} Ji,\nPlease find the GST invoice${
-    estimate.gstInvoiceNumber ? ` ${estimate.gstInvoiceNumber}` : ""
-  } for vehicle ${jobCard.vehicle.registrationNumber}.\nTotal: ${money(grandTotal)}\n— ${business?.businessName ?? "Motors Mitra"}`;
+  const shareText = `Dear ${insurer ? "Sir / Madam" : `${customer.name} Ji`},\nPlease find the GST invoice${
+    invoiceNumber ? ` ${invoiceNumber}` : ""
+  } for vehicle ${jobCard.vehicle.registrationNumber}${insurer && jobCard.claimNumber ? ` (claim ${jobCard.claimNumber})` : ""}.\nTotal: ${money(
+    grandTotal
+  )}\n— ${business?.businessName ?? "Motors Mitra"}`;
   const th = "border border-gray-300 px-1.5 py-1 text-left font-semibold";
   const td = "border border-gray-300 px-1.5 py-1";
 
@@ -242,7 +270,7 @@ export function GstInvoice({
         <SharePdfButton
           getElement={() => printRef.current}
           fileName={fileName}
-          mobile={customer.mobile}
+          mobile={insurer ? null : customer.mobile}
           text={shareText}
           onError={setError}
         />
@@ -267,30 +295,36 @@ export function GstInvoice({
       <Card className="print:hidden">
         <CardBody className="space-y-3">
           <p className="text-sm font-semibold text-gray-900">
-            GST details{" "}
+            GST details{insurer ? " — insurance company's invoice" : ""}{" "}
             {generated && <span className="font-normal text-gray-500">— fixed once the invoice was generated</span>}
           </p>
+          {shownLines.length === 0 && (
+            <p className="text-sm text-gray-500">
+              No lines are billed to the {insurer ? "insurance company" : "customer"} — choose who pays for each line on the
+              Customer / Insurance tab.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <Label>Supply</Label>
-              <Select value={supplyType} disabled={generated} onChange={(e) => setSupplyType(e.target.value as "INTRA" | "INTER")}>
+              <Select value={supplyType} disabled={sharedLocked} onChange={(e) => setSupplyType(e.target.value as "INTRA" | "INTER")}>
                 <option value="INTRA">Within the state — CGST + SGST</option>
                 <option value="INTER">To another state — IGST</option>
               </Select>
             </div>
             <div>
-              <Label>Customer GSTIN (if registered)</Label>
+              <Label>{insurer ? "Insurance company GSTIN" : "Customer GSTIN (if registered)"}</Label>
               <Input
-                value={customerGstin}
+                value={gstin}
                 disabled={generated}
-                onChange={(e) => setCustomerGstin(e.target.value.toUpperCase())}
+                onChange={(e) => setGstin(e.target.value.toUpperCase())}
                 placeholder="e.g. 06ABCDE1234F1Z5"
                 maxLength={15}
                 className="uppercase"
               />
             </div>
             <label className="flex items-center gap-2 self-end pb-2 text-sm text-gray-700">
-              <input type="checkbox" checked={inclusive} disabled={generated} onChange={(e) => setInclusive(e.target.checked)} />
+              <input type="checkbox" checked={inclusive} disabled={sharedLocked} onChange={(e) => setInclusive(e.target.checked)} />
               Estimate prices already include GST
             </label>
           </div>
@@ -305,7 +339,7 @@ export function GstInvoice({
                 </tr>
               </thead>
               <tbody>
-                {estimate.lines.map((l) => (
+                {shownLines.map((l) => (
                   <tr key={l.id} className="border-t border-gray-100">
                     <td className="py-1.5 pr-2">
                       {l.description}
@@ -349,12 +383,14 @@ export function GstInvoice({
               <Button type="button" variant="secondary" size="sm" onClick={save} disabled={saving || !dirty}>
                 {saving ? "Saving..." : dirty ? "Save GST details" : "Saved"}
               </Button>
-              <Button type="button" size="sm" onClick={generate} disabled={saving || estimate.lines.length === 0}>
+              <Button type="button" size="sm" onClick={generate} disabled={saving || shownLines.length === 0 || !closed}>
                 <FileCheck2 className="h-4 w-4" /> Generate GST invoice number
               </Button>
               <p className="w-full text-xs text-gray-500">
-                Until the number is generated, the invoice below is a preview. Numbers run GST/2026-27/0001, 0002… each
-                financial year.
+                {closed
+                  ? "Until the number is generated, the invoice below is a preview."
+                  : `Close job card ${jobCard.jobCardNumber} first — the GST invoice is made from the final estimate. The invoice below is a preview.`}{" "}
+                Numbers run GST/2026-27/0001, 0002… each financial year.
               </p>
             </div>
           )}
@@ -380,10 +416,8 @@ export function GstInvoice({
           </div>
           <div className="text-right text-sm">
             <p className="text-base font-bold tracking-wide">TAX INVOICE</p>
-            <p className="font-mono font-semibold">{estimate.gstInvoiceNumber ?? "PREVIEW — not generated"}</p>
-            <p className="text-gray-600">
-              Date: {new Date(estimate.gstInvoiceDate ?? estimate.estimateDate).toLocaleDateString()}
-            </p>
+            <p className="font-mono font-semibold">{invoiceNumber ?? "PREVIEW — not generated"}</p>
+            <p className="text-gray-600">Date: {new Date(invoiceDate ?? estimate.estimateDate).toLocaleDateString()}</p>
             <p className="text-gray-600">Estimate: {estimate.estimateNumber}</p>
             <p className="text-gray-600">Job Card: {jobCard.jobCardNumber}</p>
           </div>
@@ -392,10 +426,21 @@ export function GstInvoice({
         <div className="mb-3 grid grid-cols-2 gap-4 text-sm">
           <div>
             <p className="mb-0.5 font-semibold">Bill to</p>
-            <p>{customer.name}</p>
-            <p>Mobile: {customer.mobile}</p>
-            {customer.address && <p>{customer.address}</p>}
-            {estimate.customerGstin && <p className="font-semibold">GSTIN: {estimate.customerGstin}</p>}
+            {insurer ? (
+              <>
+                <p>{jobCard.insuranceCompany || "Insurance company"}</p>
+                {jobCard.claimNumber && <p>Claim No.: {jobCard.claimNumber}</p>}
+                {estimate.insuranceGstin && <p className="font-semibold">GSTIN: {estimate.insuranceGstin}</p>}
+                <p className="text-gray-600">Insured: {customer.name}</p>
+              </>
+            ) : (
+              <>
+                <p>{customer.name}</p>
+                <p>Mobile: {customer.mobile}</p>
+                {customer.address && <p>{customer.address}</p>}
+                {estimate.customerGstin && <p className="font-semibold">GSTIN: {estimate.customerGstin}</p>}
+              </>
+            )}
             <p className="text-gray-600">Supply: {inter ? "Inter-state (IGST)" : "Within the state (CGST + SGST)"}</p>
           </div>
           <div>
@@ -535,7 +580,7 @@ export function GstInvoice({
         <div className="mt-12 grid grid-cols-2 gap-10 text-sm">
           <div>
             <div className="h-12 border-b border-gray-400" />
-            <p className="mt-1 font-semibold">Customer Signature</p>
+            <p className="mt-1 font-semibold">{insurer ? "Received by (insurance company)" : "Customer Signature"}</p>
           </div>
           <div>
             <div className="h-12 border-b border-gray-400" />

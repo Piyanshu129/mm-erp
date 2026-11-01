@@ -4,6 +4,7 @@ import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { formatItemCode } from "../../lib/itemCode";
 import { addStock } from "../../lib/stock";
+import { recordSupplierPaymentTx, SupplierPaymentInput } from "../suppliers/suppliers.service";
 
 // SPARE_PART/PAINT/TOOL/ELECTRICAL/SETTINGS_ADJUSTMENTS are inventory types — they need an Item and add
 // their quantity to its stock. The rest are plain business expenses with no
@@ -50,6 +51,10 @@ export interface PurchaseEntryInput {
   billUrl?: string;
   remarks?: string;
   lines: PurchaseLineInput[];
+  // Paid to the supplier now, entered at the end of the purchase (optional —
+  // leave it out for a purchase on credit). Goes on the supplier's account,
+  // dated the purchase date, saved together with the purchase.
+  payment?: Omit<SupplierPaymentInput, "paymentDate" | "proofUrl">;
   createdById: number;
 }
 
@@ -280,10 +285,22 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
       }
     }
 
-    return tx.purchase.findMany({
+    let payment = null;
+    if (input.payment) {
+      if (!input.supplierId) throw new ConflictError("A payment needs a supplier — expenses aren't on a supplier's account");
+      payment = await recordSupplierPaymentTx(
+        tx,
+        input.supplierId,
+        { ...input.payment, paymentDate: purchaseDate.toISOString() },
+        input.createdById
+      );
+    }
+
+    const purchases = await tx.purchase.findMany({
       where: { id: { in: createdIds } },
       include: purchaseInclude,
       orderBy: { id: "asc" },
     });
+    return { purchases, payment };
   });
 }

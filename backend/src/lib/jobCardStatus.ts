@@ -1,6 +1,7 @@
-// A job card is Open while work is going on, Invoiced once its invoice has
-// been generated (the only way to reach Invoiced — see invoices.service.ts),
-// or Cancelled. Simplified from an eleven-step workflow on 2026-09-30.
+// A job card is Open while work is going on, Closed once it's been closed
+// and billed (stored as INVOICED, its name before 2026-11-01; closing is the
+// only way to reach it — see invoices.service.ts#closeJobCard), or
+// Cancelled. Simplified from an eleven-step workflow on 2026-09-30.
 export const JOB_CARD_STATUSES = ["OPEN", "INVOICED", "CANCELLED"] as const;
 
 export type JobCardStatus = (typeof JOB_CARD_STATUSES)[number];

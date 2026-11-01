@@ -168,7 +168,7 @@ function BarChart({
 }
 
 // Admin dashboard graphs for the chosen period: purchases (stock and
-// expenses), estimates, and profit (draft invoice sales − purchases).
+// expenses), estimates, and profit (sales billed on closed job cards − purchases).
 export function DashboardCharts({ series, periodLabel }: { series: SeriesPoint[]; periodLabel: string }) {
   const sum = (f: (p: SeriesPoint) => number) => series.reduce((t, p) => t + f(p), 0);
   return (
@@ -183,7 +183,7 @@ export function DashboardCharts({ series, periodLabel }: { series: SeriesPoint[]
           points={series}
           value={(p) => p.profit}
           colorFor={(v) => (v < 0 ? COLORS.profitDown : COLORS.profitUp)}
-          note="Draft invoice sales − purchases & expenses"
+          note="Sales (closed job cards) − purchases & expenses"
         />
       </div>
     </div>

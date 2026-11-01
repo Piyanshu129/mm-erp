@@ -6,7 +6,7 @@ import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { compressImage } from "@/lib/compressImage";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Car, ClipboardPlus, Plus } from "lucide-react";
+import { Search, Car, ClipboardPlus, Plus, Pencil } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -22,13 +22,9 @@ import {
   InvoiceAccountCells,
   InvoiceAccountActions,
 } from "@/components/InvoiceAccountPanel";
+import { EditableVehicle, FUEL_TYPES, TRANSMISSIONS, VehicleEditForm } from "@/components/VehicleEditForm";
 
-interface VehicleRow {
-  id: number;
-  registrationNumber: string;
-  make: string;
-  model: string;
-  currentKm: number | null;
+interface VehicleRow extends EditableVehicle {
   isActive: boolean;
   customer: { id: number; name: string; mobile: string };
   account: InvoiceAccount;
@@ -40,8 +36,6 @@ interface CustomerOption {
   mobile: string;
 }
 
-const FUEL_TYPES = ["Petrol", "Diesel", "CNG", "Electric", "Hybrid"];
-const TRANSMISSIONS = ["Manual", "Automatic"];
 
 // Vehicle numbers are always capitals with no spaces — the same form the
 // backend stores, so "hr 26 ab 1234" and "HR26AB1234" are one vehicle.
@@ -89,6 +83,7 @@ function VehiclesPageContent() {
   const [submitting, setSubmitting] = useState(false);
   // The account panel (Pay / Payment history) for one vehicle.
   const [accountFor, setAccountFor] = useState<{ vehicle: VehicleRow; focusPay: boolean } | null>(null);
+  const [editing, setEditing] = useState<VehicleRow | null>(null);
 
   // quiet: refresh the amounts after a payment without blanking the table.
   async function load(query: string, quiet = false) {
@@ -431,11 +426,23 @@ function VehiclesPageContent() {
         </Card>
       )}
 
+      {editing && (
+        <VehicleEditForm
+          key={editing.id}
+          vehicle={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await load(q, true);
+          }}
+        />
+      )}
+
       {accountFor && (
         <InvoiceAccountPanel
           key={`${accountFor.vehicle.id}-${accountFor.focusPay}`}
           accountUrl={`/vehicles/${accountFor.vehicle.id}/account`}
-          title={`${accountFor.vehicle.registrationNumber} (${accountFor.vehicle.customer.name}) — draft invoices & payments`}
+          title={`${accountFor.vehicle.registrationNumber} (${accountFor.vehicle.customer.name}) — bills & payments`}
           focusPay={accountFor.focusPay}
           onClose={() => setAccountFor(null)}
           onChanged={() => load(q, true)}
@@ -454,7 +461,7 @@ function VehiclesPageContent() {
               <Th>Make / Model</Th>
               <Th>KM</Th>
               <Th>Owner</Th>
-              <Th className="text-right">Invoiced</Th>
+              <Th className="text-right">Billed</Th>
               <Th className="text-right">Paid</Th>
               <Th className="text-right">Due</Th>
               <Th></Th>
@@ -485,6 +492,17 @@ function VehiclesPageContent() {
                         <ClipboardPlus className="h-3 w-3" /> New job card
                       </Link>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountFor(null);
+                        setEditing(v);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
                     <InvoiceAccountActions
                       account={v.account}
                       onPay={() => setAccountFor({ vehicle: v, focusPay: true })}

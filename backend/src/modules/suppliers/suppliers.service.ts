@@ -204,37 +204,46 @@ export async function deleteSupplierPayment(supplierId: number, paymentId: numbe
 }
 
 export async function recordSupplierPayment(id: number, input: SupplierPaymentInput, createdById: number) {
+  return prisma.$transaction((tx) => recordSupplierPaymentTx(tx, id, input, createdById));
+}
+
+// The same, inside a transaction already under way — a payment entered at
+// the end of a purchase entry is saved with the purchase (purchases.service.ts).
+export async function recordSupplierPaymentTx(
+  tx: Prisma.TransactionClient,
+  id: number,
+  input: SupplierPaymentInput,
+  createdById: number
+) {
   const discount = input.discount ?? 0;
   if (input.amount < 0 || discount < 0) throw new ConflictError("Amounts can't be negative");
   if (input.amount + discount <= 0) throw new ConflictError("Enter the amount paid, a discount, or both");
 
-  return prisma.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${id} FOR UPDATE`;
-    if (locked.length === 0) throw new NotFoundError("Supplier not found");
+  const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${id} FOR UPDATE`;
+  if (locked.length === 0) throw new NotFoundError("Supplier not found");
 
-    const account = (await accountsFor([id], tx)).get(id)!;
-    if (input.amount + discount > account.balanceDue + 0.005) {
-      throw new ConflictError(
-        account.balanceDue <= 0
-          ? "Nothing is due to this supplier"
-          : `That would overpay this supplier — only ₹${account.balanceDue.toFixed(2)} is due (payment + discount)`
-      );
-    }
+  const account = (await accountsFor([id], tx)).get(id)!;
+  if (input.amount + discount > account.balanceDue + 0.005) {
+    throw new ConflictError(
+      account.balanceDue <= 0
+        ? "Nothing is due to this supplier"
+        : `That would overpay this supplier — only ₹${account.balanceDue.toFixed(2)} is due (payment + discount)`
+    );
+  }
 
-    return tx.supplierPayment.create({
-      data: {
-        supplierId: id,
-        amount: input.amount,
-        discount,
-        paymentDate: input.paymentDate ? new Date(input.paymentDate) : new Date(),
-        paymentMode: input.paymentMode,
-        reference: input.reference,
-        paidBy: input.paidBy,
-        notes: input.notes,
-        proofUrl: input.proofUrl,
-        createdById,
-      },
-      include: { createdBy: { select: { id: true, name: true } } },
-    });
+  return tx.supplierPayment.create({
+    data: {
+      supplierId: id,
+      amount: input.amount,
+      discount,
+      paymentDate: input.paymentDate ? new Date(input.paymentDate) : new Date(),
+      paymentMode: input.paymentMode,
+      reference: input.reference,
+      paidBy: input.paidBy,
+      notes: input.notes,
+      proofUrl: input.proofUrl,
+      createdById,
+    },
+    include: { createdBy: { select: { id: true, name: true } } },
   });
 }

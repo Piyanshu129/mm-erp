@@ -5,6 +5,10 @@ import * as invoicesService from "../invoices/invoices.service";
 import { JOB_TYPES } from "./jobCards.service";
 import { parsePageParams } from "../../lib/pagination";
 import { JOB_CARD_STATUSES } from "../../lib/jobCardStatus";
+import { publicUrlFor } from "../../middleware/upload";
+import { AppError } from "../../lib/errors";
+
+export const SIGN_OFF_FOLDER = "job-card-sign-offs";
 
 const optionalString = z.string().trim().min(1).optional();
 
@@ -46,6 +50,9 @@ export const updateJobCardSchema = z.object({
   // Accidental repairs (optional).
   insuranceCompany: clearableString,
   claimNumber: clearableString,
+  // Vehicle trial with the customer.
+  trialBy: clearableString,
+  trialRemarks: clearableString,
 });
 
 export async function list(req: Request, res: Response) {
@@ -71,19 +78,30 @@ export async function update(req: Request, res: Response) {
   const id = Number(req.params.id);
   const { status, ...rest } = req.body as z.infer<typeof updateJobCardSchema>;
 
-  // Marking a job card Invoiced generates its draft invoice (or, for one
-  // that was reopened, brings its existing draft invoice up to date) — the
-  // two always happen together, in one transaction (invoices.service.ts).
+  // Choosing Closed closes the job card: its estimate becomes the bill (or,
+  // for one that was reopened, its bills are brought up to date) — always in
+  // one transaction (invoices.service.ts#closeJobCard).
   if (status === "INVOICED") {
     const current = await jobCardsService.getJobCard(id);
     if (current.status !== "INVOICED") {
-      if (Object.keys(rest).length > 0) await jobCardsService.updateJobCard(id, rest);
-      const invoice = await invoicesService.createInvoice(id, undefined, req.user!.id);
-      res.json({ jobCard: await jobCardsService.getJobCard(id), invoice });
+      if (Object.keys(rest).length > 0) await jobCardsService.updateJobCard(id, rest, req.user!.id);
+      const result = await invoicesService.closeJobCard(id, undefined, req.user!.id);
+      res.json({ jobCard: await jobCardsService.getJobCard(id), ...result });
       return;
     }
   }
 
-  const jobCard = await jobCardsService.updateJobCard(id, status ? { ...rest, status } : rest);
+  const jobCard = await jobCardsService.updateJobCard(id, status ? { ...rest, status } : rest, req.user!.id);
+  res.json({ jobCard });
+}
+
+// Photo of a signed slip: kind "trial" (vehicle trial with the customer) or
+// "gate-pass" (the vehicle may leave).
+export async function signOff(req: Request, res: Response) {
+  const kind = req.params.kind;
+  if (kind !== "trial" && kind !== "gate-pass") throw new AppError(404, "Not found");
+  if (!req.file) throw new AppError(400, "Upload a photo of the signed copy");
+  const url = publicUrlFor(SIGN_OFF_FOLDER, req.file.filename);
+  const jobCard = await jobCardsService.recordSignOff(Number(req.params.jobCardId), kind, url);
   res.json({ jobCard });
 }

@@ -64,7 +64,7 @@ const MODULE_WORDS: Record<string, string> = {
   SUPPLIERS: "Suppliers",
   PURCHASES: "Purchases",
   JOB_CARDS: "Job Cards",
-  INVOICES: "Draft Invoices",
+  INVOICES: "Bills & Payments",
   REPORTS: "Reports",
   EMPLOYEES: "Employees",
   ATTENDANCE: "Attendance",

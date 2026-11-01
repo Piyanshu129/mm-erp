@@ -318,6 +318,17 @@ model JobCard {
 
   deliveredAt DateTime? @map("delivered_at")
 
+  // Vehicle trial (road test) signed off with the customer: a printed slip,
+  // then a photo of the signed copy.
+  trialBy       String?   @map("trial_by")
+  trialRemarks  String?   @map("trial_remarks")
+  trialPhotoUrl String?   @map("trial_photo_url")
+  trialAt       DateTime? @map("trial_at")
+  // Gate pass for the vehicle to leave, once the job card is closed: printed,
+  // signed, and a photo of the signed copy uploaded.
+  gatePassPhotoUrl String?   @map("gate_pass_photo_url")
+  gatePassAt       DateTime? @map("gate_pass_at")
+
   createdById Int      @map("created_by_id")
   createdBy   User     @relation(fields: [createdById], references: [id])
   createdAt   DateTime @default(now()) @map("created_at")
@@ -326,7 +337,9 @@ model JobCard {
   media    JobCardMedia[]
   parts    JobCardPart[]
   labour   JobCardLabour[]
-  invoice  Invoice?
+  // The bills behind the closed job card's estimate: one for the customer,
+  // plus one for the insurance company on an accidental claim.
+  invoices Invoice[]
   estimate Estimate?
 
   @@map("job_cards")
@@ -389,11 +402,16 @@ model Estimate {
   approvedAt       DateTime? @map("approved_at")
   // GST tax invoice made from this estimate (estimates.service.ts): numbered
   // and locked once generated. INTRA = CGST + SGST, INTER = IGST.
-  gstInvoiceNumber String?   @unique @map("gst_invoice_number")
-  gstInvoiceDate   DateTime? @map("gst_invoice_date")
-  supplyType       String    @default("INTRA") @map("supply_type")
-  pricesIncludeGst Boolean   @default(false) @map("prices_include_gst")
-  customerGstin    String?   @map("customer_gstin")
+  // The customer's GST invoice (gstInvoice*) and, on an accidental claim, the
+  // insurance company's (insuranceGstInvoice*) — each covers its own lines.
+  gstInvoiceNumber          String?   @unique @map("gst_invoice_number")
+  gstInvoiceDate            DateTime? @map("gst_invoice_date")
+  insuranceGstInvoiceNumber String?   @unique @map("insurance_gst_invoice_number")
+  insuranceGstInvoiceDate   DateTime? @map("insurance_gst_invoice_date")
+  supplyType                String    @default("INTRA") @map("supply_type")
+  pricesIncludeGst          Boolean   @default(false) @map("prices_include_gst")
+  customerGstin             String?   @map("customer_gstin")
+  insuranceGstin            String?   @map("insurance_gstin")
   createdById      Int       @map("created_by_id")
   createdBy        User      @relation(fields: [createdById], references: [id])
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -417,6 +435,12 @@ model EstimateLine {
   amount      Decimal  @db.Decimal(12, 2)
   hsnCode     String?  @map("hsn_code") // HSN (goods) or SAC (services)
   gstRate     Decimal? @map("gst_rate") @db.Decimal(5, 2) // %
+  // Who pays for this line: CUSTOMER, or INSURANCE on an accidental claim.
+  scope       String   @default("CUSTOMER")
+  // The job card part / labour line this was copied from. Closing the job
+  // card brings the estimate in step with them (estimates.service.ts).
+  jobCardPartId   Int? @map("job_card_part_id")
+  jobCardLabourId Int? @map("job_card_labour_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([estimateId])
@@ -437,13 +461,13 @@ model JobCardLabour {
   @@map("job_card_labour")
 }
 
-// Phase 5/Rev2: Invoice. Deliberately has no line-item tables of its own —
-// parts and labour are read straight from the job card's (already
-// immutable, already locked-at-invoice-time) records, so an invoice can
-// never show different numbers than the job card it came from.
+// Phase 5/Rev2: Invoice — since 2026-11-01 the money side of a closed job
+// card's estimate (the app shows the estimate; there's no separate "draft
+// invoice" any more). One per payer: CUSTOMER always, plus INSURANCE when an
+// accidental claim's estimate puts lines on the insurance company. Its
+// totals are that payer's estimate lines (estimates.service.ts#syncBills).
 // invoiceNumber follows the same derive-from-own-id pattern as Item/Job
-// Card. taxRate/taxAmount exist now, unused, so GST can be added later
-// without a migration touching this table's shape.
+// Card. taxRate/taxAmount are unused.
 // Payments are one InvoicePayment row each (so the history is kept);
 // paymentAmount is their running total, kept in step in the same
 // transaction as every payment. Pending/Partial/Paid is computed from
@@ -451,8 +475,9 @@ model JobCardLabour {
 model Invoice {
   id            Int      @id @default(autoincrement())
   invoiceNumber String   @unique @map("invoice_number")
-  jobCardId     Int      @unique @map("job_card_id")
+  jobCardId     Int      @map("job_card_id")
   jobCard       JobCard  @relation(fields: [jobCardId], references: [id])
+  payer         String   @default("CUSTOMER") // CUSTOMER | INSURANCE
   invoiceDate   DateTime @default(now()) @map("invoice_date")
   partsTotal    Decimal  @map("parts_total") @db.Decimal(12, 2)
   labourTotal   Decimal  @map("labour_total") @db.Decimal(12, 2)
@@ -467,6 +492,7 @@ model Invoice {
 
   payments InvoicePayment[]
 
+  @@unique([jobCardId, payer])
   @@map("invoices")
 }
 

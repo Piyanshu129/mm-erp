@@ -6,6 +6,7 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Plus, ShoppingCart, Paperclip, Trash2, Printer, Download } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { PAYMENT_MODES, modeLabel } from "@/components/InvoiceAccountPanel";
 import { GST_RATES } from "@/lib/gst";
 import { AssetLink } from "@/components/AuthedMedia";
 import { fmtQty, formatINR, todayISO } from "@/lib/format";
@@ -560,6 +561,14 @@ function PurchasesPageContent() {
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine(initialType)]);
   const [remarks, setRemarks] = useState("");
   const [bill, setBill] = useState<File | null>(null);
+  // Paid to the supplier now (optional — empty for a purchase on credit).
+  const [payAmount, setPayAmount] = useState("");
+  const [payDiscount, setPayDiscount] = useState("");
+  const [payMode, setPayMode] = useState("");
+  const [payReference, setPayReference] = useState("");
+  const [payPaidBy, setPayPaidBy] = useState("");
+  // What the last save recorded, shown with the stickers.
+  const [savedPayment, setSavedPayment] = useState<string | null>(null);
   // Bumped after a save to clear the file inputs, which can't be reset by value.
   const [fileInputsKey, setFileInputsKey] = useState(0);
 
@@ -706,6 +715,11 @@ function PurchasesPageContent() {
     setLines([emptyLine(purchaseType)]);
     setRemarks("");
     setBill(null);
+    setPayAmount("");
+    setPayDiscount("");
+    setPayMode("");
+    setPayReference("");
+    setPayPaidBy("");
     setFileInputsKey((k) => k + 1);
   }
 
@@ -730,6 +744,12 @@ function PurchasesPageContent() {
     // expense there's often no slip, so it's optional.
     if (inventory && !bill) {
       setFormError("Take a photo of the bill / receipt");
+      return;
+    }
+
+    const paying = inventory && (Number(payAmount || 0) > 0 || Number(payDiscount || 0) > 0);
+    if (inventory && (Number(payAmount || 0) < 0 || Number(payDiscount || 0) < 0)) {
+      setFormError("Payment amounts can't be negative");
       return;
     }
 
@@ -777,6 +797,18 @@ function PurchasesPageContent() {
     formData.set("purchaseDate", purchaseDate);
     if (remarks.trim()) formData.set("remarks", remarks.trim());
     if (compressedBill) formData.set("bill", compressedBill);
+    if (paying) {
+      formData.set(
+        "payment",
+        JSON.stringify({
+          amount: Number(payAmount || 0),
+          ...(Number(payDiscount || 0) > 0 ? { discount: Number(payDiscount) } : {}),
+          ...(payMode ? { paymentMode: payMode } : {}),
+          ...(payReference.trim() ? { reference: payReference.trim() } : {}),
+          ...(payPaidBy.trim() ? { paidBy: payPaidBy.trim() } : {}),
+        })
+      );
+    }
 
     const payload = lines.map((line, i) => {
       const cost = Number(line.purchaseCost);
@@ -823,6 +855,11 @@ function PurchasesPageContent() {
           return { itemCode: p.item!.itemCode, itemName: p.item!.name, labels };
         });
       setStickerList(stickers.length > 0 ? stickers : null);
+      setSavedPayment(
+        body.payment
+          ? `Payment of ${formatINR(body.payment.amount)}${Number(body.payment.discount) > 0 ? ` (+ ${formatINR(body.payment.discount)} discount)` : ""} recorded on ${selectedSupplier?.name ?? "the supplier"}'s account.`
+          : null
+      );
       resetEntry();
       setShowForm(false);
       await loadPurchases();
@@ -857,7 +894,7 @@ function PurchasesPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Purchases"
-        description="Spare parts, paint and tools add to the item's stock, with a sticker for each piece. Travel, petrol, food and other costs are recorded as plain expenses. Payments to suppliers are recorded on the Suppliers page."
+        description="Spare parts, paint and tools add to the item's stock, with a sticker for each piece. Travel, petrol, food and other costs are recorded as plain expenses. A payment to the supplier can be entered at the end of the purchase, or later on the Suppliers page."
         action={
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={exportExcel} disabled={exporting}>
@@ -876,6 +913,7 @@ function PurchasesPageContent() {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="text-base font-semibold text-gray-900">Purchase saved — write these numbers on the stickers</p>
+                {savedPayment && <p className="text-sm text-green-700">{savedPayment}</p>}
                 <p className="text-sm text-gray-600">
                   One sticker per piece: item number, then the piece number. On a job card, enter the item code and the quantity used.
                 </p>
@@ -884,7 +922,15 @@ function PurchasesPageContent() {
                 <Button type="button" size="sm" onClick={() => printStickers(stickerList)}>
                   <Printer className="h-4 w-4" /> Print stickers
                 </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setStickerList(null)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setStickerList(null);
+                    setSavedPayment(null);
+                  }}
+                >
                   Done
                 </Button>
               </div>
@@ -1063,6 +1109,47 @@ function PurchasesPageContent() {
                   <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} />
                 </Field>
               </div>
+
+              {category === "INVENTORY" && (
+                <div className="space-y-3 rounded-md border border-gray-200 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Payment to supplier (optional)</p>
+                      <p className="text-xs text-gray-500">
+                        Paid now — goes on {selectedSupplier ? selectedSupplier.name : "the supplier"}&apos;s account, dated the purchase date.
+                        Leave empty for a purchase on credit.
+                      </p>
+                    </div>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setPayAmount(String(Math.round(grandTotal * 100) / 100))}>
+                      Paid in full ({formatINR(grandTotal)})
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <Field label="Amount paid (₹)">
+                      <Input type="number" min={0} step="0.01" placeholder="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+                    </Field>
+                    <Field label="Discount (₹)">
+                      <Input type="number" min={0} step="0.01" placeholder="0" value={payDiscount} onChange={(e) => setPayDiscount(e.target.value)} />
+                    </Field>
+                    <Field label="Payment mode">
+                      <Select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+                        <option value="">Select...</option>
+                        {PAYMENT_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {modeLabel(m)}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Reference / transaction ID">
+                      <Input value={payReference} onChange={(e) => setPayReference(e.target.value)} />
+                    </Field>
+                    <Field label="Paid by">
+                      <Input value={payPaidBy} onChange={(e) => setPayPaidBy(e.target.value)} />
+                    </Field>
+                  </div>
+                </div>
+              )}
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               <Button type="submit" disabled={submitting !== false}>

@@ -9,11 +9,12 @@ import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
-import { uploadMedia } from "../../middleware/upload";
+import { uploadImage, uploadMedia } from "../../middleware/upload";
 
 export const jobCardsRouter = Router();
 
 const uploadJobCardMedia = uploadMedia("job-cards").single("file");
+const uploadSignOffPhoto = uploadImage(jobCardsController.SIGN_OFF_FOLDER).single("photo");
 
 jobCardsRouter.use(authenticate, requirePermission("JOB_CARDS"));
 
@@ -57,10 +58,13 @@ jobCardsRouter.delete(
   asyncHandler(jobCardMediaController.removeMedia)
 );
 
-jobCardsRouter.post(
-  "/:jobCardId/invoice",
-  validateBody(invoicesController.createInvoiceSchema),
-  asyncHandler(invoicesController.create)
-);
+// Close the job card — its estimate becomes the bill. (/invoice is the old
+// name, kept for pages loaded before the change.)
+for (const path of ["/:jobCardId/close", "/:jobCardId/invoice"]) {
+  jobCardsRouter.post(path, validateBody(invoicesController.closeJobCardSchema), asyncHandler(invoicesController.close));
+}
+
+// Signed-copy photos: the vehicle trial sign-off and, once closed, the gate pass.
+jobCardsRouter.post("/:jobCardId/sign-off/:kind", uploadSignOffPhoto, asyncHandler(jobCardsController.signOff));
 
 jobCardsRouter.post("/:jobCardId/estimate", asyncHandler(estimatesController.createForJobCard));

@@ -15,7 +15,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { downloadElementAsPdf, invoiceFileName } from "@/lib/invoicePdf";
 import { SharePdfButton } from "@/components/SharePdfButton";
-import { GstInvoice } from "@/components/GstInvoice";
+import { GstInvoice, Payer, payerOf } from "@/components/GstInvoice";
+import { Bill, EstimateBills } from "@/components/EstimateBills";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
 
@@ -29,6 +30,8 @@ interface EstimateLine {
   amount: string;
   hsnCode?: string | null;
   gstRate?: string | null;
+  // Who pays (accidental claims; older servers don't send it).
+  scope?: Payer;
   item: { id: number; itemCode: string; name: string; uom: string } | null;
 }
 
@@ -44,9 +47,12 @@ interface EstimateDetail {
   // GST invoice made from this estimate (older servers don't send these).
   gstInvoiceNumber?: string | null;
   gstInvoiceDate?: string | null;
+  insuranceGstInvoiceNumber?: string | null;
+  insuranceGstInvoiceDate?: string | null;
   supplyType?: "INTRA" | "INTER";
   pricesIncludeGst?: boolean;
   customerGstin?: string | null;
+  insuranceGstin?: string | null;
   lines: EstimateLine[];
   partsTotal: number;
   labourTotal: number;
@@ -56,6 +62,9 @@ interface EstimateDetail {
   jobCard: {
     id: number;
     jobCardNumber: string;
+    // INVOICED = closed: the estimate is the bill (older servers don't send these).
+    status?: string;
+    invoices?: Bill[];
     kmAtService: number | null;
     jobType?: string | null;
     insuranceCompany?: string | null;
@@ -94,7 +103,9 @@ function EstimatePageContent() {
   const [error, setError] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
-  const [tab, setTab] = useState<"estimate" | "gst">("estimate");
+  const [tab, setTab] = useState<"estimate" | "claim" | "gst">("estimate");
+  // Which GST invoice the GST tab shows on an accidental claim.
+  const [gstPayer, setGstPayer] = useState<Payer>("CUSTOMER");
 
   // New line
   const [kind, setKind] = useState<LineKind>("INVENTORY");
@@ -131,6 +142,16 @@ function EstimatePageContent() {
       }
     })();
   }, [id]);
+
+  // After a payment: refresh the bills without blanking the page.
+  async function reload() {
+    try {
+      const body = await apiFetch(`/estimates/${id}`);
+      apply(body.estimate);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not refresh the estimate");
+    }
+  }
 
   // Item code typed in → look it up so its name and MRP fill in.
   useEffect(() => {
@@ -275,10 +296,26 @@ function EstimatePageContent() {
     return <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error ?? "Estimate not found"}</p>;
   }
 
-  const draft = estimate.status === "DRAFT";
   const { jobCard } = estimate;
+  // A closed job card's estimate is the bill: it follows the job card and
+  // can't be edited here.
+  const closed = jobCard.status === "INVOICED";
+  const draft = estimate.status === "DRAFT" && !closed;
+  const claim = jobCard.jobType === "ACCIDENTAL_CLAIM";
   const parts = estimate.lines.filter((l) => l.lineType === "PART");
   const labour = estimate.lines.filter((l) => l.lineType === "LABOUR");
+  const bills = jobCard.invoices ?? [];
+  const customerBill = bills.find((b) => b.payer === "CUSTOMER");
+  const insuranceBill = bills.find((b) => b.payer === "INSURANCE");
+  const billed = bills.reduce((t, b) => t + Number(b.totalAmount), 0);
+  const paid = bills.reduce((t, b) => t + Number(b.paymentAmount), 0);
+  const insuranceTotal = estimate.lines
+    .filter((l) => payerOf(l, jobCard.jobType) === "INSURANCE")
+    .reduce((t, l) => t + Number(l.amount), 0);
+  const insuranceTag = (l: EstimateLine) =>
+    claim && payerOf(l, jobCard.jobType) === "INSURANCE" ? (
+      <span className="ml-1 rounded bg-purple-50 px-1 text-[11px] font-medium text-purple-700">Insurance</span>
+    ) : null;
 
   const removeCell = (lineId: number) =>
     draft ? (
@@ -317,7 +354,11 @@ function EstimatePageContent() {
                 getElement={() => printRef.current}
                 fileName={fileName}
                 mobile={jobCard.vehicle.customer.mobile}
-                text={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the estimate ${estimate.estimateNumber} for vehicle ${jobCard.vehicle.registrationNumber}.\nEstimated amount: ${money(estimate.totalAmount)}\n— Motors Mitra`}
+                text={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the estimate ${estimate.estimateNumber} for vehicle ${jobCard.vehicle.registrationNumber}.\n${
+                  closed && customerBill
+                    ? `Amount payable: ${money(customerBill.totalAmount)}${Number(customerBill.paymentAmount) > 0 ? ` (paid ${money(customerBill.paymentAmount)})` : ""}`
+                    : `Estimated amount: ${money(estimate.totalAmount)}`
+                }\n— Motors Mitra`}
                 onError={setError}
               />
             )}
@@ -327,22 +368,63 @@ function EstimatePageContent() {
 
       <div className="flex border-b border-gray-200 print:hidden">
         <button type="button" className={tabClass("estimate")} onClick={() => setTab("estimate")}>
-          Estimate
+          {closed ? "Estimate & bill" : "Estimate"}
         </button>
+        {claim && (
+          <button type="button" className={tabClass("claim")} onClick={() => setTab("claim")}>
+            Customer / Insurance
+          </button>
+        )}
         <button type="button" className={tabClass("gst")} onClick={() => setTab("gst")}>
           GST Invoice{estimate.gstInvoiceNumber ? ` · ${estimate.gstInvoiceNumber}` : ""}
         </button>
       </div>
 
-      {tab === "gst" ? (
-        <GstInvoice estimate={estimate} onUpdated={(e) => apply(e as EstimateDetail)} />
+      {tab === "claim" && claim ? (
+        <ClaimScope estimate={estimate} closed={closed} onUpdated={apply} />
+      ) : tab === "gst" ? (
+        <div className="space-y-3">
+          {claim && (
+            <div className="flex flex-wrap gap-2 print:hidden">
+              {(
+                [
+                  ["CUSTOMER", `Customer's invoice${estimate.gstInvoiceNumber ? ` · ${estimate.gstInvoiceNumber}` : ""}`],
+                  [
+                    "INSURANCE",
+                    `Insurance company's invoice${estimate.insuranceGstInvoiceNumber ? ` · ${estimate.insuranceGstInvoiceNumber}` : ""}`,
+                  ],
+                ] as [Payer, string][]
+              ).map(([p, label]) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setGstPayer(p)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                    gstPayer === p ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <GstInvoice
+            key={claim ? gstPayer : "CUSTOMER"}
+            estimate={estimate}
+            payer={claim ? gstPayer : "CUSTOMER"}
+            onUpdated={(e) => apply(e as EstimateDetail)}
+          />
+        </div>
       ) : (
         <>
 
           <div className="flex flex-wrap items-center gap-2 print:hidden">
-            {draft ? (
+            {closed ? (
+              <Badge tone="blue">Job card closed — this estimate is the bill</Badge>
+            ) : draft ? (
               <Badge tone="amber">Draft — awaiting customer approval</Badge>
-            ) : (
+            ) : null}
+            {estimate.status === "APPROVED" && (
               <Badge tone="green">
                 Customer approved{estimate.approvedAt ? ` on ${new Date(estimate.approvedAt).toLocaleDateString()}` : ""}
               </Badge>
@@ -418,6 +500,7 @@ function EstimatePageContent() {
                           ) : (
                             <span className="text-gray-500"> (not in stock)</span>
                           )}
+                          {insuranceTag(l)}
                         </td>
                         <td className="py-1 text-right">{fmtQty(l.quantity)}</td>
                         <td className="py-1 text-right">{money(l.rate)}</td>
@@ -450,7 +533,10 @@ function EstimatePageContent() {
                     {labour.map((l, i) => (
                       <tr key={l.id} className="border-b border-gray-100">
                         <td className="py-1">{i + 1}</td>
-                        <td className="py-1">{l.description}</td>
+                        <td className="py-1">
+                          {l.description}
+                          {insuranceTag(l)}
+                        </td>
                         <td className="py-1 text-right">{fmtQty(l.quantity)}</td>
                         <td className="py-1 text-right">{money(l.rate)}</td>
                         <td className="py-1 text-right">{money(l.amount)}</td>
@@ -483,10 +569,63 @@ function EstimatePageContent() {
                   </div>
                 </>
               )}
-              <div className="flex justify-between border-t border-gray-200 pt-1 text-base font-bold">
-                <span>Total Estimated Amount</span>
-                <span>{money(estimate.totalAmount)}</span>
-              </div>
+              {closed && bills.length > 0 ? (
+                <>
+                  {customerBill && Number(customerBill.discount) > 0 && (
+                    <div className="flex justify-between">
+                      <span>Discount</span>
+                      <span>− {money(customerBill.discount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t border-gray-200 pt-1 text-base font-bold">
+                    <span>Total</span>
+                    <span>{money(billed)}</span>
+                  </div>
+                  {insuranceBill && (
+                    <>
+                      <div className="flex justify-between text-gray-700">
+                        <span>Insurance company pays</span>
+                        <span>{money(insuranceBill.totalAmount)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span>Customer pays</span>
+                        <span>{money(customerBill?.totalAmount ?? 0)}</span>
+                      </div>
+                    </>
+                  )}
+                  {paid > 0 && (
+                    <div className="flex justify-between text-green-700">
+                      <span>Paid</span>
+                      <span>{money(paid)}</span>
+                    </div>
+                  )}
+                  {billed - paid > 0.005 && (
+                    <div className="flex justify-between font-semibold text-red-700">
+                      <span>Balance due</span>
+                      <span>{money(billed - paid)}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between border-t border-gray-200 pt-1 text-base font-bold">
+                    <span>Total Estimated Amount</span>
+                    <span>{money(estimate.totalAmount)}</span>
+                  </div>
+                  {claim && insuranceTotal > 0 && (
+                    <>
+                      <div className="flex justify-between text-gray-700">
+                        <span>Insurance company scope</span>
+                        <span>{money(insuranceTotal)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span>Customer scope</span>
+                        <span>{money(estimate.subtotal - insuranceTotal)}</span>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             {estimate.notes && (
@@ -496,10 +635,12 @@ function EstimatePageContent() {
               </p>
             )}
 
-            <p className="mt-4 text-xs text-gray-500">
-              This is an estimate. The final bill may vary if additional work or parts are found to be needed — any such
-              change will be done only with the customer&apos;s consent.
-            </p>
+            {!closed && (
+              <p className="mt-4 text-xs text-gray-500">
+                This is an estimate. The final bill may vary if additional work or parts are found to be needed — any such
+                change will be done only with the customer&apos;s consent.
+              </p>
+            )}
 
             <div className="mt-12 grid grid-cols-2 gap-10 text-sm">
               <div>
@@ -514,6 +655,23 @@ function EstimatePageContent() {
               </div>
             </div>
           </div>
+
+          {closed && bills.length > 0 && (
+            <EstimateBills
+              bills={bills}
+              estimateNumber={estimate.estimateNumber}
+              insuranceCompany={jobCard.insuranceCompany}
+              customer={jobCard.vehicle.customer}
+              vehicle={jobCard.vehicle}
+              onChanged={reload}
+            />
+          )}
+          {closed && (
+            <p className="text-xs text-gray-500 print:hidden">
+              This estimate follows job card {jobCard.jobCardNumber}&apos;s parts and labour. To change it, set the job card
+              back to Open, change it, and close it again — the bill keeps its payments.
+            </p>
+          )}
 
           {/* Editing — only while the estimate is a draft */}
           {draft && (
@@ -660,6 +818,129 @@ function EstimatePageContent() {
         </>
       )}
     </div>
+  );
+}
+
+// Accidental claim: who pays for each line — the customer or the insurance
+// company. On a closed job card, saving moves the amounts between the two
+// bills. Fixed once either GST invoice is made.
+function ClaimScope({
+  estimate,
+  closed,
+  onUpdated,
+}: {
+  estimate: EstimateDetail;
+  closed: boolean;
+  onUpdated: (e: EstimateDetail) => void;
+}) {
+  const initial = () => Object.fromEntries(estimate.lines.map((l) => [l.id, l.scope ?? "CUSTOMER"])) as Record<number, Payer>;
+  const [scopes, setScopes] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const locked = estimate.gstInvoiceNumber || estimate.insuranceGstInvoiceNumber;
+
+  useEffect(() => {
+    setScopes(initial());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estimate]);
+
+  const dirty = estimate.lines.some((l) => scopes[l.id] !== (l.scope ?? "CUSTOMER"));
+  const sumFor = (p: Payer) => estimate.lines.filter((l) => scopes[l.id] === p).reduce((t, l) => t + Number(l.amount), 0);
+
+  async function save() {
+    setError(null);
+    setNotice(null);
+    setSaving(true);
+    try {
+      const body = await apiFetch(`/estimates/${estimate.id}/gst`, {
+        method: "PATCH",
+        body: JSON.stringify({ lines: estimate.lines.map((l) => ({ id: l.id, scope: scopes[l.id] })) }),
+      });
+      onUpdated(body.estimate);
+      setNotice(closed ? "Saved — the customer's and insurance company's bills are updated." : "Saved.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const setAll = (p: Payer) => setScopes(Object.fromEntries(estimate.lines.map((l) => [l.id, p])));
+
+  return (
+    <Card className="print:hidden">
+      <CardBody className="space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Customer scope and insurance company scope</p>
+          <p className="text-sm text-gray-600">
+            Choose who pays for each line
+            {estimate.jobCard.insuranceCompany ? ` — the customer or ${estimate.jobCard.insuranceCompany}` : ""}. Each side
+            gets its own bill and its own GST invoice.
+            {locked ? ` Fixed now that GST invoice ${locked} is made.` : ""}
+          </p>
+        </div>
+        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {notice && <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">{notice}</p>}
+        {!locked && estimate.lines.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button type="button" onClick={() => setAll("CUSTOMER")} className="font-medium text-blue-600 hover:underline">
+              All customer
+            </button>
+            <button type="button" onClick={() => setAll("INSURANCE")} className="font-medium text-blue-600 hover:underline">
+              All insurance
+            </button>
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-gray-500">
+                <th className="py-1 pr-2">Line</th>
+                <th className="py-1 pr-2 text-right">Amount</th>
+                <th className="py-1 pl-4">Customer</th>
+                <th className="py-1">Insurance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estimate.lines.map((l) => (
+                <tr key={l.id} className="border-t border-gray-100">
+                  <td className="py-1.5 pr-2">
+                    {l.description}
+                    <span className="ml-1 text-xs text-gray-500">{l.lineType === "LABOUR" ? "(labour)" : ""}</span>
+                  </td>
+                  <td className="py-1.5 pr-2 text-right">{money(l.amount)}</td>
+                  {(["CUSTOMER", "INSURANCE"] as Payer[]).map((p) => (
+                    <td key={p} className={p === "CUSTOMER" ? "py-1.5 pl-4" : "py-1.5"}>
+                      <input
+                        type="radio"
+                        name={`scope-${l.id}`}
+                        aria-label={`${l.description}: ${p === "CUSTOMER" ? "customer" : "insurance"}`}
+                        checked={scopes[l.id] === p}
+                        disabled={!!locked}
+                        onChange={() => setScopes((prev) => ({ ...prev, [l.id]: p }))}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              <tr className="border-t border-gray-300 font-semibold">
+                <td className="py-1.5 pr-2">Totals</td>
+                <td />
+                <td className="py-1.5 pl-4">{money(sumFor("CUSTOMER"))}</td>
+                <td className="py-1.5">{money(sumFor("INSURANCE"))}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {!locked && (
+          <Button type="button" size="sm" onClick={save} disabled={saving || !dirty}>
+            {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+          </Button>
+        )}
+        {closed && <p className="text-xs text-gray-500">The customer&apos;s discount stays on the customer&apos;s bill.</p>}
+      </CardBody>
+    </Card>
   );
 }
 

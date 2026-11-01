@@ -23,7 +23,29 @@ export const createVehicleSchema = z.object({
   customerId: z.coerce.number().int().positive(),
 });
 
-export const updateVehicleSchema = createVehicleSchema.partial();
+// Editing: blank optional fields clear on the server.
+const clearableString = z
+  .string()
+  .trim()
+  .nullable()
+  .optional()
+  .transform((s) => (s === "" ? null : s));
+
+export const updateVehicleSchema = z.object({
+  registrationNumber: z.string().trim().min(4).max(20).optional(),
+  make: z.string().trim().min(1).optional(),
+  model: z.string().trim().min(1).optional(),
+  variant: clearableString,
+  year: z.coerce.number().int().min(1980).max(2100).nullable().optional(),
+  fuelType: clearableString,
+  transmission: clearableString,
+  currentKm: z.coerce.number().int().min(0).nullable().optional(),
+  chassisNumber: clearableString,
+  engineNumber: clearableString,
+  nextServiceDue: clearableString,
+  nextServiceKm: z.coerce.number().int().min(0).nullable().optional(),
+  customerId: z.coerce.number().int().positive().optional(),
+});
 
 export const setActiveSchema = z.object({ isActive: z.boolean() });
 
@@ -50,6 +72,13 @@ export async function create(req: Request, res: Response) {
 export async function update(req: Request, res: Response) {
   const input = req.body as z.infer<typeof updateVehicleSchema>;
   const vehicle = await vehiclesService.updateVehicle(Number(req.params.id), input);
+  res.json({ vehicle });
+}
+
+// Replaces the RC photo (multipart, field "rcPhoto").
+export async function replaceRcPhoto(req: Request, res: Response) {
+  if (!req.file) throw new AppError(400, "Choose a photo of the RC");
+  const vehicle = await vehiclesService.setRcPhoto(Number(req.params.id), publicUrlFor("vehicle-rc", req.file.filename));
   res.json({ vehicle });
 }
 

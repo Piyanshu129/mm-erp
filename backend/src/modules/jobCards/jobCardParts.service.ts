@@ -15,9 +15,9 @@ export interface AddPartInput {
   createdById: number;
 }
 
-// Parts and labour can be changed while the job card is Open. An invoiced
-// job card can be set back to Open to edit it (its draft invoice is then
-// brought up to date when it's invoiced again — see invoices.service.ts).
+// Parts and labour can be changed while the job card is Open. A closed job
+// card can be set back to Open to edit it (its estimate and bills are then
+// brought up to date when it's closed again — see invoices.service.ts).
 export async function assertJobCardEditable(db: any, jobCardId: number) {
   const jobCard = await db.jobCard.findUnique({ where: { id: jobCardId } });
   if (!jobCard) throw new NotFoundError("Job card not found");
@@ -25,7 +25,7 @@ export async function assertJobCardEditable(db: any, jobCardId: number) {
     throw new ConflictError(
       jobCard.status === "CANCELLED"
         ? "This job card is cancelled — set it back to Open to make changes"
-        : "This job card is invoiced — set it back to Open to make changes"
+        : "This job card is closed — set it back to Open to make changes"
     );
   }
   return jobCard;

@@ -51,7 +51,7 @@ async function estimatesBetween(start: Date, end: Date) {
 
 // Graph buckets for the admin dashboard: the last 7 days for "today", each
 // day of the month for "month", each month of the financial year for "fy".
-// Per bucket: purchases (stock + expenses), estimates, sales (draft invoice
+// Per bucket: purchases (stock + expenses), estimates, sales (bill
 // totals) and profit = sales − purchases.
 async function dashboardSeries(period: DashboardPeriod, now = new Date()) {
   const todayStart = periodStart("today", now);

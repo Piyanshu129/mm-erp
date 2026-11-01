@@ -34,6 +34,8 @@ interface HistoryEntry {
   labourTotal: number;
   grandTotal: number;
   invoice: { id: number; invoiceNumber: string; totalAmount: string } | null;
+  // Customer + insurance company, once closed (older servers don't send it).
+  billedTotal?: number | null;
   estimate: { id: number; estimateNumber: string; status: string; approvalPhotoUrl: string | null } | null;
 }
 
@@ -135,7 +137,11 @@ function ServiceHistoryPageContent() {
                       <JobCardStatusBadge status={h.status} label={STATUS_LABELS[h.status] ?? h.status} />
                     </Td>
                     <Td className="font-medium text-gray-900">
-                      {h.invoice ? `₹${h.invoice.totalAmount}` : `₹${h.grandTotal.toFixed(2)}`}
+                      {h.billedTotal != null
+                        ? `₹${Number(h.billedTotal).toFixed(2)}`
+                        : h.invoice
+                          ? `₹${h.invoice.totalAmount}`
+                          : `₹${h.grandTotal.toFixed(2)}`}
                     </Td>
                     <Td>
                       {h.estimate ? (
@@ -148,11 +154,8 @@ function ServiceHistoryPageContent() {
                       )}
                     </Td>
                     <Td>
-                      <Link
-                        href={h.invoice ? `/dashboard/invoices/${h.invoice.id}` : `/dashboard/jobcards/${h.id}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {h.invoice ? "View draft invoice" : "View job card"}
+                      <Link href={`/dashboard/jobcards/${h.id}`} className="text-blue-600 hover:underline">
+                        View job card
                       </Link>
                     </Td>
                   </Tr>

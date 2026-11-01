@@ -27,7 +27,12 @@ interface AccountInvoice {
   totalAmount: string;
   paymentAmount: string;
   due: number;
-  jobCard: { jobCardNumber: string; vehicle: { registrationNumber: string } };
+  jobCard: {
+    jobCardNumber: string;
+    vehicle: { registrationNumber: string };
+    // The bill is the closed job card's estimate (older servers don't send it).
+    estimate?: { id: number; estimateNumber: string } | null;
+  };
 }
 
 export interface InvoicePaymentRow {
@@ -42,7 +47,19 @@ export interface InvoicePaymentRow {
   receivedBy: string | null;
   notes: string | null;
   createdBy: { name: string };
-  invoice?: { id: number; invoiceNumber: string; jobCard: { vehicle: { registrationNumber: string } } };
+  invoice?: {
+    id: number;
+    invoiceNumber: string;
+    jobCard: { vehicle: { registrationNumber: string }; estimate?: { id: number; estimateNumber: string } | null };
+  };
+}
+
+// A bill is shown as its estimate — number and page — where there is one.
+function billNumber(i: { invoiceNumber: string; jobCard: { estimate?: { estimateNumber: string } | null } }): string {
+  return i.jobCard.estimate?.estimateNumber ?? i.invoiceNumber;
+}
+function billHref(i: { id: number; jobCard: { estimate?: { id: number } | null } }): string {
+  return i.jobCard.estimate ? `/dashboard/estimates/${i.jobCard.estimate.id}` : `/dashboard/invoices/${i.id}`;
 }
 
 export const PAYMENT_MODES = ["CASH", "UPI", "CARD", "BANK_TRANSFER", "CHEQUE"];
@@ -57,7 +74,7 @@ export function InvoiceAccountSummary({ account }: { account: InvoiceAccount }) 
   return (
     <div className="grid grid-cols-3 gap-3 text-center">
       <div className="rounded-md bg-gray-50 px-2 py-2">
-        <p className="text-xs text-gray-500">Invoiced ({account.invoiceCount})</p>
+        <p className="text-xs text-gray-500">Billed ({account.invoiceCount})</p>
         <p className="text-sm font-semibold text-gray-900">{formatINR(account.totalInvoiced)}</p>
       </div>
       <div className="rounded-md bg-green-50 px-2 py-2">
@@ -72,7 +89,7 @@ export function InvoiceAccountSummary({ account }: { account: InvoiceAccount }) 
   );
 }
 
-// The Invoiced / Paid / Due cells of a Customers or Vehicles list row.
+// The Billed / Paid / Due cells of a Customers or Vehicles list row.
 export function InvoiceAccountCells({ account }: { account: InvoiceAccount }) {
   return (
     <>
@@ -110,7 +127,7 @@ export function InvoiceAccountActions({
         type="button"
         onClick={onHistory}
         disabled={account.invoiceCount === 0}
-        title={account.invoiceCount === 0 ? "No invoices yet" : undefined}
+        title={account.invoiceCount === 0 ? "No bills yet" : undefined}
         className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
       >
         <History className="h-3 w-3" /> Payment history
@@ -260,7 +277,7 @@ export function InvoicePaymentHistory({
         <thead>
           <tr>
             <Th>Date</Th>
-            {showInvoice && <Th>Draft Invoice</Th>}
+            {showInvoice && <Th>Estimate</Th>}
             <Th className="text-right">Amount</Th>
             <Th>Mode</Th>
             <Th>Reference</Th>
@@ -287,8 +304,8 @@ export function InvoicePaymentHistory({
                 {showInvoice && (
                   <Td className="whitespace-nowrap">
                     {p.invoice ? (
-                      <Link href={`/dashboard/invoices/${p.invoice.id}`} className="font-mono text-blue-600 hover:underline">
-                        {p.invoice.invoiceNumber}
+                      <Link href={billHref(p.invoice)} className="font-mono text-blue-600 hover:underline">
+                        {billNumber(p.invoice)}
                       </Link>
                     ) : (
                       "-"
@@ -384,7 +401,7 @@ export function RecordInvoicePaymentForm({
     e.preventDefault();
     setError(null);
     if (!selected) {
-      setError("Choose the draft invoice this payment is for");
+      setError("Choose the estimate this payment is for");
       return;
     }
     const value = Number(amount || 0);
@@ -428,7 +445,7 @@ export function RecordInvoicePaymentForm({
     <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {unpaid.length > 1 || invoices.length > 1 ? (
         <div className="sm:col-span-2">
-          <Label>Draft invoice</Label>
+          <Label>Estimate</Label>
           <Select value={invoiceId ?? ""} onChange={(e) => choose(Number(e.target.value))}>
             {unpaid.map((i) => (
               <option key={i.id} value={i.id}>
@@ -481,8 +498,10 @@ export function RecordInvoicePaymentForm({
   );
 }
 
-// Everything about one customer's or one vehicle's invoices in one card:
-// the totals, taking a payment, every invoice, and the payment history.
+// Everything about one customer's or one vehicle's bills in one card: the
+// totals, taking a payment, every bill (a closed job card's estimate), and
+// the payment history. Only the customer's own bills — an insurance
+// company's share of a claim is on that estimate.
 export function InvoiceAccountPanel({
   accountUrl,
   title,
@@ -541,7 +560,7 @@ export function InvoiceAccountPanel({
             <InvoiceAccountSummary account={data.account} />
 
             {data.invoices.length === 0 ? (
-              <p className="text-sm text-gray-500">No draft invoices yet.</p>
+              <p className="text-sm text-gray-500">No bills yet — a job card is billed when it's closed.</p>
             ) : (
               <>
                 <div>
@@ -551,9 +570,9 @@ export function InvoiceAccountPanel({
                     autoFocus={focusPay}
                     invoices={data.invoices.map((i) => ({
                       id: i.id,
-                      invoiceNumber: i.invoiceNumber,
+                      invoiceNumber: billNumber(i),
                       due: i.due,
-                      label: `${i.invoiceNumber} · ${i.jobCard.vehicle.registrationNumber} · ${new Date(i.invoiceDate).toLocaleDateString()}`,
+                      label: `${billNumber(i)} · ${i.jobCard.vehicle.registrationNumber} · ${new Date(i.invoiceDate).toLocaleDateString()}`,
                     }))}
                     onSaved={async () => {
                       await load();
@@ -564,11 +583,11 @@ export function InvoiceAccountPanel({
                 </div>
 
                 <div>
-                  <p className="mb-2 text-sm font-semibold text-gray-900">Draft invoices</p>
+                  <p className="mb-2 text-sm font-semibold text-gray-900">Bills (closed estimates)</p>
                   <Table minWidth={620}>
                     <thead>
                       <tr>
-                        <Th>Draft Invoice</Th>
+                        <Th>Estimate</Th>
                         <Th>Date</Th>
                         <Th>Vehicle</Th>
                         <Th className="text-right">Total</Th>
@@ -581,8 +600,8 @@ export function InvoiceAccountPanel({
                       {data.invoices.map((i) => (
                         <Tr key={i.id}>
                           <Td>
-                            <Link href={`/dashboard/invoices/${i.id}`} className="font-mono text-blue-600 hover:underline">
-                              {i.invoiceNumber}
+                            <Link href={billHref(i)} className="font-mono text-blue-600 hover:underline">
+                              {billNumber(i)}
                             </Link>
                           </Td>
                           <Td className="whitespace-nowrap">{new Date(i.invoiceDate).toLocaleDateString()}</Td>

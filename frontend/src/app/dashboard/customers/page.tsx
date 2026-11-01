@@ -131,7 +131,7 @@ function CustomersPageContent() {
         <InvoiceAccountPanel
           key={`${accountFor.customer.id}-${accountFor.focusPay}`}
           accountUrl={`/customers/${accountFor.customer.id}/account`}
-          title={`${accountFor.customer.name} — draft invoices & payments`}
+          title={`${accountFor.customer.name} — bills & payments`}
           focusPay={accountFor.focusPay}
           onClose={() => setAccountFor(null)}
           onChanged={() => loadCustomers(q, true)}
@@ -149,7 +149,7 @@ function CustomersPageContent() {
               <Th>Name</Th>
               <Th>Mobile</Th>
               <Th>Address</Th>
-              <Th className="text-right">Invoiced</Th>
+              <Th className="text-right">Billed</Th>
               <Th className="text-right">Paid</Th>
               <Th className="text-right">Due</Th>
               <Th>Status</Th>
