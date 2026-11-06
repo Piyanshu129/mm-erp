@@ -1,4 +1,4 @@
-# MM ERP — Motors Mitra Workshop Management System
+# MM ERP — Workshop Management System
 
 Phase 1 (auth), Phase 2 (Customer/Vehicle/Item masters), Phase 3 (Purchase/Serial Number/Inventory), Phase 4 (Job Card/Inspection/Parts/Labour), Phase 5 (Invoice/Service History), and Phase 6 (Dashboard/Reports/Backup) are done, followed by a September 2026 rework driven by the client's own flowchart documentation — see "What's in the September 2026 rework" below, which supersedes some of Phase 3/4's original design.
 
