@@ -13,6 +13,7 @@
 # that npm and PostgreSQL print.)
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"   # makes downloads much faster in Windows PowerShell
+. (Join-Path $PSScriptRoot "database.ps1")
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -126,12 +127,9 @@ if (-not (Test-Path "$PgData\PG_VERSION")) {
 # Running = its port is answering (pg_ctl's own status check can miss it).
 if (-not (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyContinue)) {
   Step "Starting the database server on port $DbPort"
-  # Not answering, so any lock file is left over from a crash - it would block the start.
-  Remove-Item "$PgData\postmaster.pid" -Force -ErrorAction SilentlyContinue
-  # A new log file per start: an old one can stay locked after a crash.
-  New-Item -ItemType Directory -Force "$PgDir\logs" | Out-Null
-  $PgLog = "$PgDir\logs\server-$(Get-Date -Format yyyyMMdd-HHmmss).log"
-  & "$PgDir\bin\pg_ctl.exe" -D $PgData -l $PgLog -o "-p $DbPort" -w start; Check "Starting PostgreSQL (log: $PgLog)"
+  # In a window-less console of its own, so closing this window doesn't stop it.
+  $db = Start-Database $PgDir $DbPort
+  if (-not $db.Started) { throw "Starting PostgreSQL failed (log: $($db.Log))" }
 }
 
 # ---- 3. Backend packages, database and app login ---------------------------

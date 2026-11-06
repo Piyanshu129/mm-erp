@@ -3,6 +3,7 @@
 # ngrok tunnel on the fixed public address the Vercel website talks to.
 # Run it through start-servers.bat (double-click).
 $ErrorActionPreference = "Continue"
+. (Join-Path $PSScriptRoot "database.ps1")
 
 $PublicUrl = "https://les-unhesitative-blandishingly.ngrok-free.dev"
 
@@ -29,14 +30,10 @@ if (Get-NetTCPConnection -LocalPort $DbPort -State Listen -ErrorAction SilentlyC
   Write-Host "Database already running."
 } else {
   Write-Host "Starting the database..."
-  # Not answering, so any lock file is left over from a crash or power cut —
-  # it would make the start fail.
-  Remove-Item "$PgDir\data\postmaster.pid" -Force -ErrorAction SilentlyContinue
-  # A new log file per start: an old one can stay locked after a crash.
-  New-Item -ItemType Directory -Force "$PgDir\logs" | Out-Null
-  $PgLog = "$PgDir\logs\server-$(Get-Date -Format yyyyMMdd-HHmmss).log"
-  & "$PgDir\bin\pg_ctl.exe" -D "$PgDir\data" -l $PgLog -o "-p $DbPort" -w start
-  if ($LASTEXITCODE -ne 0) { throw "The database didn't start - see $PgLog" }
+  # In a window-less console of its own, so closing this window (or any
+  # other) doesn't stop it — see database.ps1.
+  $db = Start-Database $PgDir $DbPort
+  if (-not $db.Started) { throw "The database didn't start - see $($db.Log)" }
 }
 
 # Double-clicking again while it's running must not start second copies (a
