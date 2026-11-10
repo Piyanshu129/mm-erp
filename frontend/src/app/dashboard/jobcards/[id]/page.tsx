@@ -36,8 +36,12 @@ import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
 import { EstimateCheck } from "@/components/EstimateCheck";
 import { SignOffSlip, SignatureLines } from "@/components/SignOffSlip";
+import { FUEL_LEVELS, TrialAgreement } from "@/components/TrialAgreement";
 import { JOB_TYPE_LABELS } from "@/lib/jobTypes";
 import { formatINR } from "@/lib/format";
+import { useAuth } from "@/context/AuthContext";
+import { hasPermission } from "@/lib/permissions";
+import { PAYMENT_MODES, modeLabel } from "@/components/InvoiceAccountPanel";
 
 const STATUS_LABELS = JOB_CARD_STATUS_LABELS;
 
@@ -67,6 +71,14 @@ function autoSavePayload(f: {
   };
 }
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
+
+// An ISO time as a datetime-local input value, in local time.
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 
 const MEDIA_ANGLES = [
@@ -105,6 +117,9 @@ interface JobCardDetail {
   // Vehicle trial and gate pass (older servers don't send these).
   trialBy?: string | null;
   trialRemarks?: string | null;
+  trialFuelLevel?: string | null;
+  trialArea?: string | null;
+  trialReturnBy?: string | null;
   trialPhotoUrl?: string | null;
   trialAt?: string | null;
   gatePassPhotoUrl?: string | null;
@@ -114,7 +129,8 @@ interface JobCardDetail {
     registrationNumber: string;
     make: string;
     model: string;
-    customer: { id: number; name: string; mobile: string };
+    customer: { id: number; name: string; mobile: string; address?: string | null };
+    variant?: string | null;
   };
   media: { id: number; mediaType: string; angle: string | null; phase: string; url: string }[];
   parts: {
@@ -189,9 +205,19 @@ function JobCardDetailPageContent() {
   // Choosing "Closed" opens this confirmation instead of just changing a
   // label — closing a job card makes its estimate the bill.
   const [showInvoicePrompt, setShowInvoicePrompt] = useState(false);
+  // Optional payment taken when closing.
+  const { user } = useAuth();
+  const canPay = (["INVOICES", "CUSTOMERS", "VEHICLES"] as const).some((p) => hasPermission(user, p));
+  const [payAmount, setPayAmount] = useState("");
+  const [payMode, setPayMode] = useState("CASH");
+  const [payReference, setPayReference] = useState("");
+  const [payReceivedBy, setPayReceivedBy] = useState("");
 
   const [trialBy, setTrialBy] = useState("");
-  const [trialRemarks, setTrialRemarks] = useState("");
+  const [trialFuel, setTrialFuel] = useState("");
+  const [trialArea, setTrialArea] = useState("");
+  // datetime-local value (local time, "YYYY-MM-DDTHH:mm").
+  const [trialReturnBy, setTrialReturnBy] = useState("");
   const [savingTrial, setSavingTrial] = useState(false);
 
   const [jobType, setJobType] = useState("");
@@ -270,7 +296,9 @@ function JobCardDetailPageContent() {
     }
     setAssignEmployeeId(jc.assignedEmployeeId?.toString() ?? "");
     setTrialBy(jc.trialBy ?? "");
-    setTrialRemarks(jc.trialRemarks ?? "");
+    setTrialFuel(jc.trialFuelLevel ?? "");
+    setTrialArea(jc.trialArea ?? "");
+    setTrialReturnBy(toLocalInput(jc.trialReturnBy));
     setFinalStatus(jc.finalInspectionStatus ?? "");
     setFinalBy(jc.finalInspectionBy ?? "");
     setLoading(false);
@@ -348,16 +376,7 @@ function JobCardDetailPageContent() {
     // discount if it was closed before) and opens the estimate. If something
     // is missing, the server says what (labour line, photos).
     if (status === "INVOICED") {
-      setShowInvoicePrompt(false);
-      setGeneratingInvoice(true);
-      try {
-        const body = await apiFetch(`/job-cards/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-        openBill(body);
-      } catch (err) {
-        setActionError(err instanceof ApiError ? err.message : "Could not close the job card");
-        setGeneratingInvoice(false);
-        await load();
-      }
+      openClosePrompt();
       return;
     }
     setShowInvoicePrompt(false);
@@ -575,14 +594,38 @@ function JobCardDetailPageContent() {
     await load();
   }
 
+  // The Close job card box: the checks, the discount and an optional payment.
+  function openClosePrompt() {
+    setActionError(null);
+    const bill = jobCard?.invoices?.find((b) => b.payer === "CUSTOMER");
+    if (bill) setDiscount(String(Number(bill.discount)));
+    setPayAmount("");
+    setPayReference("");
+    setShowInvoicePrompt(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function handleGenerateInvoice(e: FormEvent) {
     e.preventDefault();
     setActionError(null);
+    const amount = Number(payAmount) || 0;
     setGeneratingInvoice(true);
     try {
       const body = await apiFetch(`/job-cards/${id}/close`, {
         method: "POST",
-        body: JSON.stringify({ discount: Number(discount) || 0 }),
+        body: JSON.stringify({
+          discount: Number(discount) || 0,
+          ...(amount > 0
+            ? {
+                payment: {
+                  amount,
+                  paymentMode: payMode,
+                  ...(payReference.trim() ? { reference: payReference.trim() } : {}),
+                  ...(payReceivedBy.trim() ? { receivedBy: payReceivedBy.trim() } : {}),
+                },
+              }
+            : {}),
+        }),
       });
       openBill(body);
     } catch (err) {
@@ -598,7 +641,12 @@ function JobCardDetailPageContent() {
     try {
       await apiFetch(`/job-cards/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ trialBy: trialBy.trim() || null, trialRemarks: trialRemarks.trim() || null }),
+        body: JSON.stringify({
+          trialBy: trialBy.trim() || null,
+          trialFuelLevel: trialFuel || null,
+          trialArea: trialArea.trim() || null,
+          trialReturnBy: trialReturnBy ? new Date(trialReturnBy).toISOString() : null,
+        }),
       });
       await load();
     } catch (err) {
@@ -617,6 +665,19 @@ function JobCardDetailPageContent() {
       </div>
     );
   }
+
+  const trialDirty =
+    trialBy.trim() !== (jobCard.trialBy ?? "") ||
+    trialFuel !== (jobCard.trialFuelLevel ?? "") ||
+    trialArea.trim() !== (jobCard.trialArea ?? "") ||
+    trialReturnBy !== toLocalInput(jobCard.trialReturnBy);
+
+  // Closing can take the customer's payment too (optional). On a reopened
+  // job card, what they've already paid stays on the bill.
+  const customerBill = jobCard.invoices?.find((b) => b.payer === "CUSTOMER");
+  const billAfterDiscount = Math.max(0, jobCard.grandTotal - (Number(discount) || 0));
+  const fullPayment = Math.max(0, Math.round((billAfterDiscount - Number(customerBill?.paymentAmount ?? 0)) * 100) / 100);
+  const claimJob = jobCard.jobType === "ACCIDENTAL_CLAIM";
 
   const coveredAngles = new Set(
     jobCard.media.filter((m) => m.phase === uploadPhase && m.mediaType === "PHOTO").map((m) => m.angle)
@@ -753,9 +814,51 @@ function JobCardDetailPageContent() {
                 <Label>Discount (optional)</Label>
                 <Input type="number" step="0.01" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
               </div>
+              {canPay && (
+                <div className="space-y-2 rounded-md border border-gray-200 p-3">
+                  <p className="text-sm font-semibold text-gray-900">Payment received now (optional)</p>
+                  <p className="text-xs text-gray-500">
+                    Leave the amount empty to close without a payment — it can be taken later on the estimate.
+                    {claimJob && " On an accidental claim this is the customer's payment, and it can't be more than the customer's bill."}
+                    {Number(customerBill?.paymentAmount ?? 0) > 0 && ` Already paid: ${formatINR(customerBill!.paymentAmount)}.`}
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label>Amount</Label>
+                      <div className="flex gap-2">
+                        <Input type="number" step="0.01" min={0} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="₹" />
+                        {!claimJob && fullPayment > 0 && (
+                          <Button type="button" size="sm" variant="secondary" onClick={() => setPayAmount(String(fullPayment))}>
+                            Full
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Mode</Label>
+                      <Select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+                        {PAYMENT_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {modeLabel(m)}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Reference (optional)</Label>
+                      <Input value={payReference} onChange={(e) => setPayReference(e.target.value)} placeholder="UPI / cheque no." />
+                    </div>
+                    <div>
+                      <Label>Received by (optional)</Label>
+                      <Input value={payReceivedBy} onChange={(e) => setPayReceivedBy(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <Button type="submit" disabled={generatingInvoice || !invoiceReady}>
-                  <Receipt className="h-4 w-4" /> {generatingInvoice ? "Closing..." : "Close job card"}
+                  <Receipt className="h-4 w-4" />{" "}
+                {generatingInvoice ? "Closing..." : Number(payAmount) > 0 ? "Close job card & save payment" : "Close job card"}
                 </Button>
                 <Button type="button" variant="secondary" onClick={() => setShowInvoicePrompt(false)}>
                   Cancel
@@ -1273,82 +1376,51 @@ function JobCardDetailPageContent() {
 
       {/* Vehicle trial with the customer */}
       <div>
-        <SectionHeading icon={Car}>Vehicle Trial Sign-off</SectionHeading>
+        <SectionHeading icon={Car}>Vehicle Trial Agreement</SectionHeading>
         <Card className="max-w-2xl">
           <CardBody className="space-y-4">
-            <form onSubmit={handleSaveTrial} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
+            <form onSubmit={handleSaveTrial} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
-                <Label>Trial taken by</Label>
+                <Label>Workshop representative</Label>
                 <Input value={trialBy} onChange={(e) => setTrialBy(e.target.value)} placeholder="Staff name" />
               </div>
               <div>
-                <Label>Remarks (printed on the slip)</Label>
-                <Input value={trialRemarks} onChange={(e) => setTrialRemarks(e.target.value)} placeholder="e.g. Brakes, steering and AC checked" />
+                <Label>Fuel level</Label>
+                <Select value={trialFuel} onChange={(e) => setTrialFuel(e.target.value)}>
+                  <option value="">Fill in by hand</option>
+                  {FUEL_LEVELS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </Select>
               </div>
-              <Button
-                type="submit"
-                size="sm"
-                variant="secondary"
-                disabled={savingTrial || (trialBy.trim() === (jobCard.trialBy ?? "") && trialRemarks.trim() === (jobCard.trialRemarks ?? ""))}
-              >
-                {savingTrial ? "Saving..." : "Save"}
-              </Button>
+              <div>
+                <Label>Trial area</Label>
+                <Input value={trialArea} onChange={(e) => setTrialArea(e.target.value)} placeholder="e.g. Within 10 km of the workshop" />
+              </div>
+              <div>
+                <Label>Return by (date &amp; time)</Label>
+                <Input type="datetime-local" value={trialReturnBy} onChange={(e) => setTrialReturnBy(e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <Button type="submit" size="sm" variant="secondary" disabled={savingTrial || !trialDirty}>
+                  {savingTrial ? "Saving..." : trialDirty ? "Save — printed on the agreement" : "Saved"}
+                </Button>
+              </div>
             </form>
             <SignOffSlip
               jobCardId={jobCard.id}
               kind="trial"
               fileName={`Trial_${jobCard.jobCardNumber}_${jobCard.vehicle.registrationNumber}`}
               shareMobile={jobCard.vehicle.customer.mobile}
-              shareText={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the vehicle trial sign-off for ${jobCard.vehicle.registrationNumber} (job card ${jobCard.jobCardNumber}).\n— Motors Mitra`}
+              shareText={`Dear ${jobCard.vehicle.customer.name} Ji,\nPlease find the vehicle trial agreement for ${jobCard.vehicle.registrationNumber} (job card ${jobCard.jobCardNumber}).\n— Motors Mitra`}
               photoUrl={jobCard.trialPhotoUrl}
               signedAt={jobCard.trialAt}
               disabledReason={jobCard.status === "CANCELLED" ? "This job card is cancelled." : undefined}
               onUploaded={load}
             >
-              <div className="mb-4 flex items-start justify-between border-b border-gray-200 pb-3">
-                <div>
-                  <p className="text-lg font-bold">Motors Mitra</p>
-                  <p className="text-xs text-gray-500">Multibrand Car Workshop</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold tracking-wide">VEHICLE TRIAL SIGN-OFF</p>
-                  <p className="font-mono">{jobCard.jobCardNumber}</p>
-                  <p className="text-gray-500">Date: {new Date(jobCard.trialAt ?? Date.now()).toLocaleDateString()}</p>
-                </div>
-              </div>
-              <div className="mb-4 grid grid-cols-2 gap-4">
-                <div>
-                  <p className="font-semibold">Customer</p>
-                  <p>{jobCard.vehicle.customer.name}</p>
-                  <p>Mobile: {jobCard.vehicle.customer.mobile}</p>
-                </div>
-                <div>
-                  <p className="font-semibold">Vehicle</p>
-                  <p>Reg. No.: {jobCard.vehicle.registrationNumber}</p>
-                  <p>
-                    {jobCard.vehicle.make} {jobCard.vehicle.model}
-                  </p>
-                  <p>KM reading: {jobCard.kmAtService ?? "—"}</p>
-                </div>
-              </div>
-              <p>
-                <span className="font-semibold">Trial taken by: </span>
-                {jobCard.trialBy || "________________"}
-              </p>
-              {jobCard.trialRemarks && (
-                <p className="mt-1">
-                  <span className="font-semibold">Remarks: </span>
-                  {jobCard.trialRemarks}
-                </p>
-              )}
-              <p className="mt-4">
-                I have taken a trial of my vehicle with the workshop&apos;s representative. The work done is to my
-                satisfaction.
-              </p>
-              <SignatureLines
-                left={["Customer Signature", "Name & date"]}
-                right={["For Motors Mitra", "Trial taken by"]}
-              />
+              <TrialAgreement jobCard={jobCard} />
             </SignOffSlip>
           </CardBody>
         </Card>
@@ -1424,13 +1496,7 @@ function JobCardDetailPageContent() {
               <Button
                 type="button"
                 className={billed ? "mt-2 w-full" : "w-full"}
-                onClick={() => {
-                  setActionError(null);
-                  const customerBill = jobCard.invoices?.find((b) => b.payer === "CUSTOMER");
-                  if (customerBill) setDiscount(String(Number(customerBill.discount)));
-                  setShowInvoicePrompt(true);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
+                onClick={openClosePrompt}
               >
                 <Receipt className="h-4 w-4" /> Close job card
               </Button>

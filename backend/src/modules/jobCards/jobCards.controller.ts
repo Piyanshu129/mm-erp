@@ -53,6 +53,9 @@ export const updateJobCardSchema = z.object({
   // Vehicle trial with the customer.
   trialBy: clearableString,
   trialRemarks: clearableString,
+  trialFuelLevel: clearableString,
+  trialArea: clearableString,
+  trialReturnBy: z.coerce.date().nullable().optional(),
 });
 
 export async function list(req: Request, res: Response) {

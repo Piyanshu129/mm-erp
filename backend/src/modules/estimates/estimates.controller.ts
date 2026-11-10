@@ -32,7 +32,10 @@ export const addLineSchema = z.object({
 export async function list(req: Request, res: Response) {
   const page = parsePageParams(req.query);
   const q = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
-  const { total, estimates } = await estimatesService.listEstimates(page, q);
+  const payment = (estimatesService.ESTIMATE_PAYMENT_FILTERS as readonly string[]).includes(String(req.query.payment))
+    ? (req.query.payment as estimatesService.EstimatePaymentFilter)
+    : undefined;
+  const { total, estimates } = await estimatesService.listEstimates(page, q, payment);
   res.json({ estimates, total, page: page.page, pageSize: page.pageSize });
 }
 

@@ -112,8 +112,23 @@ export async function getEstimate(id: number) {
 
 // The Estimates list: newest first, searchable by estimate / job card /
 // vehicle number or customer, with each one's bill position once closed.
-export async function listEstimates(page: PageParams, q: string | undefined) {
-  const where: Prisma.EstimateWhereInput = q
+// Payment filter for the list: PENDING = a closed job card with money still
+// due on a bill (the customer's or the insurance company's), PAID = closed
+// and nothing due, OPEN = the job card isn't closed yet (no bill).
+export const ESTIMATE_PAYMENT_FILTERS = ["PENDING", "PAID", "OPEN"] as const;
+export type EstimatePaymentFilter = (typeof ESTIMATE_PAYMENT_FILTERS)[number];
+
+export async function listEstimates(page: PageParams, q: string | undefined, payment?: EstimatePaymentFilter) {
+  const due = { paymentAmount: { lt: prisma.invoice.fields.totalAmount } };
+  const paymentWhere: Prisma.EstimateWhereInput | undefined =
+    payment === "PENDING"
+      ? { jobCard: { status: "INVOICED", invoices: { some: due } } }
+      : payment === "PAID"
+        ? { jobCard: { status: "INVOICED", invoices: { none: due } } }
+        : payment === "OPEN"
+          ? { jobCard: { status: { not: "INVOICED" } } }
+          : undefined;
+  const search: Prisma.EstimateWhereInput = q
     ? {
         OR: [
           { estimateNumber: { contains: q, mode: "insensitive" } },
@@ -121,9 +136,12 @@ export async function listEstimates(page: PageParams, q: string | undefined) {
           { jobCard: { vehicle: { registrationNumber: { contains: q.replace(/\s+/g, "").toUpperCase() } } } },
           { jobCard: { vehicle: { customer: { name: { contains: q, mode: "insensitive" } } } } },
           { jobCard: { vehicle: { customer: { mobile: { contains: q } } } } },
+          { jobCard: { vehicle: { make: { contains: q, mode: "insensitive" } } } },
+          { jobCard: { vehicle: { model: { contains: q, mode: "insensitive" } } } },
         ],
       }
     : {};
+  const where: Prisma.EstimateWhereInput = paymentWhere ? { AND: [search, paymentWhere] } : search;
   const [total, estimates] = await Promise.all([
     prisma.estimate.count({ where }),
     prisma.estimate.findMany({
@@ -135,7 +153,7 @@ export async function listEstimates(page: PageParams, q: string | undefined) {
             jobCardNumber: true,
             status: true,
             jobType: true,
-            vehicle: { select: { registrationNumber: true, customer: { select: { name: true, mobile: true } } } },
+            vehicle: { select: { registrationNumber: true, make: true, model: true, variant: true, customer: { select: { name: true, mobile: true } } } },
             invoices: { select: { id: true, payer: true, totalAmount: true, paymentAmount: true } },
           },
         },

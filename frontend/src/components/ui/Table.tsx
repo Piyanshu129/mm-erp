@@ -12,14 +12,14 @@ export function Table({ children, minWidth = 500 }: { children: React.ReactNode;
 
 export function Th({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
   return (
-    <th className={`bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 ${className}`}>
+    <th className={`bg-gray-50 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 ${className}`}>
       {children}
     </th>
   );
 }
 
 export function Td({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
-  return <td className={`border-t border-gray-100 px-4 py-3 text-gray-700 ${className}`}>{children}</td>;
+  return <td className={`border-t border-gray-100 px-3 py-3 text-gray-700 ${className}`}>{children}</td>;
 }
 
 export function Tr({ children, className = "" }: { children: React.ReactNode; className?: string }) {

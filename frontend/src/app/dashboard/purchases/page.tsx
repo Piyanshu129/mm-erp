@@ -423,15 +423,8 @@ function LineEditor({
                   <Input value={line.newItemVariant} onChange={(e) => onChange({ newItemVariant: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Category">
-                <Select value={line.newItemCategory} onChange={(e) => onChange({ newItemCategory: e.target.value })}>
-                  {ITEM_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              {/* No category asked here — new items get the default one
+                  (ITEM_CATEGORIES[0]); it can be changed on the item. */}
               <Field label="Unit of measure">
                 <Select value={line.newItemUom} onChange={(e) => onChange({ newItemUom: e.target.value })}>
                   {UOM_OPTIONS.map((u) => (
@@ -1203,14 +1196,14 @@ function PurchasesPageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={11} />
+        <TableSkeleton cols={7} />
       ) : (
-        <Table minWidth={1000}>
+        <Table minWidth={780}>
           <thead>
             <tr>
-              <Th>Purchase #</Th>
-              <Th>Date</Th>
+              <Th>Purchase # / Date</Th>
               <Th>
+                <div className="flex flex-col gap-1">
                 <FilterHeaderSelect
                   label="Category"
                   value={categoryFilter}
@@ -1224,23 +1217,20 @@ function PurchasesPageContent() {
                     { value: "EXPENSE", label: CATEGORY_LABELS.EXPENSE },
                   ]}
                 />
-              </Th>
-              <Th>
                 <FilterHeaderSelect label="Type" value={typeFilter} onChange={setTypeFilter} options={typeFilterOptions} />
+                </div>
               </Th>
               <Th>Item / Expense</Th>
               <Th>Supplier</Th>
-              <Th className="text-right">Qty</Th>
-              <Th>Stickers</Th>
-              <Th className="text-right">Rate</Th>
-              <Th className="text-right">MRP</Th>
+              <Th className="text-right">Qty / Stickers</Th>
+              <Th className="text-right">Rate / MRP</Th>
               <Th className="text-right">Total</Th>
             </tr>
           </thead>
           <tbody>
             {purchases.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-10">
+                <td colSpan={7} className="px-4 py-10">
                   <EmptyState
                     icon={ShoppingCart}
                     title={categoryFilter || typeFilter ? "No purchases match these filters" : "No purchases this month"}
@@ -1250,12 +1240,14 @@ function PurchasesPageContent() {
             )}
             {purchases.map((p) => (
               <Tr key={p.id}>
-                <Td className="font-mono">#{p.id}</Td>
-                <Td className="whitespace-nowrap">{new Date(p.purchaseDate).toLocaleDateString()}</Td>
+                <Td className="whitespace-nowrap">
+                  <span className="font-mono">#{p.id}</span>
+                  <span className="block text-xs text-gray-500">{new Date(p.purchaseDate).toLocaleDateString()}</span>
+                </Td>
                 <Td>
                   <CategoryBadge itemType={p.itemType} />
+                  <span className="block text-xs text-gray-700">{TYPE_LABELS[p.itemType] ?? p.itemType}</span>
                 </Td>
-                <Td>{TYPE_LABELS[p.itemType] ?? p.itemType}</Td>
                 <Td>
                   {p.item ? (
                     <>
@@ -1275,12 +1267,16 @@ function PurchasesPageContent() {
                   )}
                 </Td>
                 <Td>{p.supplier?.name ?? "-"}</Td>
-                <Td className="text-right">
+                <Td className="whitespace-nowrap text-right">
                   {fmtQty(p.quantity)} {p.item?.uom ?? ""}
+                  {p.item && stickerRange(p.item.itemCode, p.stickerFrom, p.stickerTo) && (
+                    <span className="block font-mono text-xs text-gray-500">{stickerRange(p.item.itemCode, p.stickerFrom, p.stickerTo)}</span>
+                  )}
                 </Td>
-                <Td className="font-mono text-xs text-gray-700">{p.item ? stickerRange(p.item.itemCode, p.stickerFrom, p.stickerTo) || "-" : "-"}</Td>
-                <Td className="text-right">{formatINR(p.purchaseCost)}</Td>
-                <Td className="text-right">{p.sellingPrice != null ? formatINR(p.sellingPrice) : "-"}</Td>
+                <Td className="whitespace-nowrap text-right">
+                  {formatINR(p.purchaseCost)}
+                  {p.sellingPrice != null && <span className="block text-xs text-gray-500">MRP {formatINR(p.sellingPrice)}</span>}
+                </Td>
                 <Td className="text-right font-medium text-gray-900">{formatINR(p.quantity * Number(p.purchaseCost))}</Td>
               </Tr>
             ))}
@@ -1288,7 +1284,7 @@ function PurchasesPageContent() {
           {purchases.length > 0 && (
             <tfoot>
               <tr className="bg-gray-50">
-                <td colSpan={10} className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-medium text-gray-700">
+                <td colSpan={6} className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-medium text-gray-700">
                   {typeFilter
                     ? `${TYPE_LABELS[typeFilter]} total`
                     : categoryFilter

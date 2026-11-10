@@ -142,6 +142,9 @@ export interface JobCardUpdateInput {
   claimNumber?: string | null;
   trialBy?: string | null;
   trialRemarks?: string | null;
+  trialFuelLevel?: string | null;
+  trialArea?: string | null;
+  trialReturnBy?: Date | null;
 }
 
 // Every photo taken for a phase must cover all four mandatory angles — this

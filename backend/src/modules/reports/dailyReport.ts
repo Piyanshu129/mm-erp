@@ -78,6 +78,7 @@ export async function getDailyReport(from: string, to: string = from) {
             },
           },
         },
+        createdBy: { select: { name: true } },
       },
       orderBy: { id: "asc" },
     }),
@@ -233,6 +234,8 @@ export async function getDailyReport(from: string, to: string = from) {
       paymentMode: c.paymentMode,
       reference: c.reference,
       receivedBy: c.receivedBy,
+      // Who entered the payment in the system.
+      doneBy: c.createdBy.name,
       notes: c.notes,
       invoiceId: c.invoice.id,
       invoiceNumber: billLabel(c.invoice.jobCard.estimate?.estimateNumber ?? c.invoice.invoiceNumber, c.invoice.payer),

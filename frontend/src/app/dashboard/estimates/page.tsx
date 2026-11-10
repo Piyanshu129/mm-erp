@@ -28,12 +28,20 @@ interface EstimateRow {
     jobCardNumber: string;
     status: string;
     jobType: string | null;
-    vehicle: { registrationNumber: string; customer: { name: string; mobile: string } };
+    vehicle: { registrationNumber: string; make?: string; model?: string; variant?: string | null; customer: { name: string; mobile: string } };
     invoices: { id: number; payer: "CUSTOMER" | "INSURANCE"; totalAmount: string; paymentAmount: string }[];
   };
 }
 
 const PAGE_SIZE = 50;
+
+type PaymentFilter = "" | "PENDING" | "PAID" | "OPEN";
+const PAYMENT_FILTERS: { value: PaymentFilter; label: string }[] = [
+  { value: "", label: "All" },
+  { value: "PENDING", label: "Payment pending" },
+  { value: "PAID", label: "Paid" },
+  { value: "OPEN", label: "Job card not closed" },
+];
 
 // Every estimate, newest first. Once its job card is closed an estimate is
 // the bill: the customer's (and, on an accidental claim, the insurance
@@ -46,13 +54,15 @@ function EstimatesPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  const [payment, setPayment] = useState<PaymentFilter>("");
 
-  async function load(nextPage: number, search: string) {
+  async function load(nextPage: number, search: string, paymentFilter: PaymentFilter = payment) {
     setError(null);
     if (nextPage === 1) setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(nextPage), pageSize: String(PAGE_SIZE) });
       if (search) params.set("q", search);
+      if (paymentFilter) params.set("payment", paymentFilter);
       const body = await apiFetch(`/estimates?${params}`);
       setRows((prev) => (nextPage === 1 ? body.estimates : [...prev, ...body.estimates]));
       setTotal(body.total);
@@ -74,6 +84,11 @@ function EstimatesPageContent() {
     load(1, q.trim());
   }
 
+  function changePayment(next: PaymentFilter) {
+    setPayment(next);
+    load(1, query, next);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -82,11 +97,29 @@ function EstimatesPageContent() {
       />
 
       <form onSubmit={handleSearch} className="flex max-w-md gap-2">
-        <Input placeholder="Estimate, job card, vehicle number or customer" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Estimate, job card, vehicle, car or customer" value={q} onChange={(e) => setQ(e.target.value)} />
         <Button type="submit" variant="secondary">
           <Search className="h-4 w-4" /> Search
         </Button>
       </form>
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Payment">
+        {PAYMENT_FILTERS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            role="tab"
+            aria-selected={payment === f.value}
+            onClick={() => changePayment(f.value)}
+            className={`rounded-full border px-3 py-1 text-sm font-medium ${
+              payment === f.value ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {f.label}
+            {payment === f.value && !loading ? ` (${total})` : ""}
+          </button>
+        ))}
+      </div>
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
@@ -96,15 +129,16 @@ function EstimatesPageContent() {
         <EmptyState
           icon={Receipt}
           title="No estimates found"
-          description={query ? "Try a different search." : "An estimate is made from a job card, or when the job card is closed."}
+          description={
+            query || payment ? "Try a different search or filter." : "An estimate is made from a job card, or when the job card is closed."
+          }
         />
       ) : (
         <>
-          <Table minWidth={980}>
+          <Table minWidth={760}>
             <thead>
               <tr>
                 <Th>Estimate</Th>
-                <Th>Date</Th>
                 <Th>Job Card</Th>
                 <Th>Vehicle / Customer</Th>
                 <Th className="text-right">Total</Th>
@@ -131,8 +165,8 @@ function EstimatesPageContent() {
                           {[e.gstInvoiceNumber, e.insuranceGstInvoiceNumber].filter(Boolean).join(" · ")}
                         </span>
                       )}
+                      <span className="block text-xs text-gray-500">{new Date(e.estimateDate).toLocaleDateString()}</span>
                     </Td>
-                    <Td className="whitespace-nowrap">{new Date(e.estimateDate).toLocaleDateString()}</Td>
                     <Td>
                       <Link href={`/dashboard/jobcards/${e.jobCard.id}`} className="font-mono text-gray-900 hover:text-blue-600 hover:underline">
                         {e.jobCard.jobCardNumber}
@@ -140,6 +174,11 @@ function EstimatesPageContent() {
                     </Td>
                     <Td>
                       <span className="font-medium text-gray-900">{e.jobCard.vehicle.registrationNumber}</span>
+                      {e.jobCard.vehicle.make && (
+                        <span className="block text-xs font-medium text-gray-700">
+                          {[e.jobCard.vehicle.make, e.jobCard.vehicle.model, e.jobCard.vehicle.variant].filter(Boolean).join(" ")}
+                        </span>
+                      )}
                       <span className="block text-xs text-gray-500">
                         {e.jobCard.vehicle.customer.name} · {e.jobCard.vehicle.customer.mobile}
                       </span>

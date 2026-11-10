@@ -269,11 +269,11 @@ export function InvoicePaymentHistory({
   if (payments.length === 0) {
     return <p className="text-sm text-gray-500">No payments recorded yet.</p>;
   }
-  const colSpan = (showInvoice ? 7 : 6) + (canEdit ? 1 : 0);
+  const colSpan = (showInvoice ? 8 : 7) + (canEdit ? 1 : 0);
   return (
     <>
       {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <Table minWidth={showInvoice ? 820 : 680}>
+      <Table minWidth={showInvoice ? 860 : 720}>
         <thead>
           <tr>
             <Th>Date</Th>
@@ -282,6 +282,7 @@ export function InvoicePaymentHistory({
             <Th>Mode</Th>
             <Th>Reference</Th>
             <Th>Received by</Th>
+            <Th>Done by</Th>
             <Th>Notes</Th>
             {canEdit && <Th></Th>}
           </tr>
@@ -324,10 +325,8 @@ export function InvoicePaymentHistory({
                 <Td>{modeLabel(p.paymentMode)}</Td>
                 <Td>{p.reference ?? "-"}</Td>
                 <Td>{p.receivedBy ?? "-"}</Td>
-                <Td className="text-xs text-gray-500">
-                  {p.notes ?? ""}
-                  <span className="block text-gray-400">Entered by {p.createdBy.name}</span>
-                </Td>
+                <Td>{p.createdBy.name}</Td>
+                <Td className="text-xs text-gray-500">{p.notes ?? "-"}</Td>
                 {canEdit && (
                   <Td className="whitespace-nowrap">
                     <button type="button" onClick={() => setEditingId(p.id)} className="mr-3 text-xs font-medium text-blue-600 hover:underline">

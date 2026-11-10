@@ -103,7 +103,11 @@ export interface PurchaseTotals {
 // purchase in the period, not just the page of rows being shown.
 export async function purchaseTotals(range?: DateRange, itemId?: number): Promise<PurchaseTotals> {
   const conditions: Prisma.Sql[] = [];
-  if (range) conditions.push(Prisma.sql`purchase_date >= ${range.start} AND purchase_date < ${range.end}`);
+  // purchase_date has no time zone. A Date passed here would arrive as a
+  // time-zone-aware value and be shifted by the server's zone (IST), counting
+  // today's purchases as yesterday's — so compare as plain timestamps.
+  const plain = (d: Date) => d.toISOString().replace("Z", "");
+  if (range) conditions.push(Prisma.sql`purchase_date >= ${plain(range.start)}::timestamp AND purchase_date < ${plain(range.end)}::timestamp`);
   if (itemId) conditions.push(Prisma.sql`item_id = ${itemId}`);
   const where = conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}` : Prisma.empty;
 

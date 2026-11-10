@@ -59,6 +59,7 @@ interface Collection {
   paymentMode: string | null;
   reference: string | null;
   receivedBy: string | null;
+  doneBy?: string;
   notes: string | null;
   invoiceId: number;
   invoiceNumber: string;
@@ -408,7 +409,7 @@ export function DailyReport() {
         },
         {
           name: "Payments Received",
-          columns: ["Estimate", "Customer", "Vehicle", "Amount", "Discount", "Mode", "Reference", "Received By", "Notes"],
+          columns: ["Estimate", "Customer", "Vehicle", "Amount", "Discount", "Mode", "Reference", "Received By", "Done By", "Notes"],
           rows: data.collections.map((c) => ({
             Estimate: c.invoiceNumber,
             Customer: c.customerName,
@@ -418,6 +419,7 @@ export function DailyReport() {
             Mode: mode(c.paymentMode),
             Reference: c.reference,
             "Received By": c.receivedBy,
+            "Done By": c.doneBy ?? "",
             Notes: c.notes,
           })),
         },
@@ -643,13 +645,15 @@ export function DailyReport() {
                 <p className="text-sm text-gray-500">No payments received in this period.</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-sm">
+                  <table className="w-full min-w-[700px] text-sm">
                     <thead>
                       <tr className="text-left text-xs text-gray-500">
                         <th className="py-1 pr-2">Estimate</th>
                         <th className="py-1 pr-2">Customer</th>
                         <th className="py-1 pr-2">Mode</th>
                         <th className="py-1 pr-2">Reference</th>
+                        <th className="py-1 pr-2">Received by</th>
+                        <th className="py-1 pr-2">Done by</th>
                         <th className="py-1 text-right">Amount</th>
                       </tr>
                     </thead>
@@ -666,6 +670,8 @@ export function DailyReport() {
                           </td>
                           <td className="py-1.5 pr-2">{mode(c.paymentMode)}</td>
                           <td className="py-1.5 pr-2">{c.reference ?? "—"}</td>
+                          <td className="py-1.5 pr-2">{c.receivedBy ?? "—"}</td>
+                          <td className="py-1.5 pr-2">{c.doneBy ?? "—"}</td>
                           <td className="py-1.5 text-right font-medium">
                             {formatINR(c.amount)}
                             {!!c.discount && <span className="block text-xs font-normal text-amber-700">+ {formatINR(c.discount)} discount</span>}

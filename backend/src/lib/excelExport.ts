@@ -411,8 +411,8 @@ async function invoicePaymentsSheet(): Promise<SheetSpec> {
       { header: "Payment Mode", key: "paymentMode", width: 14 },
       { header: "Reference", key: "reference", width: 18 },
       { header: "Received By", key: "receivedBy", width: 16 },
+      { header: "Done By", key: "createdByName", width: 16 },
       { header: "Notes", key: "notes", width: 26 },
-      { header: "Entered By", key: "createdByName", width: 16 },
     ],
     rows: payments.map((p) => ({
       paymentDate: p.paymentDate,

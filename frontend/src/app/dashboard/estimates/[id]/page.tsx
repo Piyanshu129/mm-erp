@@ -19,6 +19,7 @@ import { GstInvoice, Payer, payerOf } from "@/components/GstInvoice";
 import { Bill, EstimateBills } from "@/components/EstimateBills";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
+import { LABOUR_SAC } from "@/lib/gst";
 
 interface EstimateLine {
   id: number;
@@ -376,7 +377,7 @@ function EstimatePageContent() {
           </button>
         )}
         <button type="button" className={tabClass("gst")} onClick={() => setTab("gst")}>
-          GST Invoice{estimate.gstInvoiceNumber ? ` · ${estimate.gstInvoiceNumber}` : ""}
+          {claim ? "GST Invoices" : `GST Invoice${estimate.gstInvoiceNumber ? ` · ${estimate.gstInvoiceNumber}` : ""}`}
         </button>
       </div>
 
@@ -385,28 +386,13 @@ function EstimatePageContent() {
       ) : tab === "gst" ? (
         <div className="space-y-3">
           {claim && (
-            <div className="flex flex-wrap gap-2 print:hidden">
-              {(
-                [
-                  ["CUSTOMER", `Customer's invoice${estimate.gstInvoiceNumber ? ` · ${estimate.gstInvoiceNumber}` : ""}`],
-                  [
-                    "INSURANCE",
-                    `Insurance company's invoice${estimate.insuranceGstInvoiceNumber ? ` · ${estimate.insuranceGstInvoiceNumber}` : ""}`,
-                  ],
-                ] as [Payer, string][]
-              ).map(([p, label]) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setGstPayer(p)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                    gstPayer === p ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <ClaimGstOverview
+              estimate={estimate}
+              closed={closed}
+              shown={gstPayer}
+              onShow={setGstPayer}
+              onUpdated={apply}
+            />
           )}
           <GstInvoice
             key={claim ? gstPayer : "CUSTOMER"}
@@ -818,6 +804,132 @@ function EstimatePageContent() {
         </>
       )}
     </div>
+  );
+}
+
+// Accidental claim, GST tab: the two GST invoices — the customer's and the
+// insurance company's — side by side: each one's number (or not yet made),
+// which one is shown below, and one button that generates both.
+function ClaimGstOverview({
+  estimate,
+  closed,
+  shown,
+  onShow,
+  onUpdated,
+}: {
+  estimate: EstimateDetail;
+  closed: boolean;
+  shown: Payer;
+  onShow: (p: Payer) => void;
+  onUpdated: (e: EstimateDetail) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const jobType = estimate.jobCard.jobType;
+  const sides = (["CUSTOMER", "INSURANCE"] as Payer[]).map((p) => {
+    const lines = estimate.lines.filter((l) => payerOf(l, jobType) === p);
+    return {
+      payer: p,
+      title: p === "CUSTOMER" ? `Customer — ${estimate.jobCard.vehicle.customer.name}` : `Insurance company — ${estimate.jobCard.insuranceCompany || "not named"}`,
+      number: p === "CUSTOMER" ? estimate.gstInvoiceNumber : estimate.insuranceGstInvoiceNumber,
+      lines: lines.length,
+      amount: lines.reduce((t, l) => t + Number(l.amount), 0),
+    };
+  });
+  const toMake = sides.filter((s) => !s.number && s.lines > 0);
+
+  async function generateBoth() {
+    if (
+      !window.confirm(
+        `Generate ${toMake.length === 2 ? "both GST invoice numbers (customer and insurance company)" : "the remaining GST invoice number"}? After this the HSN/SAC and GST %, who pays for each line, and the estimate's lines can't be changed, and the job card can't be reopened.`
+      )
+    )
+      return;
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    const made: string[] = [];
+    try {
+      // Lines still without a GST % or code get what the GST details show
+      // for them (18%, and the repair SAC for labour) — the same as
+      // generating each invoice on its own.
+      const unset = estimate.lines.filter(
+        (l) => toMake.some((s) => s.payer === payerOf(l, jobType)) && (l.gstRate == null || (!l.hsnCode && l.lineType === "LABOUR"))
+      );
+      if (unset.length) {
+        const body = await apiFetch(`/estimates/${estimate.id}/gst`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            lines: unset.map((l) => ({
+              id: l.id,
+              hsnCode: l.hsnCode || (l.lineType === "LABOUR" ? LABOUR_SAC : null),
+              gstRate: l.gstRate != null ? Number(l.gstRate) : 18,
+            })),
+          }),
+        });
+        onUpdated(body.estimate);
+      }
+      for (const s of toMake) {
+        const body = await apiFetch(`/estimates/${estimate.id}/gst-invoice`, { method: "POST", body: JSON.stringify({ payer: s.payer }) });
+        onUpdated(body.estimate);
+        made.push(s.payer === "CUSTOMER" ? body.estimate.gstInvoiceNumber : body.estimate.insuranceGstInvoiceNumber);
+      }
+      setNotice(`Generated ${made.join(" and ")}.`);
+    } catch (err) {
+      const side = toMake[made.length];
+      if (side) onShow(side.payer);
+      setError(
+        `${made.length ? `Generated ${made.join(", ")}. ` : ""}${side?.payer === "INSURANCE" ? "Insurance company's" : "Customer's"} invoice: ${
+          err instanceof ApiError ? err.message : "could not generate it"
+        } — fix it in the GST details below, then try again.`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="print:hidden">
+      <CardBody className="space-y-3">
+        <p className="text-sm font-semibold text-gray-900">Accidental claim — two GST invoices</p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {sides.map((s) => (
+            <button
+              key={s.payer}
+              type="button"
+              onClick={() => onShow(s.payer)}
+              className={`rounded-md border p-3 text-left text-sm ${
+                shown === s.payer ? "border-blue-600 bg-blue-50" : "border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              <span className="block font-medium text-gray-900">{s.title}</span>
+              <span className="block text-gray-600">
+                {s.lines} {s.lines === 1 ? "line" : "lines"} · {money(s.amount)} before GST
+              </span>
+              <span className={`mt-1 block font-mono text-xs ${s.number ? "text-green-700" : "text-amber-700"}`}>
+                {s.number ?? (s.lines === 0 ? "No lines — no invoice needed" : "Not generated yet")}
+              </span>
+              <span className="mt-1 block text-xs text-blue-600">{shown === s.payer ? "Shown below" : "Show this invoice"}</span>
+            </button>
+          ))}
+        </div>
+        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {notice && <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">{notice}</p>}
+        {toMake.length > 0 && (
+          <div className="space-y-1">
+            <Button type="button" size="sm" onClick={generateBoth} disabled={busy || !closed}>
+              {busy ? "Generating..." : toMake.length === 2 ? "Generate both GST invoices" : "Generate the remaining GST invoice"}
+            </Button>
+            <p className="text-xs text-gray-500">
+              {closed
+                ? "Set who pays for each line on the Customer / Insurance tab first. Each invoice uses the GST details saved for it below."
+                : `Close job card ${estimate.jobCard.jobCardNumber} first.`}
+            </p>
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 

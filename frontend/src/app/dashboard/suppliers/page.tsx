@@ -284,7 +284,7 @@ function EditSupplierPaymentRow({
 
   return (
     <tr>
-      <td colSpan={8} className="border-t border-gray-100 bg-blue-50 px-4 py-3">
+      <td colSpan={9} className="border-t border-gray-100 bg-blue-50 px-4 py-3">
         <form onSubmit={save} className="grid grid-cols-2 gap-2 sm:grid-cols-6 sm:items-end">
           <div>
             <Label>Amount</Label>
@@ -406,7 +406,7 @@ function PaymentHistoryCard({
             {payments.length === 0 ? (
               <p className="text-sm text-gray-500">No payments recorded for this supplier yet.</p>
             ) : (
-              <Table minWidth={760}>
+              <Table minWidth={800}>
                 <thead>
                   <tr>
                     <Th>Date</Th>
@@ -414,6 +414,7 @@ function PaymentHistoryCard({
                     <Th>Mode</Th>
                     <Th>Reference</Th>
                     <Th>Paid by</Th>
+                    <Th>Done by</Th>
                     <Th>Photo</Th>
                     <Th>Notes</Th>
                     {canEdit && <Th></Th>}
@@ -445,6 +446,7 @@ function PaymentHistoryCard({
                       <Td>{modeLabel(p.paymentMode)}</Td>
                       <Td>{p.reference ?? "-"}</Td>
                       <Td>{p.paidBy ?? "-"}</Td>
+                      <Td>{p.createdBy.name}</Td>
                       <Td>
                         {p.proofUrl ? (
                           <button type="button" onClick={() => setZoomedProof(p.proofUrl)} aria-label="View transaction photo">
@@ -454,10 +456,7 @@ function PaymentHistoryCard({
                           "-"
                         )}
                       </Td>
-                      <Td className="text-xs text-gray-500">
-                        {p.notes ?? ""}
-                        <span className="block text-gray-400">Entered by {p.createdBy.name}</span>
-                      </Td>
+                      <Td className="text-xs text-gray-500">{p.notes ?? "-"}</Td>
                       {canEdit && (
                         <Td className="whitespace-nowrap">
                           <button type="button" onClick={() => setEditingId(p.id)} className="mr-3 text-xs font-medium text-blue-600 hover:underline">

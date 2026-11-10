@@ -64,7 +64,15 @@ export async function getInvoice(id: number) {
 //
 // discount (the customer's) left undefined, as when closing from the status
 // dropdown, keeps the bill's current discount, or none the first time.
-export async function closeJobCard(jobCardId: number, discount: number | undefined, createdById: number) {
+//
+// payment (optional) is taken on the customer's bill in the same
+// transaction — if it can't be (e.g. more than is due), nothing is closed.
+export async function closeJobCard(
+  jobCardId: number,
+  discount: number | undefined,
+  createdById: number,
+  payment?: InvoicePaymentInput
+) {
   // Status first, so a cancelled or already-closed job card gets that
   // reason rather than a list of missing photos. (Re-checked inside the
   // transaction below.)
@@ -104,6 +112,12 @@ export async function closeJobCard(jobCardId: number, discount: number | undefin
     await syncBills(tx, jobCardId, createdById, discount);
     await tx.jobCard.update({ where: { id: jobCardId }, data: { status: "INVOICED" } });
 
+    if (payment) {
+      const customerBill = await tx.invoice.findUnique({ where: { jobCardId_payer: { jobCardId, payer: "CUSTOMER" } } });
+      if (!customerBill) throw new ConflictError("There's no customer bill to take the payment on");
+      await recordInvoicePaymentTx(tx, customerBill.id, payment, createdById);
+    }
+
     const invoices = await tx.invoice.findMany({ where: { jobCardId }, include: detailInclude, orderBy: { id: "asc" } });
     return { estimateId, invoices };
   });
@@ -128,6 +142,13 @@ export interface InvoicePaymentInput {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+// How a bill is named to staff: by its estimate number (the estimate is the
+// bill), the insurance company's one marked as such.
+function billNameOf(invoice: { invoiceNumber: string; payer: string; jobCard: { estimate: { estimateNumber: string } | null } }) {
+  const number = invoice.jobCard.estimate?.estimateNumber ?? invoice.invoiceNumber;
+  return invoice.payer === "INSURANCE" ? `the insurance bill on ${number}` : `bill ${number}`;
+}
+
 function checkAmounts(amount: number, discount: number) {
   if (amount < 0 || discount < 0) throw new ConflictError("Amounts can't be negative");
   if (amount + discount <= 0) throw new ConflictError("Enter the amount received, a discount, or both");
@@ -141,20 +162,26 @@ function checkAmounts(amount: number, discount: number) {
 // for the length of the check-and-write, so two payments entered at the
 // same moment can't both pass the overpay check and together overpay.
 export async function recordInvoicePayment(invoiceId: number, input: InvoicePaymentInput, createdById: number) {
+  return prisma.$transaction((tx) => recordInvoicePaymentTx(tx, invoiceId, input, createdById));
+}
+
+// The same, inside a transaction the caller already has open (closing a job
+// card with a payment taken at the counter).
+async function recordInvoicePaymentTx(tx: Prisma.TransactionClient, invoiceId: number, input: InvoicePaymentInput, createdById: number) {
   const discount = input.discount ?? 0;
   checkAmounts(input.amount, discount);
-
-  return prisma.$transaction(async (tx) => {
+  {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Bill not found");
-    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { jobCard: { select: { estimate: { select: { estimateNumber: true } } } } } });
+    const billName = billNameOf(invoice);
 
     const due = Number(invoice.totalAmount) - Number(invoice.paymentAmount);
     if (input.amount + discount > due + 0.005) {
       throw new ConflictError(
         due <= 0
-          ? `${invoice.invoiceNumber} is already fully paid`
-          : `That would overpay ${invoice.invoiceNumber} — only ₹${due.toFixed(2)} is still due (payment + discount)`
+          ? `${billName} is already fully paid`
+          : `That would overpay ${billName} — only ₹${due.toFixed(2)} is still due (payment + discount)`
       );
     }
 
@@ -180,7 +207,7 @@ export async function recordInvoicePayment(invoiceId: number, input: InvoicePaym
       },
       include: detailInclude,
     });
-  });
+  }
 }
 
 // Admin correction of a recorded payment (wrong amount, discount, date,
@@ -199,7 +226,8 @@ export async function updateInvoicePayment(
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM invoices WHERE id = ${invoiceId} FOR UPDATE`;
     if (locked.length === 0) throw new NotFoundError("Bill not found");
-    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { jobCard: { select: { estimate: { select: { estimateNumber: true } } } } } });
+    const billName = billNameOf(invoice);
     const payment = await tx.invoicePayment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.invoiceId !== invoiceId) throw new NotFoundError("Payment not found on this bill");
 
@@ -209,7 +237,7 @@ export async function updateInvoicePayment(
     if (newPaid > newTotal + 0.005) {
       const max = Number(invoice.totalAmount) + Number(payment.discount) - (Number(invoice.paymentAmount) - Number(payment.amount));
       throw new ConflictError(
-        `That would overpay ${invoice.invoiceNumber} — this payment plus its discount can be at most ₹${max.toFixed(2)}`
+        `That would overpay ${billName} — this payment plus its discount can be at most ₹${max.toFixed(2)}`
       );
     }
 

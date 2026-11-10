@@ -210,21 +210,18 @@ function ServiceSchedulePageContent() {
       {loadError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{loadError}</p>}
 
       {loading ? (
-        <TableSkeleton cols={10} />
+        <TableSkeleton cols={7} />
       ) : shown.length === 0 ? (
         <EmptyState icon={CalendarClock} title={filter ? "No vehicles in this group" : "No vehicles yet"} />
       ) : (
-        <Table minWidth={1250}>
+        <Table minWidth={840}>
           <thead>
             <tr>
               <Th>Vehicle No.</Th>
               <Th>Customer</Th>
               <Th>Last Service</Th>
-              <Th className="text-right">Last KM</Th>
               <Th className="text-right">Current KM</Th>
-              <Th className="text-right">Avg Running</Th>
-              <Th>Next Service Due (est.)</Th>
-              <Th className="text-right">Next Service KM</Th>
+              <Th>Next Service (est.)</Th>
               <Th>Status</Th>
               <Th></Th>
             </tr>
@@ -256,14 +253,14 @@ function ServiceSchedulePageContent() {
                         {r.lastServiceJobCard.jobCardNumber}
                       </Link>
                     )}
+                    {r.lastServiceKm != null && <span className="block text-xs text-gray-500">at {km(r.lastServiceKm)}</span>}
                   </Td>
-                  <Td className="text-right">{km(r.lastServiceKm)}</Td>
                   <Td className="whitespace-nowrap text-right">
                     {km(r.updatedKm)}
                     {r.lastReadingDate && <span className="block text-xs text-gray-500">{date(r.lastReadingDate)}</span>}
-                  </Td>
-                  <Td className="whitespace-nowrap text-right">
-                    {r.avgKmPerMonth != null ? `${r.avgKmPerMonth.toLocaleString("en-IN")} km/mo` : "-"}
+                    {r.avgKmPerMonth != null && (
+                      <span className="block text-xs text-gray-500">avg {r.avgKmPerMonth.toLocaleString("en-IN")} km/mo</span>
+                    )}
                   </Td>
                   <Td className={`whitespace-nowrap ${due ? "font-semibold text-red-700" : ""}`}>
                     {date(r.nextServiceDue)}
@@ -272,8 +269,8 @@ function ServiceSchedulePageContent() {
                         {r.dueBasis === "KM" ? "by KM (avg running)" : "6 months since last"}
                       </span>
                     )}
+                    {r.nextServiceKm != null && <span className="block text-xs font-normal text-gray-500">at {km(r.nextServiceKm)}</span>}
                   </Td>
-                  <Td className="text-right">{km(r.nextServiceKm)}</Td>
                   <Td>
                     <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
                   </Td>
@@ -287,7 +284,7 @@ function ServiceSchedulePageContent() {
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
                     >
-                      <Gauge className="h-4 w-4" /> Update KM / Ask customer
+                      <Gauge className="h-4 w-4" /> Update KM
                     </Button>
                   </Td>
                 </Tr>

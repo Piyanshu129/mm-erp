@@ -73,7 +73,7 @@ function AdvanceInput({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="grid w-44 grid-cols-[1fr_auto] gap-1.5">
       <Input
         type="number"
         min={0}
@@ -87,8 +87,11 @@ function AdvanceInput({
             save();
           }
         }}
-        className="w-28 py-1.5"
+        className="py-1.5"
       />
+      <Button type="button" size="sm" variant="secondary" onClick={save} disabled={saving || !(Number(amount) > 0)}>
+        {saving ? "..." : "Add"}
+      </Button>
       <Input
         placeholder="Remark (optional)"
         value={remark}
@@ -99,11 +102,8 @@ function AdvanceInput({
             save();
           }
         }}
-        className="w-36 py-1.5"
+        className="col-span-2 py-1.5"
       />
-      <Button type="button" size="sm" variant="secondary" onClick={save} disabled={saving || !(Number(amount) > 0)}>
-        {saving ? "..." : "Add"}
-      </Button>
     </div>
   );
 }
@@ -294,18 +294,16 @@ function AttendancePageContent() {
       )}
 
       {loading ? (
-        <TableSkeleton cols={7} />
+        <TableSkeleton cols={5} />
       ) : rows.length === 0 ? (
         <EmptyState icon={CalendarCheck} title="No active employees" description="Add employees on the Employees page first." />
       ) : (
-        <Table minWidth={1250}>
+        <Table minWidth={860}>
           <thead>
             <tr>
               <Th>Employee</Th>
-              <Th>Role</Th>
               <Th>Status</Th>
               <Th>In / Out (optional)</Th>
-              <Th>Corrected by</Th>
               <Th>Advance paid</Th>
               <Th>Advance history ({SHORT_MONTHS[givenMonth - 1]})</Th>
             </tr>
@@ -316,9 +314,11 @@ function AttendancePageContent() {
               const historyTotal = history.reduce((sum, a) => sum + Number(a.amount), 0);
               return (
                 <Tr key={r.employee.id}>
-                  <Td className="font-medium text-gray-900">{r.employee.name}</Td>
-                  <Td>{r.employee.role ?? "-"}</Td>
                   <Td>
+                    <span className="font-medium text-gray-900">{r.employee.name}</span>
+                    {r.employee.role && <span className="block text-xs text-gray-500">{r.employee.role}</span>}
+                  </Td>
+                  <Td className="w-48">
                     <div className="flex flex-wrap gap-1.5">
                       {STATUSES.map((s) => {
                         const active = r.attendance?.status === s.value;
@@ -334,6 +334,9 @@ function AttendancePageContent() {
                         );
                       })}
                     </div>
+                    {r.attendance?.correctedBy && (
+                      <span className="mt-1 block text-xs text-gray-500">Corrected by {r.attendance.correctedBy.name}</span>
+                    )}
                   </Td>
                   <Td>
                     {/* Saved when a time is changed; needs the day's status first. */}
@@ -363,7 +366,6 @@ function AttendancePageContent() {
                       </span>
                     )}
                   </Td>
-                  <Td>{r.attendance?.correctedBy?.name ?? "-"}</Td>
                   <Td>
                     <AdvanceInput
                       saving={savingAdvanceId === r.employee.id}
@@ -386,7 +388,7 @@ function AttendancePageContent() {
                     ) : (
                       <div className="space-y-0.5 text-xs">
                         {history.map((a) => (
-                          <div key={a.id} className="flex items-center gap-1.5 whitespace-nowrap">
+                          <div key={a.id} className="flex flex-wrap items-center gap-x-1.5">
                             <span className="text-gray-500">{shortDate(a.date)}</span>
                             <span className="font-medium text-gray-900">{formatINR(a.amount)}</span>
                             {a.notes && <span className="text-gray-500" title={a.notes}>({a.notes})</span>}

@@ -318,10 +318,14 @@ model JobCard {
 
   deliveredAt DateTime? @map("delivered_at")
 
-  // Vehicle trial (road test) signed off with the customer: a printed slip,
-  // then a photo of the signed copy.
-  trialBy       String?   @map("trial_by")
-  trialRemarks  String?   @map("trial_remarks")
+  // Vehicle trial: the customer takes the vehicle out on trial under a
+  // printed agreement (trial permission and temporary handover letter),
+  // then a photo of the signed copy. trialBy is the workshop representative.
+  trialBy        String?   @map("trial_by")
+  trialRemarks   String?   @map("trial_remarks")
+  trialFuelLevel String?   @map("trial_fuel_level")
+  trialArea      String?   @map("trial_area")
+  trialReturnBy  DateTime? @map("trial_return_by")
   trialPhotoUrl String?   @map("trial_photo_url")
   trialAt       DateTime? @map("trial_at")
   // Gate pass for the vehicle to leave, once the job card is closed: printed,

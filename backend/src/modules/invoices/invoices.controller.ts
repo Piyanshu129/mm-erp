@@ -3,10 +3,8 @@ import { z } from "zod";
 import * as invoicesService from "./invoices.service";
 import { listPaymentAudits } from "../../lib/paymentAudit";
 import { parsePageParams } from "../../lib/pagination";
-
-export const closeJobCardSchema = z.object({
-  discount: z.coerce.number().min(0).optional(),
-});
+import { deniedMessage, grants } from "../../lib/permissions";
+import { ForbiddenError } from "../../lib/errors";
 
 const optionalString = z.string().trim().min(1).optional();
 
@@ -20,6 +18,16 @@ export const recordPaymentSchema = z.object({
   receivedBy: optionalString,
   notes: optionalString,
 });
+
+// Closing a job card: the customer's discount, and optionally a payment
+// received right away (on the customer's bill).
+export const closeJobCardSchema = z.object({
+  discount: z.coerce.number().min(0).optional(),
+  payment: recordPaymentSchema.optional(),
+});
+
+// Who can take a payment (invoices.routes.ts).
+const PAYMENT_MODULES = ["INVOICES", "CUSTOMERS", "VEHICLES"] as const;
 
 export async function list(req: Request, res: Response) {
   const page = parsePageParams(req.query);
@@ -36,8 +44,13 @@ export async function get(req: Request, res: Response) {
 // Closes the job card: its estimate becomes the bill (see
 // invoices.service.ts#closeJobCard).
 export async function close(req: Request, res: Response) {
-  const { discount } = req.body as z.infer<typeof closeJobCardSchema>;
-  const result = await invoicesService.closeJobCard(Number(req.params.jobCardId), discount ?? 0, req.user!.id);
+  const { discount, payment } = req.body as z.infer<typeof closeJobCardSchema>;
+  // Taking a payment needs the same permission as on the bill itself.
+  const user = req.user!;
+  if (payment && user.role !== "ADMIN" && !PAYMENT_MODULES.some((m) => grants(user.permissions, m, "ADD"))) {
+    throw new ForbiddenError(deniedMessage([...PAYMENT_MODULES], "ADD"));
+  }
+  const result = await invoicesService.closeJobCard(Number(req.params.jobCardId), discount ?? 0, user.id, payment);
   res.status(201).json(result);
 }
 
