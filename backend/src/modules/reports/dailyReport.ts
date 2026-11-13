@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { billAmountOf } from "../estimates/estimates.service";
 import { isInventoryType } from "../purchases/purchases.service";
 import { accountsFor } from "../suppliers/suppliers.service";
 
@@ -45,7 +46,7 @@ export async function getDailyReport(from: string, to: string = from) {
       where: { estimateDate: { gte: dayStart, lt: dayEnd } },
       include: {
         jobCard: { include: { vehicle: { include: { customer: true } } } },
-        lines: { include: { item: { select: { itemCode: true } } }, orderBy: { id: "asc" } },
+        lines: { where: { billOnly: false }, include: { item: { select: { itemCode: true } } }, orderBy: { id: "asc" } },
       },
       orderBy: { id: "asc" },
     }),
@@ -144,8 +145,8 @@ export async function getDailyReport(from: string, to: string = from) {
         kind: l.lineType === "LABOUR" ? "Labour" : l.item ? "Part" : "Non-inventory",
         description: l.item ? `${l.item.itemCode} — ${l.description}` : l.description,
         quantity: l.quantity,
-        rate: Number(l.rate),
-        amount: Number(l.amount),
+        rate: Number(l.billRate ?? l.rate),
+        amount: billAmountOf(l),
       })),
       partsTotal: Number(inv.partsTotal),
       labourTotal: Number(inv.labourTotal),

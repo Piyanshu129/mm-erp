@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Download, FileCheck2, Printer } from "lucide-react";
+import { Download, FileCheck2, Pencil, Printer, Trash2 } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/Button";
@@ -18,6 +18,17 @@ export type Payer = "CUSTOMER" | "INSURANCE";
 // Who pays for a line: only an accidental claim bills the insurance company.
 export function payerOf(line: { scope?: string }, jobType: string | null | undefined): Payer {
   return jobType === "ACCIDENTAL_CLAIM" && line.scope === "INSURANCE" ? "INSURANCE" : "CUSTOMER";
+}
+
+// What a line is billed at: after closing, an accidental claim's line can
+// have its own bill rate, and lines can be added on the bill only. Older
+// servers don't send these, so the estimate's own rate and amount stand in.
+export function billAmountOf(line: { amount: string; billAmount?: number | string }): number {
+  return line.billAmount != null ? Number(line.billAmount) : Number(line.amount);
+}
+
+export function billRateOf(line: { rate: string; billRate?: string | null }): number {
+  return Number(line.billRate ?? line.rate);
 }
 
 export interface GstEstimate {
@@ -42,6 +53,9 @@ export interface GstEstimate {
     hsnCode?: string | null;
     gstRate?: string | null;
     scope?: Payer;
+    billRate?: string | null;
+    billAmount?: number;
+    billOnly?: boolean;
     item: { itemCode: string } | null;
   }[];
   jobCard: {
@@ -157,7 +171,7 @@ export function GstInvoice({
   const inter = supplyType === "INTER";
   const rows = shownLines.map((l) => {
     const rate = Number(lines[l.id]?.rate ?? 18);
-    return { line: l, hsn: lines[l.id]?.hsn ?? "", ...gstForLine(Number(l.amount), rate, { inclusive, inter }) };
+    return { line: l, hsn: lines[l.id]?.hsn ?? "", ...gstForLine(billAmountOf(l), rate, { inclusive, inter }) };
   });
   const sum = (f: (r: (typeof rows)[number]) => number) => Math.round(rows.reduce((t, r) => t + f(r), 0) * 100) / 100;
   const totals = {
@@ -235,6 +249,40 @@ export function GstInvoice({
     }
   }
 
+  async function removeBillLine(lineId: number) {
+    if (!window.confirm("Remove this line from the bill and the tax invoice?")) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const body = await apiFetch(`/estimates/${estimate.id}/bill-lines/${lineId}`, { method: "DELETE" });
+      onUpdated(body.estimate);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove the line");
+    }
+  }
+
+  const [numberDraft, setNumberDraft] = useState<string | null>(null);
+  async function saveNumber(e: FormEvent) {
+    e.preventDefault();
+    if (numberDraft == null) return;
+    setError(null);
+    setNotice(null);
+    setSaving(true);
+    try {
+      const body = await apiFetch(`/estimates/${estimate.id}/gst-invoice-number`, {
+        method: "PATCH",
+        body: JSON.stringify({ payer, number: numberDraft }),
+      });
+      onUpdated(body.estimate);
+      setNumberDraft(null);
+      setNotice(`Invoice number changed to ${insurer ? body.estimate.insuranceGstInvoiceNumber : body.estimate.gstInvoiceNumber}. The next GST invoice follows on from the last one made.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change the invoice number");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function downloadPdf() {
     if (!printRef.current) return;
     setError(null);
@@ -291,6 +339,49 @@ export function GstInvoice({
         </p>
       )}
 
+      {generated && isAdmin && (
+        <Card className="print:hidden">
+          <CardBody>
+            {numberDraft == null ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-700">
+                  Invoice number <span className="font-mono font-semibold">{invoiceNumber}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setNumberDraft(invoiceNumber ?? "")}
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                >
+                  <Pencil className="h-3 w-3" /> Change number
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={saveNumber} className="flex flex-wrap items-end gap-2">
+                <div>
+                  <Label>New invoice number</Label>
+                  <Input
+                    value={numberDraft}
+                    maxLength={16}
+                    onChange={(e) => setNumberDraft(e.target.value.toUpperCase().replace(/[^A-Z0-9/-]/g, ""))}
+                    className="w-56 font-mono uppercase"
+                  />
+                </div>
+                <Button type="submit" size="sm" disabled={saving || !numberDraft.trim()}>
+                  {saving ? "Saving..." : "Save number"}
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setNumberDraft(null)} disabled={saving}>
+                  Cancel
+                </Button>
+                <p className="w-full text-xs text-gray-500">
+                  Up to 16 letters or digits, with / or -. The next GST invoice gets the number after the last one made (e.g.
+                  GST/2026-27/0151 → GST/2026-27/0152).
+                </p>
+              </form>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       {/* GST details — editable until the invoice number is generated */}
       <Card className="print:hidden">
         <CardBody className="space-y-3">
@@ -344,6 +435,14 @@ export function GstInvoice({
                     <td className="py-1.5 pr-2">
                       {l.description}
                       <span className="ml-1 text-xs text-gray-500">{l.lineType === "LABOUR" ? "(labour)" : ""}</span>
+                      {l.billOnly && (
+                        <span className="ml-1 rounded bg-blue-50 px-1 text-[11px] font-medium text-blue-700">Added on bill</span>
+                      )}
+                      {!l.billOnly && l.billRate != null && (
+                        <span className="block text-xs text-gray-500">
+                          Bill rate {money(billRateOf(l))} (estimate {money(Number(l.rate))})
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-2">
                       <Input
@@ -372,12 +471,34 @@ export function GstInvoice({
                         ))}
                       </Select>
                     </td>
-                    <td className="py-1.5 text-right">{money(Number(l.amount))}</td>
+                    <td className="py-1.5 text-right">
+                      {money(billAmountOf(l))}
+                      {l.billOnly && !generated && closed && (
+                        <button
+                          type="button"
+                          onClick={() => removeBillLine(l.id)}
+                          className="ml-2 align-middle text-red-600 hover:text-red-700"
+                          title="Remove from the bill"
+                        >
+                          <Trash2 className="inline h-4 w-4" />
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {!generated && closed && (
+            <AddBillLine
+              estimateId={estimate.id}
+              payer={payer}
+              onAdded={(e) => {
+                setNotice(null);
+                onUpdated(e);
+              }}
+            />
+          )}
           {!generated && (
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" size="sm" onClick={save} disabled={saving || !dirty}>
@@ -390,7 +511,7 @@ export function GstInvoice({
                 {closed
                   ? "Until the number is generated, the invoice below is a preview."
                   : `Close job card ${jobCard.jobCardNumber} first — the GST invoice is made from the final estimate. The invoice below is a preview.`}{" "}
-                Numbers run GST/2026-27/0001, 0002… each financial year.
+                Numbers follow on from the last GST invoice (GST/2026-27/0001, 0002… each financial year).
               </p>
             </div>
           )}
@@ -480,7 +601,7 @@ export function GstInvoice({
                 <td className={td}>{r.hsn || "—"}</td>
                 <td className={`${td} text-right`}>{fmtQty(r.line.quantity)}</td>
                 {/* Rate before GST, so Qty × Rate = Taxable even when prices include GST. */}
-                <td className={`${td} text-right`}>{amt(inclusive ? Number(r.line.rate) / (1 + r.rate / 100) : Number(r.line.rate))}</td>
+                <td className={`${td} text-right`}>{amt(inclusive ? billRateOf(r.line) / (1 + r.rate / 100) : billRateOf(r.line))}</td>
                 <td className={`${td} text-right`}>{amt(r.taxable)}</td>
                 <td className={`${td} text-right`}>{r.rate}%</td>
                 <td className={`${td} text-right`}>{inter ? "—" : amt(r.cgst)}</td>
@@ -590,5 +711,155 @@ export function GstInvoice({
         </div>
       </div>
     </div>
+  );
+}
+
+type LineKind = "INVENTORY" | "OUTSIDE" | "LABOUR";
+
+interface FoundItem {
+  id: number;
+  itemCode: string;
+  name: string;
+  uom: string;
+  sellingPrice: string;
+  currentStock: number;
+}
+
+// Adds a line to this payer's bill and tax invoice only: an inventory item
+// (by item code — its name, MRP, HSN and GST % fill in), a part that isn't in
+// inventory, or labour. It isn't added to the estimate or the job card, so it
+// doesn't take anything out of stock.
+function AddBillLine({ estimateId, payer, onAdded }: { estimateId: number; payer: Payer; onAdded: (e: GstEstimate) => void }) {
+  const [kind, setKind] = useState<LineKind>("INVENTORY");
+  const [code, setCode] = useState("");
+  const [found, setFound] = useState<FoundItem | null | "notfound">(null);
+  const [description, setDescription] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [rate, setRate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (kind !== "INVENTORY") return;
+    const c = code.trim();
+    if (!/^\d+$/.test(c) || Number(c) === 0) {
+      setFound(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const body = await apiFetch(`/item-lookup/${c}`);
+        if (cancelled) return;
+        setFound(body.item);
+        setRate(String(Number(body.item.sellingPrice)));
+      } catch {
+        if (!cancelled) setFound("notfound");
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [code, kind]);
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const qty = Number(quantity);
+    if (!(qty > 0)) return setError("Quantity must be more than 0 (e.g. 1, 2 or 0.5)");
+    if (kind === "INVENTORY" && (found == null || found === "notfound")) return setError("Enter the item code of an item in inventory");
+    if (kind !== "INVENTORY" && !description.trim()) return setError("Enter a description");
+    if (rate.trim() === "" || Number(rate) < 0) return setError("Enter the rate");
+    setBusy(true);
+    try {
+      const body = await apiFetch(`/estimates/${estimateId}/bill-lines`, {
+        method: "POST",
+        body: JSON.stringify({
+          payer,
+          lineType: kind === "LABOUR" ? "LABOUR" : "PART",
+          itemId: kind === "INVENTORY" && found && found !== "notfound" ? found.id : undefined,
+          description: kind === "INVENTORY" ? undefined : description.trim(),
+          quantity: qty,
+          rate: Number(rate),
+        }),
+      });
+      onAdded(body.estimate);
+      setCode("");
+      setFound(null);
+      setDescription("");
+      setQuantity("1");
+      setRate("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not add the line");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={add} className="space-y-2 border-t border-gray-100 pt-3">
+      <p className="text-sm font-semibold text-gray-900">Add a line to this invoice</p>
+      <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+        {(
+          [
+            ["INVENTORY", "Item from inventory"],
+            ["OUTSIDE", "Part not in inventory"],
+            ["LABOUR", "Labour / service"],
+          ] as [LineKind, string][]
+        ).map(([value, label]) => (
+          <label key={value} className="flex items-center gap-1.5">
+            <input
+              type="radio"
+              checked={kind === value}
+              onChange={() => {
+                setKind(value);
+                setFound(null);
+                setCode("");
+                setRate("");
+              }}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_6rem_8rem_auto] sm:items-end">
+        {kind === "INVENTORY" ? (
+          <div>
+            <Label>Item code</Label>
+            <Input inputMode="numeric" placeholder="e.g. 0001" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+          </div>
+        ) : (
+          <div>
+            <Label>{kind === "LABOUR" ? "Labour / service" : "Part description"}</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+        )}
+        <div>
+          <Label>Qty</Label>
+          <Input type="number" min={0.01} step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+        </div>
+        <div>
+          <Label>Rate</Label>
+          <Input type="number" min={0} step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />
+        </div>
+        <Button type="submit" size="sm" disabled={busy}>
+          {busy ? "Adding..." : "Add"}
+        </Button>
+      </div>
+      {kind === "INVENTORY" && found === "notfound" && (
+        <p className="text-sm text-red-700">No item with code {code}. Use “Part not in inventory” instead.</p>
+      )}
+      {kind === "INVENTORY" && found && found !== "notfound" && (
+        <p className="text-sm text-blue-800">
+          {found.itemCode} — {found.name} · MRP {money(Number(found.sellingPrice))}
+        </p>
+      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <p className="text-xs text-gray-500">
+        Goes on this bill and tax invoice only — not on the estimate or the job card, and it doesn&apos;t take anything out
+        of stock (for a part used from stock, add it on the job card instead). Set its HSN and GST % above.
+      </p>
+    </form>
   );
 }

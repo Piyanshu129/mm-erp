@@ -2,10 +2,11 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Fragment, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ShoppingCart, Paperclip, Trash2, Printer, Download } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { Plus, ShoppingCart, Paperclip, Trash2, Printer, Download, Pencil } from "lucide-react";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { PAYMENT_MODES, modeLabel } from "@/components/InvoiceAccountPanel";
 import { GST_RATES } from "@/lib/gst";
 import { AssetLink } from "@/components/AuthedMedia";
@@ -20,6 +21,7 @@ import {
   isInventoryType,
   categoryOf,
   typesIn,
+  selectableTypes,
 } from "@/lib/purchaseTypes";
 import { MonthNav, TotalTile, CategoryBadge, FilterHeaderSelect, currentMonth, monthLabel } from "@/components/PurchaseListControls";
 import { compressImage } from "@/lib/compressImage";
@@ -69,6 +71,7 @@ interface PurchaseRow {
   purchaseCost: string;
   sellingPrice: string | null;
   billUrl: string | null;
+  supplierId: number | null;
   supplier: { name: string } | null;
   item: {
     itemCode: string;
@@ -347,7 +350,7 @@ function LineEditor({
 
       <Field label={inventory ? "Item type" : "Expense type"}>
         <Select value={line.itemType} onChange={(e) => onChange({ itemType: e.target.value })}>
-          {typesIn(category).map((t) => (
+          {selectableTypes(category, line.itemType).map((t) => (
             <option key={t} value={t}>
               {TYPE_LABELS[t]}
             </option>
@@ -519,7 +522,161 @@ function lineProblem(line: LineDraft): string | null {
   return null;
 }
 
+// Admin: correct a saved purchase line — date, type (within its group),
+// supplier, quantity, rate, MRP, description and remarks. The server moves a
+// changed quantity in or out of stock and refuses what it can't do.
+function PurchaseEditRow({
+  purchase,
+  colSpan,
+  onCancel,
+  onSaved,
+}: {
+  purchase: PurchaseRow;
+  colSpan: number;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const inventory = isInventoryType(purchase.itemType);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchaseDate, setPurchaseDate] = useState(purchase.purchaseDate.slice(0, 10));
+  const [itemType, setItemType] = useState(purchase.itemType);
+  const [supplierId, setSupplierId] = useState(purchase.supplierId ? String(purchase.supplierId) : "");
+  const [description, setDescription] = useState(purchase.description ?? "");
+  const [quantity, setQuantity] = useState(String(purchase.quantity));
+  const [rate, setRate] = useState(String(Number(purchase.purchaseCost)));
+  const [mrp, setMrp] = useState(purchase.sellingPrice != null ? String(Number(purchase.sellingPrice)) : "");
+  const [remarks, setRemarks] = useState(purchase.remarks ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetchAll<Supplier>("/suppliers", "suppliers")
+      .then(setSuppliers)
+      .catch(() => setError("Could not load the suppliers"));
+  }, []);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (inventory && !(Number(quantity) > 0)) return setError("Quantity must be more than 0");
+    if (rate.trim() === "" || Number(rate) < 0) return setError("Enter the rate");
+    setSaving(true);
+    try {
+      await apiFetch(`/purchases/${purchase.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          purchaseDate,
+          itemType,
+          supplierId: supplierId ? Number(supplierId) : null,
+          ...(inventory
+            ? { quantity: Number(quantity), sellingPrice: mrp.trim() === "" ? null : Number(mrp) }
+            : { description: description.trim() }),
+          purchaseCost: Number(rate),
+          remarks: remarks.trim() || null,
+        }),
+      });
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save — check the connection and try again");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td colSpan={colSpan} className="border-t border-gray-100 bg-blue-50 px-3 py-3">
+        <form onSubmit={save} className="space-y-3">
+          <p className="text-sm font-semibold text-gray-900">
+            Edit purchase #{purchase.id}
+            {purchase.item ? ` — ${purchase.item.itemCode} ${purchase.item.name}` : ""}
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div>
+              <Label>Date</Label>
+              <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+            </div>
+            <div>
+              <Label>Type</Label>
+              <Select value={itemType} onChange={(e) => setItemType(e.target.value)}>
+                {selectableTypes(categoryOf(purchase.itemType), purchase.itemType).map((t) => (
+                  <option key={t} value={t}>
+                    {TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="col-span-2">
+              <Label>Supplier{inventory ? "" : " (optional)"}</Label>
+              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                {!inventory && <option value="">None</option>}
+                {supplierId && !suppliers.some((s) => String(s.id) === supplierId) && (
+                  <option value={supplierId}>{purchase.supplier?.name ?? "Current supplier"}</option>
+                )}
+                {suppliers.map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.name}
+                    {s.mobile ? ` — ${s.mobile}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {inventory ? (
+              <>
+                <div>
+                  <Label>Quantity{purchase.item ? ` (${purchase.item.uom})` : ""}</Label>
+                  <Input type="number" min={0.001} step="0.001" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Rate (per unit)</Label>
+                  <Input type="number" min={0} step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />
+                </div>
+                <div>
+                  <Label>MRP</Label>
+                  <Input type="number" min={0} step="0.01" value={mrp} onChange={(e) => setMrp(e.target.value)} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="col-span-2">
+                  <Label>Description</Label>
+                  <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Amount</Label>
+                  <Input type="number" min={0} step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />
+                </div>
+              </>
+            )}
+            <div className={inventory ? "" : "col-span-1"}>
+              <Label>Remarks</Label>
+              <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+            </div>
+          </div>
+          {inventory && (
+            <p className="text-xs text-gray-500">
+              A new quantity is added to or taken out of stock, and the sticker range is resized. The item stays the same.
+            </p>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={saving}>
+              {saving ? "Saving..." : "Save changes"}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
 function PurchasesPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [editingId, setEditingId] = useState<number | null>(null);
   const searchParams = useSearchParams();
   // ?new=<type> opens the form ready for that type — the Expenses page's
   // "New expense" button links here with an expense type.
@@ -1198,7 +1355,7 @@ function PurchasesPageContent() {
       {loading ? (
         <TableSkeleton cols={7} />
       ) : (
-        <Table minWidth={780}>
+        <Table minWidth={isAdmin ? 820 : 780}>
           <thead>
             <tr>
               <Th>Purchase # / Date</Th>
@@ -1225,12 +1382,13 @@ function PurchasesPageContent() {
               <Th className="text-right">Qty / Stickers</Th>
               <Th className="text-right">Rate / MRP</Th>
               <Th className="text-right">Total</Th>
+              {isAdmin && <Th />}
             </tr>
           </thead>
           <tbody>
             {purchases.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10">
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-10">
                   <EmptyState
                     icon={ShoppingCart}
                     title={categoryFilter || typeFilter ? "No purchases match these filters" : "No purchases this month"}
@@ -1239,7 +1397,8 @@ function PurchasesPageContent() {
               </tr>
             )}
             {purchases.map((p) => (
-              <Tr key={p.id}>
+              <Fragment key={p.id}>
+              <Tr>
                 <Td className="whitespace-nowrap">
                   <span className="font-mono">#{p.id}</span>
                   <span className="block text-xs text-gray-500">{new Date(p.purchaseDate).toLocaleDateString()}</span>
@@ -1278,7 +1437,30 @@ function PurchasesPageContent() {
                   {p.sellingPrice != null && <span className="block text-xs text-gray-500">MRP {formatINR(p.sellingPrice)}</span>}
                 </Td>
                 <Td className="text-right font-medium text-gray-900">{formatINR(p.quantity * Number(p.purchaseCost))}</Td>
+                {isAdmin && (
+                  <Td>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(editingId === p.id ? null : p.id)}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
+                  </Td>
+                )}
               </Tr>
+              {editingId === p.id && (
+                <PurchaseEditRow
+                  purchase={p}
+                  colSpan={8}
+                  onCancel={() => setEditingId(null)}
+                  onSaved={async () => {
+                    setEditingId(null);
+                    await loadPurchases();
+                  }}
+                />
+              )}
+              </Fragment>
             ))}
           </tbody>
           {purchases.length > 0 && (
@@ -1295,6 +1477,7 @@ function PurchasesPageContent() {
                 <td className="border-t border-gray-200 px-4 py-2.5 text-right text-sm font-semibold text-gray-900">
                   {formatINR(filteredTotal)}
                 </td>
+                {isAdmin && <td className="border-t border-gray-200 bg-gray-50" />}
               </tr>
             </tfoot>
           )}

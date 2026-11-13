@@ -4,7 +4,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, UserCog, Pencil, KeyRound, ExternalLink } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -14,6 +14,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { ActiveBadge, Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import { useAuth } from "@/context/AuthContext";
 
 interface EmployeeRow {
   id: number;
@@ -51,6 +52,10 @@ const EMPTY_FORM: FormState = {
 };
 
 function EmployeesPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [statusBusy, setStatusBusy] = useState<number | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -61,14 +66,29 @@ function EmployeesPageContent() {
 
   async function load() {
     setLoading(true);
-    const body = await apiFetch("/employees?pageSize=100");
-    setEmployees(body.employees);
+    setEmployees(await apiFetchAll<EmployeeRow>("/employees", "employees"));
     setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, []);
+
+  // An inactive employee drops off attendance and can't get advances; their
+  // records stay.
+  async function setActive(e: EmployeeRow, isActive: boolean) {
+    if (!isActive && !window.confirm(`Make ${e.name} inactive? They won't show on attendance any more. Their records are kept.`)) return;
+    setStatusError(null);
+    setStatusBusy(e.id);
+    try {
+      await apiFetch(`/employees/${e.id}/status`, { method: "PATCH", body: JSON.stringify({ isActive }) });
+      setEmployees((rows) => rows.map((r) => (r.id === e.id ? { ...r, isActive } : r)));
+    } catch (err) {
+      setStatusError(err instanceof ApiError ? err.message : "Could not change the status");
+    } finally {
+      setStatusBusy(null);
+    }
+  }
 
   function openCreateForm() {
     setEditingId(null);
@@ -241,6 +261,8 @@ function EmployeesPageContent() {
         </Card>
       )}
 
+      {statusError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{statusError}</p>}
+
       {loading ? (
         <TableSkeleton />
       ) : employees.length === 0 ? (
@@ -272,9 +294,21 @@ function EmployeesPageContent() {
                   <ActiveBadge isActive={e.isActive} />
                 </Td>
                 <Td>
-                  <button onClick={() => openEditForm(e)} className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
-                    <Pencil className="h-3 w-3" /> Edit
-                  </button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <button onClick={() => openEditForm(e)} className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setActive(e, !e.isActive)}
+                        disabled={statusBusy === e.id}
+                        className={`text-xs hover:underline disabled:opacity-50 ${e.isActive ? "text-red-600" : "text-green-700"}`}
+                      >
+                        {statusBusy === e.id ? "..." : e.isActive ? "Deactivate" : "Activate"}
+                      </button>
+                    )}
+                  </div>
                 </Td>
               </Tr>
             ))}

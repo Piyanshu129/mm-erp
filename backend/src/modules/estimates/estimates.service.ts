@@ -16,6 +16,11 @@ import { PageParams, toSkipTake } from "../../lib/pagination";
 // payer (syncBills). On an accidental claim each line is billed to the
 // customer or to the insurance company, so there can be two bills and two GST
 // invoices.
+//
+// After closing, the bill can differ from the estimate until its GST invoice
+// is made: on an accidental claim a line's bill rate can be changed (the
+// insurance company's approved rate, billRate), and lines can be added to a
+// tax invoice only (billOnly). The estimate keeps its own rates and lines.
 
 export const ESTIMATE_LINE_TYPES = ["PART", "LABOUR"] as const;
 export const PAYERS = ["CUSTOMER", "INSURANCE"] as const;
@@ -49,7 +54,15 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function totalsFor(lines: { lineType: string; amount: Prisma.Decimal }[], taxRate: Prisma.Decimal | null) {
+// What a line is billed at: its bill rate when one was set after closing,
+// otherwise the estimate amount.
+export function billAmountOf(line: { quantity: number; amount: Prisma.Decimal; billRate?: Prisma.Decimal | null }): number {
+  return line.billRate != null ? round2(Number(line.billRate) * line.quantity) : Number(line.amount);
+}
+
+// The estimate's own totals: lines added on the bill only are left out.
+function totalsFor(allLines: { lineType: string; amount: Prisma.Decimal; billOnly?: boolean }[], taxRate: Prisma.Decimal | null) {
+  const lines = allLines.filter((l) => !l.billOnly);
   const partsTotal = round2(lines.filter((l) => l.lineType === "PART").reduce((s, l) => s + Number(l.amount), 0));
   const labourTotal = round2(lines.filter((l) => l.lineType === "LABOUR").reduce((s, l) => s + Number(l.amount), 0));
   const subtotal = round2(partsTotal + labourTotal);
@@ -66,7 +79,11 @@ function payerOf(line: { scope: string }, jobType: string | null): Payer {
 async function loadEstimate(db: Prisma.TransactionClient | typeof prisma, id: number) {
   const estimate = await db.estimate.findUnique({ where: { id }, include: detailInclude });
   if (!estimate) throw new NotFoundError("Estimate not found");
-  return { ...estimate, ...totalsFor(estimate.lines, estimate.taxRate) };
+  return {
+    ...estimate,
+    lines: estimate.lines.map((l) => ({ ...l, billAmount: billAmountOf(l) })),
+    ...totalsFor(estimate.lines, estimate.taxRate),
+  };
 }
 
 // Keeps the job card's own estimate fields (shown on the job card and in
@@ -157,7 +174,7 @@ export async function listEstimates(page: PageParams, q: string | undefined, pay
             invoices: { select: { id: true, payer: true, totalAmount: true, paymentAmount: true } },
           },
         },
-        lines: { select: { lineType: true, amount: true } },
+        lines: { select: { lineType: true, amount: true, billOnly: true } },
       },
       orderBy: { id: "desc" },
       ...toSkipTake(page),
@@ -287,7 +304,7 @@ export async function syncEstimateWithJobCard(tx: Prisma.TransactionClient, jobC
       keep.push(created.id);
     }
   }
-  await tx.estimateLine.deleteMany({ where: { estimateId: estimate.id, id: { notIn: keep } } });
+  await tx.estimateLine.deleteMany({ where: { estimateId: estimate.id, billOnly: false, id: { notIn: keep } } });
   await syncJobCard(tx, estimate.id);
   return estimate.id;
 }
@@ -322,8 +339,8 @@ export async function syncBills(tx: Prisma.TransactionClient, jobCardId: number,
       continue;
     }
 
-    const partsTotal = round2(mine.filter((l) => l.lineType === "PART").reduce((s, l) => s + Number(l.amount), 0));
-    const labourTotal = round2(mine.filter((l) => l.lineType === "LABOUR").reduce((s, l) => s + Number(l.amount), 0));
+    const partsTotal = round2(mine.filter((l) => l.lineType === "PART").reduce((s, l) => s + billAmountOf(l), 0));
+    const labourTotal = round2(mine.filter((l) => l.lineType === "LABOUR").reduce((s, l) => s + billAmountOf(l), 0));
     const subtotal = round2(partsTotal + labourTotal);
     const billDiscount = payer === "CUSTOMER" && discount !== undefined ? discount : Number(existing?.discount ?? 0);
     if (billDiscount < 0 || billDiscount > subtotal + 0.005) {
@@ -390,42 +407,88 @@ export interface EstimateLineInput {
 // and MRP fill in unless a rate is given) or a part that isn't in inventory
 // (typed description and rate). Nothing here touches stock: an estimate is
 // only a quote.
+// The fields of a new line: an inventory item fills in its name, MRP, HSN and
+// GST %; labour gets 18%.
+async function newLineData(tx: Prisma.TransactionClient, input: EstimateLineInput) {
+  let description = input.description?.trim();
+  let rate = input.rate;
+  let itemId: number | undefined;
+  let hsnCode: string | null = null;
+  let gstRate: number | null = input.lineType === "LABOUR" ? LABOUR_GST_RATE : null;
+
+  if (input.lineType === "PART" && input.itemId) {
+    const item = await tx.item.findUnique({ where: { id: input.itemId } });
+    if (!item) throw new NotFoundError("Item not found");
+    itemId = item.id;
+    description = description || item.name;
+    rate = rate ?? Number(item.sellingPrice);
+    hsnCode = item.hsnCode;
+    gstRate = item.gstRate != null ? Number(item.gstRate) : null;
+  }
+  if (!description) throw new ConflictError("Enter a description for this line");
+  if (rate == null || rate < 0) throw new ConflictError("Enter a rate for this line");
+
+  return {
+    lineType: input.lineType,
+    itemId,
+    description,
+    quantity: input.quantity,
+    rate,
+    amount: round2(rate * input.quantity),
+    hsnCode,
+    gstRate,
+  };
+}
+
 export async function addLine(estimateId: number, input: EstimateLineInput) {
   await prisma.$transaction(async (tx) => {
     await assertDraft(tx, estimateId);
-
-    let description = input.description?.trim();
-    let rate = input.rate;
-    let itemId: number | undefined;
-    let hsnCode: string | null = null;
-    let gstRate: number | null = input.lineType === "LABOUR" ? LABOUR_GST_RATE : null;
-
-    if (input.lineType === "PART" && input.itemId) {
-      const item = await tx.item.findUnique({ where: { id: input.itemId } });
-      if (!item) throw new NotFoundError("Item not found");
-      itemId = item.id;
-      description = description || item.name;
-      rate = rate ?? Number(item.sellingPrice);
-      hsnCode = item.hsnCode;
-      gstRate = item.gstRate != null ? Number(item.gstRate) : null;
-    }
-    if (!description) throw new ConflictError("Enter a description for this line");
-    if (rate == null || rate < 0) throw new ConflictError("Enter a rate for this line");
-
-    await tx.estimateLine.create({
-      data: {
-        estimateId,
-        lineType: input.lineType,
-        itemId,
-        description,
-        quantity: input.quantity,
-        rate,
-        amount: round2(rate * input.quantity),
-        hsnCode,
-        gstRate,
-      },
-    });
+    await tx.estimateLine.create({ data: { estimateId, ...(await newLineData(tx, input)) } });
     await syncJobCard(tx, estimateId);
+  });
+  return loadEstimate(prisma, estimateId);
+}
+
+// ---- The bill, where it differs from the estimate ----------------------------
+
+// A closed job card's bill for one payer, still open to changes: refuses
+// when the job card isn't closed or that payer's GST invoice is made.
+async function assertBillOpen(tx: Prisma.TransactionClient, estimateId: number, payer: Payer) {
+  const estimate = await tx.estimate.findUnique({ where: { id: estimateId }, include: { jobCard: true } });
+  if (!estimate) throw new NotFoundError("Estimate not found");
+  if (estimate.jobCard.status !== CLOSED) {
+    throw new ConflictError(`Close job card ${estimate.jobCard.jobCardNumber} first — the bill is made when it's closed`);
+  }
+  if (payer === "INSURANCE" && estimate.jobCard.jobType !== "ACCIDENTAL_CLAIM") {
+    throw new ConflictError("Only an accidental claim bills the insurance company");
+  }
+  const number = payer === "INSURANCE" ? estimate.insuranceGstInvoiceNumber : estimate.gstInvoiceNumber;
+  if (number) throw new ConflictError(`GST invoice ${number} is already made — its lines can't be changed`);
+  return estimate;
+}
+
+// A line added to one payer's bill and tax invoice only — not to the
+// estimate or the job card, so it doesn't take anything out of stock.
+export async function addBillLine(estimateId: number, input: EstimateLineInput & { payer?: Payer }, userId: number) {
+  const payer = input.payer ?? "CUSTOMER";
+  await prisma.$transaction(async (tx) => {
+    const estimate = await assertBillOpen(tx, estimateId, payer);
+    await tx.estimateLine.create({
+      data: { estimateId, ...(await newLineData(tx, input)), scope: payer, billOnly: true },
+    });
+    await syncBills(tx, estimate.jobCardId, userId);
+  });
+  return loadEstimate(prisma, estimateId);
+}
+
+export async function removeBillLine(estimateId: number, lineId: number, userId: number) {
+  await prisma.$transaction(async (tx) => {
+    const line = await tx.estimateLine.findUnique({ where: { id: lineId }, include: { estimate: { include: { jobCard: true } } } });
+    if (!line || line.estimateId !== estimateId) throw new NotFoundError("Line not found on this estimate");
+    if (!line.billOnly) throw new ConflictError(`"${line.description}" is on the estimate — only lines added on the bill can be removed here`);
+    const estimate = await assertBillOpen(tx, estimateId, payerOf(line, line.estimate.jobCard.jobType));
+    await tx.estimateLine.delete({ where: { id: lineId } });
+    await syncBills(tx, estimate.jobCardId, userId);
   });
   return loadEstimate(prisma, estimateId);
 }
@@ -435,6 +498,7 @@ export async function removeLine(estimateId: number, lineId: number) {
     await assertDraft(tx, estimateId);
     const line = await tx.estimateLine.findUnique({ where: { id: lineId } });
     if (!line || line.estimateId !== estimateId) throw new NotFoundError("Line not found on this estimate");
+    if (line.billOnly) throw new ConflictError(`"${line.description}" was added on the bill — remove it on the GST invoice tab`);
     await tx.estimateLine.delete({ where: { id: lineId } });
     await syncJobCard(tx, estimateId);
   });
@@ -471,7 +535,9 @@ export interface GstDetailsInput {
   pricesIncludeGst?: boolean;
   customerGstin?: string | null;
   insuranceGstin?: string | null;
-  lines?: { id: number; hsnCode?: string | null; gstRate?: number | null; scope?: Payer }[];
+  // billRate: the rate billed on an accidental claim's closed job card (null
+  // = the estimate rate).
+  lines?: { id: number; hsnCode?: string | null; gstRate?: number | null; scope?: Payer; billRate?: number | null }[];
 }
 
 // HSN/SAC and GST % per line, who pays for each line (accidental claims),
@@ -515,7 +581,7 @@ export async function updateGstDetails(estimateId: number, input: GstDetailsInpu
     });
 
     const claim = estimate.jobCard.jobType === "ACCIDENTAL_CLAIM";
-    let scopeChanged = false;
+    let billChanged = false;
     for (const line of input.lines ?? []) {
       const existing = await tx.estimateLine.findUnique({ where: { id: line.id } });
       if (!existing || existing.estimateId !== estimateId) throw new NotFoundError("Line not found on this estimate");
@@ -531,13 +597,30 @@ export async function updateGstDetails(estimateId: number, input: GstDetailsInpu
           throw new ConflictError("Only an accidental claim can bill lines to the insurance company");
         }
         if (anyLocked) refuse("who pays for each line", anyLocked);
-        scopeChanged = true;
+        billChanged = true;
       }
-      if (gstChanged || scope !== existing.scope) {
-        await tx.estimateLine.update({ where: { id: line.id }, data: { hsnCode, gstRate, scope } });
+      // A bill rate equal to the estimate rate is no change.
+      const billRate =
+        line.billRate === undefined
+          ? existing.billRate
+          : line.billRate == null || Math.abs(line.billRate - Number(existing.rate)) < 0.005
+            ? null
+            : new Prisma.Decimal(round2(line.billRate));
+      const billRateChanged = (billRate == null ? null : Number(billRate)) !== (existing.billRate == null ? null : Number(existing.billRate));
+      if (billRateChanged) {
+        if (!claim) throw new ConflictError("The bill rate can be changed on an accidental claim only");
+        if (estimate.jobCard.status !== CLOSED) {
+          throw new ConflictError(`Close job card ${estimate.jobCard.jobCardNumber} first — the bill rate is set on the bill`);
+        }
+        if (existing.billOnly) throw new ConflictError(`"${existing.description}" was added on the bill — remove it and add it again at the new rate`);
+        if (locked[payer]) refuse(`the bill rate of "${existing.description}"`, locked[payer]!);
+        billChanged = true;
+      }
+      if (gstChanged || scope !== existing.scope || billRateChanged) {
+        await tx.estimateLine.update({ where: { id: line.id }, data: { hsnCode, gstRate, scope, billRate } });
       }
     }
-    if (scopeChanged && estimate.jobCard.status === CLOSED) {
+    if (billChanged && estimate.jobCard.status === CLOSED) {
       await syncBills(tx, estimate.jobCardId, userId);
     }
   });
@@ -550,10 +633,89 @@ function financialYear(d: Date): string {
   return `${y}-${String(y + 1).slice(2)}`;
 }
 
-// Makes a GST tax invoice for one payer's lines: numbered GST/<FY>/0001,
-// 0002, ... in order within each financial year across both kinds (an
-// advisory lock makes two at once take different numbers), dated today, and
-// locked from then on. Only from a closed job card, whose estimate is the
+function financialYearRange(d: Date) {
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return { start: new Date(y, 3, 1), end: new Date(y + 1, 3, 1) };
+}
+
+// A GST invoice number is at most 16 characters: letters, digits, "/" and "-".
+export const GST_INVOICE_NUMBER = /^[A-Z0-9/-]{1,16}$/;
+
+// The number with its trailing digits plus one, keeping the prefix and the
+// zero padding: GST/2026-27/0007 → GST/2026-27/0008, MM-145 → MM-146. Null
+// when it doesn't end in digits.
+function incrementNumber(n: string): string | null {
+  const m = /^(.*?)(\d+)$/.exec(n);
+  if (!m) return null;
+  return m[1] + String(Number(m[2]) + 1).padStart(m[2].length, "0");
+}
+
+const trailingNumber = (n: string) => Number(/(\d+)$/.exec(n)?.[1] ?? 0);
+
+// The estimate whose customer or insurance GST invoice already has this
+// number, other than the one being numbered.
+async function gstNumberOwner(tx: Prisma.TransactionClient, number: string, except?: { estimateId: number; payer: Payer }) {
+  const rows = await tx.estimate.findMany({
+    where: { OR: [{ gstInvoiceNumber: number }, { insuranceGstInvoiceNumber: number }] },
+    select: { id: true, estimateNumber: true, gstInvoiceNumber: true },
+  });
+  return (
+    rows.find(
+      (r) => !(except && r.id === except.estimateId && (except.payer === "CUSTOMER") === (r.gstInvoiceNumber === number))
+    ) ?? null
+  );
+}
+
+// The next GST invoice number: the one after the last GST invoice made this
+// financial year (so a number an admin changed is carried on from), or
+// GST/<FY>/0001 for the first of the year. A number already used is skipped.
+async function nextGstInvoiceNumber(tx: Prisma.TransactionClient, now: Date): Promise<string> {
+  const { start, end } = financialYearRange(now);
+  const rows = await tx.estimate.findMany({
+    where: { OR: [{ gstInvoiceDate: { gte: start, lt: end } }, { insuranceGstInvoiceDate: { gte: start, lt: end } }] },
+    select: { gstInvoiceNumber: true, gstInvoiceDate: true, insuranceGstInvoiceNumber: true, insuranceGstInvoiceDate: true },
+  });
+  const made = rows
+    .flatMap((r) => [
+      { number: r.gstInvoiceNumber, date: r.gstInvoiceDate },
+      { number: r.insuranceGstInvoiceNumber, date: r.insuranceGstInvoiceDate },
+    ])
+    .filter((m): m is { number: string; date: Date } => !!m.number && !!m.date && m.date >= start && m.date < end)
+    .sort((a, b) => b.date.getTime() - a.date.getTime() || trailingNumber(b.number) - trailingNumber(a.number));
+  let next = (made[0] && incrementNumber(made[0].number)) || `GST/${financialYear(now)}/0001`;
+  while (await gstNumberOwner(tx, next)) next = incrementNumber(next)!;
+  return next;
+}
+
+// Admin: change a GST invoice's number (e.g. to carry on from the numbers
+// used before this system). The next invoice follows on from the last one
+// made. A number can't be used twice.
+export async function setGstInvoiceNumber(estimateId: number, payer: Payer, rawNumber: string) {
+  const number = rawNumber.trim().toUpperCase();
+  if (!GST_INVOICE_NUMBER.test(number)) {
+    throw new ConflictError("A GST invoice number is up to 16 letters or digits, with / or - (e.g. GST/2026-27/0151)");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(7311)`;
+    const estimate = await tx.estimate.findUnique({ where: { id: estimateId } });
+    if (!estimate) throw new NotFoundError("Estimate not found");
+    const current = payer === "INSURANCE" ? estimate.insuranceGstInvoiceNumber : estimate.gstInvoiceNumber;
+    if (!current) throw new ConflictError("Generate the GST invoice first, then change its number");
+    if (current === number) return;
+    const owner = await gstNumberOwner(tx, number, { estimateId, payer });
+    if (owner) throw new ConflictError(`${number} is already used by ${owner.estimateNumber}'s GST invoice`);
+    await tx.estimate.update({
+      where: { id: estimateId },
+      data: payer === "INSURANCE" ? { insuranceGstInvoiceNumber: number } : { gstInvoiceNumber: number },
+    });
+  });
+  return loadEstimate(prisma, estimateId);
+}
+
+// Makes a GST tax invoice for one payer's lines: numbered on from the last
+// GST invoice (GST/<FY>/0001, 0002, ... across both kinds; an advisory lock
+// makes two at once take different numbers), dated today, and locked from
+// then on. Only from a closed job card, whose estimate is the
 // final bill.
 export async function generateGstInvoice(estimateId: number, payer: Payer = "CUSTOMER") {
   await prisma.$transaction(async (tx) => {
@@ -578,14 +740,7 @@ export async function generateGstInvoice(estimateId: number, payer: Payer = "CUS
       throw new ConflictError(`Set the GST % for: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`);
     }
     const now = new Date();
-    const prefix = `GST/${financialYear(now)}/`;
-    const count = await tx.estimate.count({
-      where: { OR: [{ gstInvoiceNumber: { startsWith: prefix } }, { insuranceGstInvoiceNumber: { startsWith: prefix } }] },
-    });
-    const both = await tx.estimate.count({
-      where: { gstInvoiceNumber: { startsWith: prefix }, insuranceGstInvoiceNumber: { startsWith: prefix } },
-    });
-    const number = `${prefix}${String(count + both + 1).padStart(4, "0")}`;
+    const number = await nextGstInvoiceNumber(tx, now);
     await tx.estimate.update({
       where: { id: estimate.id },
       data:

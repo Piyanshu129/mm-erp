@@ -218,6 +218,8 @@ async function estimatesSheet(): Promise<SheetSpec> {
       { header: "Qty", key: "quantity", width: 8 },
       { header: "Rate", key: "rate", width: 12 },
       { header: "Amount", key: "amount", width: 12 },
+      { header: "Bill Rate", key: "billRate", width: 12 },
+      { header: "On", key: "on", width: 12 },
     ],
     rows: lines.map((l) => ({
       estimateNumber: l.estimate.estimateNumber,
@@ -235,6 +237,9 @@ async function estimatesSheet(): Promise<SheetSpec> {
       quantity: l.quantity,
       rate: n(l.rate),
       amount: n(l.amount),
+      // Set when the bill's rate differs from the estimate (accidental claims).
+      billRate: n(l.billRate),
+      on: l.billOnly ? "Bill only" : "Estimate",
     })),
   };
 }

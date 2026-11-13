@@ -131,6 +131,27 @@ function describeIssue(issue: z.ZodIssue): string {
   return field ? `${field}: ${issue.message}` : issue.message;
 }
 
+export const updatePurchaseSchema = z.object({
+  purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "purchaseDate must be YYYY-MM-DD").optional(),
+  supplierId: z.coerce.number().int().positive().nullable().optional(),
+  itemType: z.enum(PURCHASE_ITEM_TYPES).optional(),
+  description: z.string().trim().optional(),
+  quantity: z.coerce.number().positive("quantity must be more than 0").max(1000000).optional(),
+  purchaseCost: z.coerce.number().min(0).optional(),
+  sellingPrice: z.coerce.number().min(0).nullable().optional(),
+  remarks: z.string().trim().nullable().optional(),
+});
+
+// Admin-only (purchases.routes.ts).
+export async function update(req: Request, res: Response) {
+  const parsed = updatePurchaseSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError(400, parsed.error.issues.slice(0, 3).map(describeIssue).join("; "));
+  }
+  const purchase = await purchasesService.updatePurchase(Number(req.params.id), parsed.data);
+  res.json({ purchase });
+}
+
 export async function create(req: Request, res: Response) {
   const parsed = createPurchaseSchema.safeParse(req.body);
   if (!parsed.success) {

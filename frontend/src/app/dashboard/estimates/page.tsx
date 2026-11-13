@@ -2,9 +2,11 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Fragment, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, Receipt } from "lucide-react";
+import { MessageCircle, Search, Receipt } from "lucide-react";
+import { WhatsAppMessage } from "@/components/WhatsAppMessage";
+import { paymentReminder } from "@/lib/whatsappMessages";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -55,6 +57,8 @@ function EstimatesPageContent() {
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [payment, setPayment] = useState<PaymentFilter>("");
+  // The estimate whose WhatsApp payment reminder is open.
+  const [remindId, setRemindId] = useState<number | null>(null);
 
   async function load(nextPage: number, search: string, paymentFilter: PaymentFilter = payment) {
     setError(null);
@@ -154,8 +158,13 @@ function EstimatesPageContent() {
                 const billed = bills.reduce((t, b) => t + Number(b.totalAmount), 0);
                 const paid = bills.reduce((t, b) => t + Number(b.paymentAmount), 0);
                 const insurance = bills.find((b) => b.payer === "INSURANCE");
+                // The reminder is for what the customer owes (not the insurance company).
+                const customerBill = bills.find((b) => b.payer === "CUSTOMER");
+                const customerDue = customerBill ? Number(customerBill.totalAmount) - Number(customerBill.paymentAmount) : 0;
+                const v = e.jobCard.vehicle;
                 return (
-                  <Tr key={e.id}>
+                  <Fragment key={e.id}>
+                  <Tr>
                     <Td>
                       <Link href={`/dashboard/estimates/${e.id}`} className="font-mono font-medium text-blue-600 hover:underline">
                         {e.estimateNumber}
@@ -192,6 +201,15 @@ function EstimatesPageContent() {
                     <Td className="text-right text-green-700">{bills.length ? formatINR(paid) : "—"}</Td>
                     <Td className={`text-right font-medium ${billed - paid > 0.005 ? "text-red-700" : "text-gray-900"}`}>
                       {bills.length ? formatINR(Math.max(0, billed - paid)) : "—"}
+                      {closed && customerDue > 0.005 && (
+                        <button
+                          type="button"
+                          onClick={() => setRemindId(remindId === e.id ? null : e.id)}
+                          className="mt-1 inline-flex items-center gap-1 text-xs font-normal text-green-700 hover:underline"
+                        >
+                          <MessageCircle className="h-3 w-3" /> WhatsApp reminder
+                        </button>
+                      )}
                     </Td>
                     <Td>
                       <div className="flex flex-wrap gap-1">
@@ -208,6 +226,29 @@ function EstimatesPageContent() {
                       </div>
                     </Td>
                   </Tr>
+                  {remindId === e.id && customerBill && (
+                    <tr>
+                      <td colSpan={7} className="border-t border-gray-100 bg-green-50 px-3 py-3">
+                        <div className="max-w-xl">
+                          <WhatsAppMessage
+                            title={`Payment reminder to ${v.customer.name} (English + Hindi)`}
+                            mobile={v.customer.mobile}
+                            message={paymentReminder({
+                              customerName: v.customer.name,
+                              registrationNumber: v.registrationNumber,
+                              vehicle: [v.make, v.model].filter(Boolean).join(" "),
+                              invoiceNumber: e.estimateNumber,
+                              invoiceDate: e.estimateDate,
+                              total: Number(customerBill.totalAmount),
+                              paid: Number(customerBill.paymentAmount),
+                              due: customerDue,
+                            })}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -4,8 +4,10 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Search, Users } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { Pencil, Plus, Search, Users } from "lucide-react";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { CustomerEditForm } from "@/components/CustomerEditForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -26,12 +28,18 @@ interface CustomerRow {
   id: number;
   name: string;
   mobile: string;
+  whatsapp: string | null;
+  email: string | null;
   address: string | null;
+  notes: string | null;
   isActive: boolean;
   account: InvoiceAccount;
 }
 
 function CustomersPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [editing, setEditing] = useState<CustomerRow | null>(null);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -48,9 +56,11 @@ function CustomersPageContent() {
   // quiet: refresh the amounts after a payment without blanking the table.
   async function loadCustomers(query: string, quiet = false) {
     if (!quiet) setLoading(true);
-    const body = await apiFetch(`/customers?${query ? `q=${encodeURIComponent(query)}` : ""}`);
-    setCustomers(body.customers);
-    setLoading(false);
+    try {
+      setCustomers(await apiFetchAll<CustomerRow>(`/customers${query ? `?q=${encodeURIComponent(query)}` : ""}`, "customers"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -127,6 +137,27 @@ function CustomersPageContent() {
         </Button>
       </form>
 
+      {editing && (
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Edit customer — {editing.name}</p>
+          <CustomerEditForm
+            key={editing.id}
+            customer={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={async () => {
+              setEditing(null);
+              await loadCustomers(q, true);
+            }}
+          />
+        </div>
+      )}
+
+      {!loading && customers.length > 0 && (
+        <p className="text-sm text-gray-500">
+          {customers.length} {customers.length === 1 ? "customer" : "customers"}
+        </p>
+      )}
+
       {accountFor && (
         <InvoiceAccountPanel
           key={`${accountFor.customer.id}-${accountFor.focusPay}`}
@@ -171,11 +202,25 @@ function CustomersPageContent() {
                   <ActiveBadge isActive={c.isActive} />
                 </Td>
                 <Td>
-                  <InvoiceAccountActions
-                    account={c.account}
-                    onPay={() => setAccountFor({ customer: c, focusPay: true })}
-                    onHistory={() => setAccountFor({ customer: c, focusPay: false })}
-                  />
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <InvoiceAccountActions
+                      account={c.account}
+                      onPay={() => setAccountFor({ customer: c, focusPay: true })}
+                      onHistory={() => setAccountFor({ customer: c, focusPay: false })}
+                    />
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(c);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                    )}
+                  </div>
                 </Td>
               </Tr>
             ))}

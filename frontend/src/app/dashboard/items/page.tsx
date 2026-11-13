@@ -4,9 +4,10 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Search, Package } from "lucide-react";
+import { Pencil, Plus, Search, Package } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { GST_RATES } from "@/lib/gst";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -40,6 +41,8 @@ interface ItemRow {
 const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
 
 function ItemsPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<ItemRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -63,9 +66,11 @@ function ItemsPageContent() {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     if (cat) params.set("category", cat);
-    const body = await apiFetch(`/items?${params.toString()}`);
-    setItems(body.items);
-    setLoading(false);
+    try {
+      setItems(await apiFetchAll<ItemRow>(`/items?${params.toString()}`, "items"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -227,6 +232,12 @@ function ItemsPageContent() {
         </Button>
       </form>
 
+      {!loading && items.length > 0 && (
+        <p className="text-sm text-gray-500">
+          {items.length} {items.length === 1 ? "item" : "items"}
+        </p>
+      )}
+
       {loading ? (
         <TableSkeleton cols={6} />
       ) : items.length === 0 ? (
@@ -243,6 +254,7 @@ function ItemsPageContent() {
               <Th>MRP</Th>
               <Th>Purchased Qty</Th>
               <Th>Available Qty</Th>
+              {isAdmin && <Th />}
             </tr>
           </thead>
           <tbody>
@@ -278,6 +290,16 @@ function ItemsPageContent() {
                     <StockStatusBadge currentStock={item.currentStock} minStock={item.minStock} />
                   </div>
                 </Td>
+                {isAdmin && (
+                  <Td>
+                    <Link
+                      href={`/dashboard/items/${item.id}?edit=1`}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </Link>
+                  </Td>
+                )}
               </Tr>
             ))}
           </tbody>

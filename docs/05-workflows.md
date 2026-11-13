@@ -68,11 +68,11 @@ CANCELLED
 - **Mandatory before/after photos** are checked at closing: all four mandatory angles (`FRONT`/`REAR`/`LEFT`/`RIGHT`) for both the `BEFORE` and `AFTER` phases. This is `assertMandatoryPhotos()`.
 - **Job types**: General Service, Accidental Claim, AC, Dent & Paint, Mechanical, Detailing (`DETAILING`) and Setting & Adjustment (`SETTING_ADJUSTMENT`); the last two were added 2026-11-01. The labels are shared in `frontend/src/lib/jobTypes.ts`. On a closed job card, switching to or from Accidental Claim moves lines between the customer's and insurance company's bills. This is refused once a GST invoice exists.
 
-#### Vehicle trial agreement and gate pass
+#### Vehicle trial undertaking and gate pass
 
 The job card page has two printable slips, signed on paper, each with **Print**, **Download PDF** and **Share on WhatsApp** (`components/SignOffSlip.tsx`). A photo of the signed copy is uploaded back with `POST /job-cards/:id/sign-off/trial` or `/sign-off/gate-pass` (multipart `photo`, stored under `job-card-sign-offs`). A later photo replaces the earlier one, and the first sign-off time is kept.
 
-- **Vehicle trial agreement** (*वाहन ट्रायल अनुमति एवं अस्थायी सुपुर्दगी पत्र*, `components/TrialAgreement.tsx`), any time before the job card is cancelled. This is the Hindi letter the customer signs before taking the vehicle out on trial: their details and the vehicle's, the conditions, the return details, the legal-action clause and the signatures. The system fills in the job card number, date, customer name, mobile and address, registration number, model and KM. It also fills in what's entered above the letter: the workshop representative (`trialBy`), fuel level (`trialFuelLevel`), trial area (`trialArea`) and return date and time (`trialReturnBy`), all saved with `PATCH /job-cards/:id` (migration `20261109090000_trial_agreement`). Anything not entered, such as the handover and return times and the signatures, is a blank line to fill by hand. The photo sets `trialPhotoUrl`/`trialAt`. The older `trialRemarks` column is kept but no longer shown.
+- **Vehicle trial undertaking** (*Vehicle Trial & Temporary Handover Undertaking*, `components/TrialAgreement.tsx`, in English since 2026-11-12), any time before the job card is cancelled. The customer signs it before taking the vehicle out on trial: customer and vehicle details, the customer's declaration and responsibility, and consent with signatures. The system fills in the job card number, date, customer name, mobile, vehicle number, model, KM and the workshop representative (`trialBy`, entered above it and saved with `PATCH /job-cards/:id`). The signatures and the handover and return times are blank lines to fill by hand. The photo sets `trialPhotoUrl`/`trialAt`. The columns of the earlier Hindi letter (`trialFuelLevel`, `trialArea`, `trialReturnBy`) and `trialRemarks` are kept but no longer shown.
 - **Gate pass**, only once the job card is closed. It shows each bill as paid or what's still due. It says the vehicle may leave, with the customer's receipt of the vehicle. The photo sets `gatePassPhotoUrl`/`gatePassAt` and marks the job card delivered (`deliveredAt`, if not already set).
 - **Assignment validation**: `assignedEmployeeId` must reference an active employee.
 - Side effects: `estimateAmount`/`estimateApproved`/`estimateApprovedAt` are kept in step by the estimate (below), and setting `finalInspectionStatus` stamps `finalInspectionAt`. `deliveredAt` is set by the signed gate pass.
@@ -123,7 +123,12 @@ The estimate page has a second tab, **GST Invoice** (`components/GstInvoice.tsx`
 
 The tab also shows a tax summary by rate, a rounded total and the amount in words.
 
-**Generate GST invoice number** (`POST /estimates/:id/gst-invoice` `{payer?}`) needs the job card closed and a GST % on every line of that payer. It assigns `GST/<FY>/0001`, numbered in sequence within the April–March financial year across both kinds, under an advisory lock.
+**Generate GST invoice number** (`POST /estimates/:id/gst-invoice` `{payer?}`) needs the job card closed and a GST % on every line of that payer. Under an advisory lock it takes the number after the last GST invoice made in this April–March financial year (either kind): its trailing digits plus one, keeping its prefix and zero padding. The first of the year is `GST/<FY>/0001`, and a number already used is skipped. An admin can **change a generated number** (`PATCH /estimates/:id/gst-invoice-number`), e.g. to carry on from the numbers used before this system: set one to `GST/2026-27/0151` and the next is `0152`.
+
+**The bill can differ from the estimate** once the job card is closed, until that payer's GST invoice is made:
+- **Bill rate (accidental claims).** The *Customer / Insurance* tab shows each line's estimate rate and an editable **bill rate**, such as the rate the insurance company approved. It's saved as `billRate` through `PATCH /estimates/:id/gst` and the bills are recalculated. A bill rate equal to the estimate rate clears it.
+- **Lines added on the tax invoice.** The GST tab has **Add a line to this invoice**: an inventory item by code, a part not in inventory, or labour. It's saved as a `billOnly` line for that payer (`POST /estimates/:id/bill-lines`) and can be removed until the invoice is generated. It isn't on the estimate or the job card and doesn't take anything out of stock; a part used from stock belongs on the job card. Re-closing a reopened job card keeps these lines.
+- The printed estimate keeps its own rates and lines. When the bill differs, its totals show the estimate total and the change on the bill. Reports count estimates without `billOnly` lines, and sales at the bill amounts.
 
 On an accidental claim there are **two GST invoices**. The GST tab shows both side by side, each with its number or *not generated yet*, and a **Generate both GST invoices** button. That button first saves the GST details shown for any line that doesn't have them yet (18%, and SAC 998714 for labour), then generates each invoice in turn:
 - **The customer's**, covering the customer's lines (`gstInvoiceNumber`, `customerGstin`).
@@ -143,7 +148,7 @@ Since 2026-10-20 the quantity can be **part of a unit** (0.5 L of oil): job card
 Inside one transaction:
 1. `assertJobCardEditable` — the lock check above.
 2. A **single conditional `UPDATE`** (`SET current_stock = current_stock - qty WHERE id = ? AND current_stock >= qty`), not a read-then-write, so two job cards using the last few pieces at the same moment can't take more than there is. If no row is updated: `ConflictError("Only N … available — can't use X")`.
-3. Creates the `JobCardPart` with `rate` = the item's MRP **right now** and `amount = quantity × rate` (never recomputed later).
+3. Creates the `JobCardPart` with `rate` = the item's MRP **right now** — prefilled in the form and editable, so a different selling price can be charged on this job card — and `amount = quantity × rate` (never recomputed later).
 
 Removing a part (`DELETE /job-cards/:jobCardId/parts/:partId`, only while Open) puts its quantity back into stock.
 

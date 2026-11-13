@@ -4,6 +4,7 @@ import { validateBody } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
+import { authorize } from "../../middleware/authorize";
 
 export const employeesRouter = Router();
 
@@ -21,8 +22,10 @@ employeesRouter.patch(
   validateBody(employeesController.updateEmployeeSchema),
   asyncHandler(employeesController.update)
 );
+// Making an employee active or inactive is admin-only.
 employeesRouter.patch(
   "/:id/status",
+  authorize("ADMIN"),
   validateBody(employeesController.setActiveSchema),
   asyncHandler(employeesController.setActive)
 );

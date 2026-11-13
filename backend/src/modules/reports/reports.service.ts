@@ -37,7 +37,7 @@ const purchaseDay = (d: Date) => d.toISOString().slice(0, 10);
 async function estimatesBetween(start: Date, end: Date) {
   const estimates = await prisma.estimate.findMany({
     where: { estimateDate: { gte: start, lt: end } },
-    select: { estimateDate: true, taxRate: true, status: true, lines: { select: { amount: true } } },
+    select: { estimateDate: true, taxRate: true, status: true, lines: { where: { billOnly: false }, select: { amount: true } } },
   });
   return estimates.map((e) => {
     const subtotal = e.lines.reduce((t, l) => t + Number(l.amount), 0);
@@ -171,7 +171,7 @@ export async function getEstimatesReport(from?: string, to?: string) {
     where: { estimateDate: { gte: start, lte: end } },
     include: {
       jobCard: { include: { vehicle: { include: { customer: true } } } },
-      lines: { select: { amount: true } },
+      lines: { where: { billOnly: false }, select: { amount: true } },
     },
     orderBy: { estimateDate: "asc" },
   });

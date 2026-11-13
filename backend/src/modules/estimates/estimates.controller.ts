@@ -95,6 +95,8 @@ export const gstDetailsSchema = z.object({
         gstRate: z.coerce.number().refine((r) => (GST_RATES as readonly number[]).includes(r), "GST % must be 0, 0.25, 3, 5, 12, 18 or 28").nullable().optional(),
         // Who pays for the line (accidental claims).
         scope: z.enum(PAYERS).optional(),
+        // The rate billed, on an accidental claim's closed job card.
+        billRate: z.coerce.number().min(0).nullable().optional(),
       })
     )
     .optional(),
@@ -112,6 +114,30 @@ export async function updateGst(req: Request, res: Response) {
 // Which payer's GST invoice: the customer's (default) or, on an accidental
 // claim, the insurance company's.
 export const generateGstInvoiceSchema = z.object({ payer: z.enum(PAYERS).optional() });
+
+export const billLineSchema = addLineSchema.extend({ payer: z.enum(PAYERS).optional() });
+
+export async function addBillLine(req: Request, res: Response) {
+  const input = req.body as z.infer<typeof billLineSchema>;
+  const estimate = await estimatesService.addBillLine(Number(req.params.id), input, req.user!.id);
+  res.status(201).json({ estimate });
+}
+
+export async function removeBillLine(req: Request, res: Response) {
+  const estimate = await estimatesService.removeBillLine(Number(req.params.id), Number(req.params.lineId), req.user!.id);
+  res.json({ estimate });
+}
+
+export const gstInvoiceNumberSchema = z.object({
+  payer: z.enum(PAYERS).optional(),
+  number: z.string().trim().min(1, "Enter the invoice number"),
+});
+
+export async function setGstInvoiceNumber(req: Request, res: Response) {
+  const { payer, number } = req.body as z.infer<typeof gstInvoiceNumberSchema>;
+  const estimate = await estimatesService.setGstInvoiceNumber(Number(req.params.id), payer ?? "CUSTOMER", number);
+  res.json({ estimate });
+}
 
 export async function generateGstInvoice(req: Request, res: Response) {
   const { payer } = req.body as z.infer<typeof generateGstInvoiceSchema>;

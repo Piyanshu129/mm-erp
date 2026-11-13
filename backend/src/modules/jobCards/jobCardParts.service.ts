@@ -4,7 +4,7 @@ import { isLocked } from "../../lib/jobCardStatus";
 import { addStock, roundQty, takeStock } from "../../lib/stock";
 
 // A part is either from inventory (itemId — comes out of stock at the item's
-// MRP) or not in inventory (description + rate — bought outside for this
+// selling price, or at the rate entered) or not in inventory (description + rate — bought outside for this
 // job, no stock involved). Quantity can be part of a unit (0.5).
 export interface AddPartInput {
   jobCardId: number;
@@ -69,7 +69,9 @@ export async function addPart(input: AddPartInput) {
     }
 
     const item = await tx.item.findUniqueOrThrow({ where: { id: input.itemId } });
-    const rate = Number(item.sellingPrice);
+    // The item's selling price unless a different rate was entered for this job.
+    if (input.rate != null && !(input.rate >= 0)) throw new ConflictError("The rate can't be negative");
+    const rate = round2(input.rate ?? Number(item.sellingPrice));
 
     return tx.jobCardPart.create({
       data: {

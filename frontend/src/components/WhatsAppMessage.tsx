@@ -53,7 +53,7 @@ export function WhatsAppMessage({
   return (
     <div className="space-y-2">
       <p className="text-sm font-semibold text-gray-900">{title}</p>
-      <Textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} />
+      <Textarea rows={10} value={text} onChange={(e) => setText(e.target.value)} />
       <p className="text-xs text-gray-500">Check and edit the message, then send it.</p>
       <div className="flex flex-wrap gap-2">
         {link ? (

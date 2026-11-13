@@ -96,7 +96,23 @@ export async function createItem(input: ItemInput, photoUrl?: string) {
   });
 }
 
-export async function updateItem(id: number, input: Partial<ItemInput>, photoUrl?: string) {
+// Optional fields can be cleared (null) when editing.
+type ClearableItemField =
+  | "subCategory"
+  | "partNumber"
+  | "brand"
+  | "specification"
+  | "hsnCode"
+  | "gstRate"
+  | "vehicleMake"
+  | "vehicleModel"
+  | "variant"
+  | "remarks";
+export type ItemUpdateInput = Partial<Omit<ItemInput, ClearableItemField>> & {
+  [K in ClearableItemField]?: ItemInput[K] | null;
+};
+
+export async function updateItem(id: number, input: ItemUpdateInput, photoUrl?: string) {
   const item = await prisma.item.findUnique({ where: { id } });
   if (!item) throw new NotFoundError("Item not found");
 

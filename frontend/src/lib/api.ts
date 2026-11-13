@@ -121,6 +121,21 @@ function formatErrorMessage(body: any): string {
   return body?.error ?? "Request failed";
 }
 
+// Every row of a paged list. The server sends at most 100 rows a page, so
+// this asks for page after page until it has them all — for the master lists
+// (customers, vehicles, items, suppliers, employees) that show everything.
+export async function apiFetchAll<T = any>(path: string, key: string): Promise<T[]> {
+  const sep = path.includes("?") ? "&" : "?";
+  const rows: T[] = [];
+  for (let page = 1; page <= 1000; page++) {
+    const body = await apiFetch(`${path}${sep}page=${page}&pageSize=100`);
+    const batch: T[] = body[key] ?? [];
+    rows.push(...batch);
+    if (batch.length < 100 || rows.length >= Number(body.total ?? 0)) break;
+  }
+  return rows;
+}
+
 // For endpoints that return a raw file (e.g. the Excel export) rather than
 // JSON — triggers a browser download with the given filename.
 export async function apiDownloadFile(path: string, filename: string): Promise<void> {

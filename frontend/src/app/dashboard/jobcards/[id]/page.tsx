@@ -36,7 +36,7 @@ import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
 import { EstimateCheck } from "@/components/EstimateCheck";
 import { SignOffSlip, SignatureLines } from "@/components/SignOffSlip";
-import { FUEL_LEVELS, TrialAgreement } from "@/components/TrialAgreement";
+import { TrialAgreement } from "@/components/TrialAgreement";
 import { JOB_TYPE_LABELS } from "@/lib/jobTypes";
 import { formatINR } from "@/lib/format";
 import { useAuth } from "@/context/AuthContext";
@@ -72,13 +72,6 @@ function autoSavePayload(f: {
 }
 const LOCKED_STATUSES = ["INVOICED", "CANCELLED"];
 
-// An ISO time as a datetime-local input value, in local time.
-function toLocalInput(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 
 const MEDIA_ANGLES = [
@@ -214,10 +207,6 @@ function JobCardDetailPageContent() {
   const [payReceivedBy, setPayReceivedBy] = useState("");
 
   const [trialBy, setTrialBy] = useState("");
-  const [trialFuel, setTrialFuel] = useState("");
-  const [trialArea, setTrialArea] = useState("");
-  // datetime-local value (local time, "YYYY-MM-DDTHH:mm").
-  const [trialReturnBy, setTrialReturnBy] = useState("");
   const [savingTrial, setSavingTrial] = useState(false);
 
   const [jobType, setJobType] = useState("");
@@ -248,6 +237,8 @@ function JobCardDetailPageContent() {
   const [partMode, setPartMode] = useState<"inventory" | "outside">("inventory");
   const [outsideDesc, setOutsideDesc] = useState("");
   const [outsideRate, setOutsideRate] = useState("");
+  // Rate for an inventory part — starts at the item's selling price, can be changed.
+  const [invRate, setInvRate] = useState("");
   const [itemQuery, setItemQuery] = useState("");
   const [itemResults, setItemResults] = useState<ItemOption[]>([]);
   const [addingPart, setAddingPart] = useState(false);
@@ -296,9 +287,6 @@ function JobCardDetailPageContent() {
     }
     setAssignEmployeeId(jc.assignedEmployeeId?.toString() ?? "");
     setTrialBy(jc.trialBy ?? "");
-    setTrialFuel(jc.trialFuelLevel ?? "");
-    setTrialArea(jc.trialArea ?? "");
-    setTrialReturnBy(toLocalInput(jc.trialReturnBy));
     setFinalStatus(jc.finalInspectionStatus ?? "");
     setFinalBy(jc.finalInspectionBy ?? "");
     setLoading(false);
@@ -480,7 +468,11 @@ function JobCardDetailPageContent() {
         setActionError("Enter the item code of an item in inventory");
         return;
       }
-      body = { itemId: codePreview.item.id, quantity };
+      if (invRate.trim() === "" || !(Number(invRate) >= 0)) {
+        setActionError("Enter the selling price for this part");
+        return;
+      }
+      body = { itemId: codePreview.item.id, quantity, rate: Number(invRate) };
     }
     setAddingPart(true);
     try {
@@ -578,7 +570,10 @@ function JobCardDetailPageContent() {
     const timer = setTimeout(async () => {
       try {
         const body = await apiFetch(`/item-lookup/${code}`);
-        if (!cancelled) setCodePreview({ state: "found", item: body.item });
+        if (!cancelled) {
+          setCodePreview({ state: "found", item: body.item });
+          setInvRate(String(Number(body.item.sellingPrice)));
+        }
       } catch {
         if (!cancelled) setCodePreview({ state: "notfound" });
       }
@@ -641,12 +636,7 @@ function JobCardDetailPageContent() {
     try {
       await apiFetch(`/job-cards/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          trialBy: trialBy.trim() || null,
-          trialFuelLevel: trialFuel || null,
-          trialArea: trialArea.trim() || null,
-          trialReturnBy: trialReturnBy ? new Date(trialReturnBy).toISOString() : null,
-        }),
+        body: JSON.stringify({ trialBy: trialBy.trim() || null }),
       });
       await load();
     } catch (err) {
@@ -666,11 +656,7 @@ function JobCardDetailPageContent() {
     );
   }
 
-  const trialDirty =
-    trialBy.trim() !== (jobCard.trialBy ?? "") ||
-    trialFuel !== (jobCard.trialFuelLevel ?? "") ||
-    trialArea.trim() !== (jobCard.trialArea ?? "") ||
-    trialReturnBy !== toLocalInput(jobCard.trialReturnBy);
+  const trialDirty = trialBy.trim() !== (jobCard.trialBy ?? "");
 
   // Closing can take the customer's payment too (optional). On a reopened
   // job card, what they've already paid stays on the bill.
@@ -1155,7 +1141,7 @@ function JobCardDetailPageContent() {
                     </Button>
                   </div>
                 ) : (
-                <div className="grid grid-cols-[1fr_6rem_auto] items-end gap-2">
+                <div className="grid grid-cols-[1fr_5rem_6rem_auto] items-end gap-2">
                   <div>
                     <Label>Item code</Label>
                     <Input
@@ -1169,11 +1155,24 @@ function JobCardDetailPageContent() {
                     <Label>Qty used</Label>
                     <Input type="number" min={0.01} step="0.01" value={partQty} onChange={(e) => setPartQty(e.target.value)} />
                   </div>
+                  <div>
+                    <Label>Rate (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={codePreview.state === "found" ? invRate : ""}
+                      disabled={codePreview.state !== "found"}
+                      onChange={(e) => setInvRate(e.target.value)}
+                    />
+                  </div>
                   <Button
                     type="submit"
                     disabled={
                       addingPart ||
                       codePreview.state !== "found" ||
+                      invRate.trim() === "" ||
+                      !(Number(invRate) >= 0) ||
                       !(Number(partQty) > 0) ||
                       Number(partQty) > codePreview.item.currentStock
                     }
@@ -1197,6 +1196,9 @@ function JobCardDetailPageContent() {
                     <p>
                       <strong>{codePreview.item.itemCode}</strong> — {codePreview.item.name} · MRP ₹
                       {Number(codePreview.item.sellingPrice).toFixed(2)}
+                      {invRate.trim() !== "" && Number(invRate) !== Number(codePreview.item.sellingPrice) && (
+                        <span className="text-amber-700"> · charging ₹{Number(invRate).toFixed(2)} on this job card</span>
+                      )}
                     </p>
                     <p className="mt-0.5">
                       Available: <strong>{fmtQty(codePreview.item.currentStock)}</strong> {codePreview.item.uom}
@@ -1383,25 +1385,6 @@ function JobCardDetailPageContent() {
               <div>
                 <Label>Workshop representative</Label>
                 <Input value={trialBy} onChange={(e) => setTrialBy(e.target.value)} placeholder="Staff name" />
-              </div>
-              <div>
-                <Label>Fuel level</Label>
-                <Select value={trialFuel} onChange={(e) => setTrialFuel(e.target.value)}>
-                  <option value="">Fill in by hand</option>
-                  {FUEL_LEVELS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label>Trial area</Label>
-                <Input value={trialArea} onChange={(e) => setTrialArea(e.target.value)} placeholder="e.g. Within 10 km of the workshop" />
-              </div>
-              <div>
-                <Label>Return by (date &amp; time)</Label>
-                <Input type="datetime-local" value={trialReturnBy} onChange={(e) => setTrialReturnBy(e.target.value)} />
               </div>
               <div className="sm:col-span-2">
                 <Button type="submit" size="sm" variant="secondary" disabled={savingTrial || !trialDirty}>

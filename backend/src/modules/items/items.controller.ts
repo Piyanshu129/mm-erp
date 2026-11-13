@@ -29,7 +29,22 @@ export const itemFieldsSchema = z.object({
   remarks: optionalString,
 });
 
-export const updateItemFieldsSchema = itemFieldsSchema.partial();
+// Editing can clear an optional field: "" or null empties it.
+const clearable = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === "" ? null : v), schema.nullable().optional());
+
+export const updateItemFieldsSchema = itemFieldsSchema.partial().extend({
+  subCategory: clearable(z.string().trim()),
+  partNumber: clearable(z.string().trim()),
+  brand: clearable(z.string().trim()),
+  specification: clearable(z.string().trim()),
+  hsnCode: clearable(z.string().trim().regex(/^[0-9]{4,8}$/, "HSN/SAC is 4–8 digits")),
+  gstRate: clearable(z.coerce.number().min(0).max(28)),
+  vehicleMake: clearable(z.string().trim()),
+  vehicleModel: clearable(z.string().trim()),
+  variant: clearable(z.string().trim()),
+  remarks: clearable(z.string().trim()),
+});
 
 export const setActiveSchema = z.object({ isActive: z.boolean() });
 

@@ -4,6 +4,15 @@ export const EXPENSE_TYPES = ["TRAVEL", "PETROL", "FOOD", "RENT", "BILLS_UTILITI
 
 export type PurchaseCategory = "INVENTORY" | "EXPENSE";
 
+// Kept for older purchases, no longer offered for new ones.
+export const RETIRED_TYPES: readonly string[] = ["SETTINGS_ADJUSTMENTS"];
+
+// The types to choose from: the category's, less retired ones (unless it's
+// the one already chosen, on an older purchase).
+export function selectableTypes(category: PurchaseCategory, current?: string): string[] {
+  return typesIn(category).filter((t) => !RETIRED_TYPES.includes(t) || t === current);
+}
+
 export const TYPE_LABELS: Record<string, string> = {
   SPARE_PART: "Spare Part",
   PAINT: "Paint",

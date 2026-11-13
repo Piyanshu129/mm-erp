@@ -7,7 +7,7 @@ import { compressImage } from "@/lib/compressImage";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Car, ClipboardPlus, Plus, Pencil } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -88,8 +88,8 @@ function VehiclesPageContent() {
   // quiet: refresh the amounts after a payment without blanking the table.
   async function load(query: string, quiet = false) {
     if (!quiet) setLoading(true);
-    const body = await apiFetch(`/vehicles?${query ? `q=${encodeURIComponent(query)}` : ""}`);
-    setVehicles(body.vehicles);
+    const rows = await apiFetchAll<VehicleRow>(`/vehicles${query ? `?q=${encodeURIComponent(query)}` : ""}`, "vehicles");
+    setVehicles(rows);
     setLoading(false);
   }
 

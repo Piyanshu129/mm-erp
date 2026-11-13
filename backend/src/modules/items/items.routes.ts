@@ -5,6 +5,7 @@ import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { uploadImage } from "../../middleware/upload";
+import { authorize } from "../../middleware/authorize";
 
 export const itemsRouter = Router();
 
@@ -16,7 +17,8 @@ itemsRouter.get("/", asyncHandler(itemsController.list));
 itemsRouter.get("/:id", asyncHandler(itemsController.get));
 itemsRouter.get("/:id/stock-history", asyncHandler(itemsController.stockHistory));
 itemsRouter.post("/", uploadItemPhoto, asyncHandler(itemsController.create));
-itemsRouter.patch("/:id", uploadItemPhoto, asyncHandler(itemsController.update));
+// Editing an item's details is admin-only.
+itemsRouter.patch("/:id", authorize("ADMIN"), uploadItemPhoto, asyncHandler(itemsController.update));
 itemsRouter.patch(
   "/:id/status",
   validateBody(itemsController.setActiveSchema),

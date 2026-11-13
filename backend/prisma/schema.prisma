@@ -441,6 +441,12 @@ model EstimateLine {
   gstRate     Decimal? @map("gst_rate") @db.Decimal(5, 2) // %
   // Who pays for this line: CUSTOMER, or INSURANCE on an accidental claim.
   scope       String   @default("CUSTOMER")
+  // The bill can differ from the estimate (estimates.service.ts): billRate
+  // is the rate billed when it was changed after closing (an accidental
+  // claim's approved rate; null = the estimate rate), and a billOnly line was
+  // added on the tax invoice: it is on the bill, not the estimate.
+  billRate    Decimal? @map("bill_rate") @db.Decimal(12, 2)
+  billOnly    Boolean  @default(false) @map("bill_only")
   // The job card part / labour line this was copied from. Closing the job
   // card brings the estimate in step with them (estimates.service.ts).
   jobCardPartId   Int? @map("job_card_part_id")

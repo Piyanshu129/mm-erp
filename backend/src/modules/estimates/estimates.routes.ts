@@ -5,6 +5,7 @@ import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { uploadImage } from "../../middleware/upload";
+import { authorize } from "../../middleware/authorize";
 
 // Estimates are created from their job card (POST /api/job-cards/:id/estimate
 // in jobCards.routes.ts); everything else about one lives here.
@@ -40,3 +41,17 @@ estimatesRouter.post(
   validateBody(estimatesController.generateGstInvoiceSchema),
   asyncHandler(estimatesController.generateGstInvoice)
 );
+// Changing a GST invoice's number is admin-only.
+estimatesRouter.patch(
+  "/:id/gst-invoice-number",
+  authorize("ADMIN"),
+  validateBody(estimatesController.gstInvoiceNumberSchema),
+  asyncHandler(estimatesController.setGstInvoiceNumber)
+);
+// Lines added to a closed job card's bill and tax invoice only.
+estimatesRouter.post(
+  "/:id/bill-lines",
+  validateBody(estimatesController.billLineSchema),
+  asyncHandler(estimatesController.addBillLine)
+);
+estimatesRouter.delete("/:id/bill-lines/:lineId", asyncHandler(estimatesController.removeBillLine));

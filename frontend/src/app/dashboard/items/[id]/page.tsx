@@ -2,12 +2,18 @@
 
 import { RequireAuth } from "@/components/RequireAuth";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, History, X, ZoomIn } from "lucide-react";
+import { ArrowLeft, History, Pencil, X, ZoomIn } from "lucide-react";
 import { AuthedImage } from "@/components/AuthedMedia";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Label } from "@/components/ui/Input";
+import { GST_RATES } from "@/lib/gst";
+import { UOM_OPTIONS } from "@/lib/uom";
+import { compressImage } from "@/lib/compressImage";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { StockStatusBadge } from "@/components/ui/Badge";
@@ -32,6 +38,152 @@ interface ItemDetail {
   specification: string | null;
   hsnCode?: string | null;
   gstRate?: string | null;
+  subCategory?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  variant?: string | null;
+  remarks?: string | null;
+}
+
+const CATEGORIES = ["OEM", "Local", "Imported", "Old/Used"];
+
+// Admin-only (the server enforces it): correct an item's details. A blank
+// optional field clears it. Stock isn't changed here — it follows purchases
+// and job cards.
+function ItemEditForm({ item, onCancel, onSaved }: { item: ItemDetail; onCancel: () => void; onSaved: (item: ItemDetail) => void }) {
+  const text = (v: string | null | undefined) => v ?? "";
+  const [f, setF] = useState({
+    name: item.name,
+    category: item.category,
+    uom: item.uom,
+    partNumber: text(item.partNumber),
+    brand: text(item.brand),
+    specification: text(item.specification),
+    vehicleMake: text(item.vehicleMake),
+    vehicleModel: text(item.vehicleModel),
+    variant: text(item.variant),
+    hsnCode: text(item.hsnCode),
+    gstRate: item.gstRate != null ? String(Number(item.gstRate)) : "",
+    purchaseCost: String(Number(item.purchaseCost)),
+    sellingPrice: String(Number(item.sellingPrice)),
+    minStock: String(item.minStock),
+    remarks: text(item.remarks),
+  });
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }));
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!f.name.trim()) return setError("Enter the item name");
+    if (f.hsnCode && !/^\d{4,8}$/.test(f.hsnCode)) return setError("HSN code is 4 to 8 digits");
+    setSaving(true);
+    try {
+      const form = new FormData();
+      for (const [k, v] of Object.entries(f)) {
+        // Numbers left blank stay as they are; text left blank is cleared.
+        if (["purchaseCost", "sellingPrice", "minStock"].includes(k) && v.trim() === "") continue;
+        form.set(k, v.trim());
+      }
+      if (photo) form.set("photo", await compressImage(photo));
+      const body = await apiFetch(`/items/${item.id}`, { method: "PATCH", body: form });
+      onSaved(body.item);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save — check the connection and try again");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = (label: string, k: keyof typeof f, props: Record<string, unknown> = {}) => (
+    <div>
+      <Label>{label}</Label>
+      <Input value={f[k]} onChange={set(k)} {...props} />
+    </div>
+  );
+
+  return (
+    <Card className="border-blue-200">
+      <CardBody>
+        <form onSubmit={save} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-3">{field("Item name", "name")}</div>
+          <div>
+            <Label>Category</Label>
+            <Select value={f.category} onChange={set("category")}>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Unit of measure</Label>
+            <Select value={f.uom} onChange={set("uom")}>
+              {!UOM_OPTIONS.some((u) => u.value === f.uom) && <option value={f.uom}>{f.uom}</option>}
+              {UOM_OPTIONS.map((u) => (
+                <option key={u.value} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {field("Part number", "partNumber")}
+          {field("Brand", "brand")}
+          {field("Specification", "specification")}
+          {field("Minimum stock", "minStock", { type: "number", min: 0, step: 1 })}
+          {field("For car make", "vehicleMake")}
+          {field("Model", "vehicleModel")}
+          {field("Variant", "variant")}
+          {field("Purchase cost", "purchaseCost", { type: "number", min: 0, step: "0.01" })}
+          {field("MRP", "sellingPrice", { type: "number", min: 0, step: "0.01" })}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>HSN code</Label>
+              <Input
+                inputMode="numeric"
+                maxLength={8}
+                value={f.hsnCode}
+                onChange={(e) => setF((prev) => ({ ...prev, hsnCode: e.target.value.replace(/\D/g, "") }))}
+              />
+            </div>
+            <div>
+              <Label>GST %</Label>
+              <Select value={f.gstRate} onChange={set("gstRate")}>
+                <option value="">Not set</option>
+                {GST_RATES.map((r) => (
+                  <option key={r} value={String(r)}>
+                    {r}%
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div className="sm:col-span-2">{field("Remarks", "remarks")}</div>
+          <div>
+            <Label>Replace photo (optional)</Label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600 sm:col-span-3">{error}</p>}
+          <div className="flex gap-2 sm:col-span-3">
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save item"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardBody>
+    </Card>
+  );
 }
 
 interface PurchaseRow {
@@ -58,6 +210,14 @@ function ItemDetailPageContent() {
   const [issues, setIssues] = useState<IssueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [photoOpen, setPhotoOpen] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [editing, setEditing] = useState(false);
+
+  // The items list's Edit link opens the form straight away.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("edit") === "1") setEditing(true);
+  }, []);
 
   // Esc closes the full-screen photo.
   useEffect(() => {
@@ -114,9 +274,27 @@ function ItemDetailPageContent() {
         </div>
       )}
 
-      <Link href="/dashboard/items" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-        <ArrowLeft className="h-4 w-4" /> All items
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Link href="/dashboard/items" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-4 w-4" /> All items
+        </Link>
+        {isAdmin && !editing && (
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+            <Pencil className="h-3.5 w-3.5" /> Edit item
+          </Button>
+        )}
+      </div>
+
+      {editing && isAdmin && (
+        <ItemEditForm
+          item={item}
+          onCancel={() => setEditing(false)}
+          onSaved={(saved) => {
+            setItem(saved);
+            setEditing(false);
+          }}
+        />
+      )}
 
       <Card>
         <CardBody className="flex flex-col gap-4 sm:flex-row">

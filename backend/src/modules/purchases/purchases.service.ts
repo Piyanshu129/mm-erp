@@ -3,7 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { NotFoundError, ConflictError } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { formatItemCode } from "../../lib/itemCode";
-import { addStock } from "../../lib/stock";
+import { addStock, takeStock, roundQty } from "../../lib/stock";
 import { recordSupplierPaymentTx, SupplierPaymentInput } from "../suppliers/suppliers.service";
 
 // SPARE_PART/PAINT/TOOL/ELECTRICAL/SETTINGS_ADJUSTMENTS are inventory types — they need an Item and add
@@ -15,6 +15,9 @@ export const PURCHASE_ITEM_TYPES = [...INVENTORY_ITEM_TYPES, ...EXPENSE_ITEM_TYP
 export const PURCHASE_CATEGORIES = ["INVENTORY", "EXPENSE"] as const;
 
 export type PurchaseItemType = (typeof PURCHASE_ITEM_TYPES)[number];
+
+// Types kept for older purchases but no longer offered for new ones.
+export const RETIRED_ITEM_TYPES: readonly string[] = ["SETTINGS_ADJUSTMENTS"];
 export type PurchaseCategory = (typeof PURCHASE_CATEGORIES)[number];
 
 export interface NewItemInput {
@@ -163,6 +166,9 @@ function validateLine(line: PurchaseLineInput, label: string) {
   if (!PURCHASE_ITEM_TYPES.includes(line.itemType)) {
     throw new ConflictError(`${label}: invalid item type ${line.itemType}`);
   }
+  if (RETIRED_ITEM_TYPES.includes(line.itemType)) {
+    throw new ConflictError(`${label}: Settings & Adjustments is no longer a purchase type — choose another`);
+  }
   if (isInventoryType(line.itemType)) {
     if (!line.itemId && !line.newItem) {
       throw new ConflictError(`${label}: choose an existing item or enter a new one`);
@@ -306,5 +312,124 @@ export async function createPurchaseEntry(input: PurchaseEntryInput) {
       orderBy: { id: "asc" },
     });
     return { purchases, payment };
+  });
+}
+
+export interface PurchaseUpdateInput {
+  purchaseDate?: string; // YYYY-MM-DD
+  supplierId?: number | null;
+  itemType?: PurchaseItemType;
+  description?: string;
+  quantity?: number;
+  purchaseCost?: number;
+  sellingPrice?: number | null;
+  remarks?: string | null;
+}
+
+// Admin: correct a saved purchase line. The type can change within its
+// category (not between inventory and miscellaneous), and the item stays the
+// same. A new quantity moves the difference in or out of stock (it can't take
+// out pieces already used on job cards) and resizes the sticker range, which
+// is only possible while no later purchase of the item has taken the next
+// sticker numbers. On the item's latest purchase, a new cost or MRP is copied
+// to the item too.
+export async function updatePurchase(id: number, input: PurchaseUpdateInput) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM purchases WHERE id = ${id} FOR UPDATE`;
+    const purchase = await tx.purchase.findUnique({ where: { id }, include: { item: true } });
+    if (!purchase) throw new NotFoundError("Purchase not found");
+    const inventory = isInventoryType(purchase.itemType);
+
+    const itemType = input.itemType ?? (purchase.itemType as PurchaseItemType);
+    if (categoryOf(itemType) !== categoryOf(purchase.itemType)) {
+      throw new ConflictError("A purchase can't move between Inventory and Miscellaneous — pick a type in the same group");
+    }
+    if (itemType !== purchase.itemType && RETIRED_ITEM_TYPES.includes(itemType)) {
+      throw new ConflictError("Settings & Adjustments is no longer a purchase type — choose another");
+    }
+
+    const supplierId = input.supplierId === undefined ? purchase.supplierId : input.supplierId;
+    if (inventory && !supplierId) throw new ConflictError("Spare parts, paint and tools must come from a supplier");
+    if (supplierId && supplierId !== purchase.supplierId) {
+      const supplier = await tx.supplier.findUnique({ where: { id: supplierId } });
+      if (!supplier) throw new NotFoundError("Supplier not found");
+    }
+
+    const purchaseCost = input.purchaseCost ?? Number(purchase.purchaseCost);
+    const sellingPrice = !inventory
+      ? null
+      : input.sellingPrice === undefined
+        ? purchase.sellingPrice != null
+          ? Number(purchase.sellingPrice)
+          : null
+        : input.sellingPrice;
+    if (sellingPrice != null && sellingPrice < purchaseCost) throw new ConflictError("MRP cannot be lower than purchase cost");
+
+    const description = inventory ? null : (input.description ?? purchase.description ?? "").trim();
+    if (!inventory && !description) throw new ConflictError("Enter what the expense was for");
+
+    let quantity = purchase.quantity;
+    let stickerTo = purchase.stickerTo;
+    if (inventory && input.quantity !== undefined && roundQty(input.quantity) !== purchase.quantity) {
+      quantity = roundQty(input.quantity);
+      if (!(quantity > 0)) throw new ConflictError("Quantity must be more than 0");
+      const itemId = purchase.itemId!;
+      await tx.$queryRaw`SELECT id FROM items WHERE id = ${itemId} FOR UPDATE`;
+      const delta = roundQty(quantity - purchase.quantity);
+      if (delta > 0) {
+        await addStock(tx, itemId, delta);
+      } else if (!(await takeStock(tx, itemId, -delta))) {
+        const item = await tx.item.findUniqueOrThrow({ where: { id: itemId } });
+        throw new ConflictError(
+          `Only ${item.currentStock} ${item.uom} of ${item.itemCode} is in stock — the rest has been used on job cards, so the quantity can't go down by ${-delta}`
+        );
+      }
+      if (purchase.stickerFrom != null && purchase.stickerTo != null) {
+        const newTo = purchase.stickerFrom + Math.ceil(quantity) - 1;
+        if (newTo !== purchase.stickerTo) {
+          const later = await tx.purchase.findFirst({
+            where: { itemId, id: { not: id }, stickerFrom: { gt: purchase.stickerTo } },
+            orderBy: { stickerFrom: "asc" },
+          });
+          if (later) {
+            throw new ConflictError(
+              `Purchase #${later.id} of this item already has the next sticker numbers — the quantity can only change within ${Math.ceil(purchase.quantity)} pieces`
+            );
+          }
+          stickerTo = newTo;
+        }
+      }
+    }
+
+    const purchaseDate = input.purchaseDate
+      ? new Date(`${input.purchaseDate.slice(0, 10)}T00:00:00Z`)
+      : purchase.purchaseDate;
+
+    const updated = await tx.purchase.update({
+      where: { id },
+      data: {
+        purchaseDate,
+        supplierId,
+        itemType,
+        description,
+        quantity,
+        stickerTo,
+        purchaseCost,
+        sellingPrice,
+        ...(input.remarks !== undefined ? { remarks: input.remarks?.trim() || null } : {}),
+      },
+      include: purchaseInclude,
+    });
+
+    if (inventory && purchase.itemId != null) {
+      const latest = await tx.purchase.findFirst({ where: { itemId: purchase.itemId }, orderBy: { id: "desc" } });
+      if (latest?.id === id) {
+        await tx.item.update({
+          where: { id: purchase.itemId },
+          data: { purchaseCost, ...(sellingPrice != null ? { sellingPrice } : {}) },
+        });
+      }
+    }
+    return updated;
   });
 }

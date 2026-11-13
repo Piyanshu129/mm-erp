@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { downloadElementAsPdf, invoiceFileName } from "@/lib/invoicePdf";
 import { SharePdfButton } from "@/components/SharePdfButton";
-import { GstInvoice, Payer, payerOf } from "@/components/GstInvoice";
+import { GstInvoice, Payer, payerOf, billAmountOf, billRateOf } from "@/components/GstInvoice";
 import { Bill, EstimateBills } from "@/components/EstimateBills";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
@@ -33,6 +33,11 @@ interface EstimateLine {
   gstRate?: string | null;
   // Who pays (accidental claims; older servers don't send it).
   scope?: Payer;
+  // The bill, where it differs from the estimate: the rate billed (claims)
+  // and lines added on the bill only.
+  billRate?: string | null;
+  billAmount?: number;
+  billOnly?: boolean;
   item: { id: number; itemCode: string; name: string; uom: string } | null;
 }
 
@@ -303,14 +308,19 @@ function EstimatePageContent() {
   const closed = jobCard.status === "INVOICED";
   const draft = estimate.status === "DRAFT" && !closed;
   const claim = jobCard.jobType === "ACCIDENTAL_CLAIM";
-  const parts = estimate.lines.filter((l) => l.lineType === "PART");
-  const labour = estimate.lines.filter((l) => l.lineType === "LABOUR");
+  // The estimate's own lines; ones added on the bill are on the GST invoice.
+  const estimateLines = estimate.lines.filter((l) => !l.billOnly);
+  const parts = estimateLines.filter((l) => l.lineType === "PART");
+  const labour = estimateLines.filter((l) => l.lineType === "LABOUR");
+  // The bill differs from the estimate: changed rates or added lines.
+  const billAdjusted = closed && estimate.lines.some((l) => l.billOnly || l.billRate != null);
   const bills = jobCard.invoices ?? [];
+  const billSubtotal = bills.reduce((t, b) => t + Number(b.totalAmount) + Number(b.discount), 0);
   const customerBill = bills.find((b) => b.payer === "CUSTOMER");
   const insuranceBill = bills.find((b) => b.payer === "INSURANCE");
   const billed = bills.reduce((t, b) => t + Number(b.totalAmount), 0);
   const paid = bills.reduce((t, b) => t + Number(b.paymentAmount), 0);
-  const insuranceTotal = estimate.lines
+  const insuranceTotal = estimateLines
     .filter((l) => payerOf(l, jobCard.jobType) === "INSURANCE")
     .reduce((t, l) => t + Number(l.amount), 0);
   const insuranceTag = (l: EstimateLine) =>
@@ -557,6 +567,21 @@ function EstimatePageContent() {
               )}
               {closed && bills.length > 0 ? (
                 <>
+                  {billAdjusted && (
+                    <>
+                      <div className="flex justify-between text-gray-600">
+                        <span>Estimate total</span>
+                        <span>{money(estimate.totalAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-600">
+                        <span>Changed on the bill</span>
+                        <span>
+                          {billSubtotal - estimate.subtotal >= 0 ? "+ " : "− "}
+                          {money(Math.abs(billSubtotal - estimate.subtotal))}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   {customerBill && Number(customerBill.discount) > 0 && (
                     <div className="flex justify-between">
                       <span>Discount</span>
@@ -651,6 +676,12 @@ function EstimatePageContent() {
               vehicle={jobCard.vehicle}
               onChanged={reload}
             />
+          )}
+          {billAdjusted && (
+            <p className="text-xs text-gray-500 print:hidden">
+              The bill differs from this estimate — rates changed on the bill or lines added on the GST invoice. The GST
+              invoice shows exactly what&apos;s billed.
+            </p>
           )}
           {closed && (
             <p className="text-xs text-gray-500 print:hidden">
@@ -834,7 +865,7 @@ function ClaimGstOverview({
       title: p === "CUSTOMER" ? `Customer — ${estimate.jobCard.vehicle.customer.name}` : `Insurance company — ${estimate.jobCard.insuranceCompany || "not named"}`,
       number: p === "CUSTOMER" ? estimate.gstInvoiceNumber : estimate.insuranceGstInvoiceNumber,
       lines: lines.length,
-      amount: lines.reduce((t, l) => t + Number(l.amount), 0),
+      amount: lines.reduce((t, l) => t + billAmountOf(l), 0),
     };
   });
   const toMake = sides.filter((s) => !s.number && s.lines > 0);
@@ -947,6 +978,12 @@ function ClaimScope({
 }) {
   const initial = () => Object.fromEntries(estimate.lines.map((l) => [l.id, l.scope ?? "CUSTOMER"])) as Record<number, Payer>;
   const [scopes, setScopes] = useState(initial);
+  // The rate billed for each line — editable once the job card is closed,
+  // until that side's GST invoice is made.
+  const initialRates = () => Object.fromEntries(estimate.lines.map((l) => [l.id, String(billRateOf(l))])) as Record<number, string>;
+  const [billRates, setBillRates] = useState(initialRates);
+  const payerLocked = (p: Payer) => !!(p === "INSURANCE" ? estimate.insuranceGstInvoiceNumber : estimate.gstInvoiceNumber);
+  const rateEditable = (l: EstimateLine) => closed && !l.billOnly && !payerLocked(payerOf(l, estimate.jobCard.jobType));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -954,11 +991,17 @@ function ClaimScope({
 
   useEffect(() => {
     setScopes(initial());
+    setBillRates(initialRates());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimate]);
 
-  const dirty = estimate.lines.some((l) => scopes[l.id] !== (l.scope ?? "CUSTOMER"));
-  const sumFor = (p: Payer) => estimate.lines.filter((l) => scopes[l.id] === p).reduce((t, l) => t + Number(l.amount), 0);
+  const rateChanged = (l: EstimateLine) => rateEditable(l) && Math.abs(Number(billRates[l.id]) - billRateOf(l)) >= 0.005;
+  const dirty = estimate.lines.some((l) => scopes[l.id] !== (l.scope ?? "CUSTOMER") || rateChanged(l));
+  const badRate = estimate.lines.some((l) => rateEditable(l) && !(billRates[l.id] !== "" && Number(billRates[l.id]) >= 0));
+  // What each line comes to: at the bill rate being entered, once closed.
+  const lineAmount = (l: EstimateLine) =>
+    rateEditable(l) && billRates[l.id] !== "" ? Math.round(Number(billRates[l.id]) * l.quantity * 100) / 100 : closed ? billAmountOf(l) : Number(l.amount);
+  const sumFor = (p: Payer) => estimate.lines.filter((l) => scopes[l.id] === p).reduce((t, l) => t + lineAmount(l), 0);
 
   async function save() {
     setError(null);
@@ -967,7 +1010,13 @@ function ClaimScope({
     try {
       const body = await apiFetch(`/estimates/${estimate.id}/gst`, {
         method: "PATCH",
-        body: JSON.stringify({ lines: estimate.lines.map((l) => ({ id: l.id, scope: scopes[l.id] })) }),
+        body: JSON.stringify({
+          lines: estimate.lines.map((l) => ({
+            id: l.id,
+            scope: scopes[l.id],
+            ...(rateChanged(l) ? { billRate: Number(billRates[l.id]) } : {}),
+          })),
+        }),
       });
       onUpdated(body.estimate);
       setNotice(closed ? "Saved — the customer's and insurance company's bills are updated." : "Saved.");
@@ -984,12 +1033,15 @@ function ClaimScope({
     <Card className="print:hidden">
       <CardBody className="space-y-3">
         <div>
-          <p className="text-sm font-semibold text-gray-900">Customer scope and insurance company scope</p>
+          <p className="text-sm font-semibold text-gray-900">Customer scope and insurance company scope{closed ? " — bill rates" : ""}</p>
           <p className="text-sm text-gray-600">
             Choose who pays for each line
             {estimate.jobCard.insuranceCompany ? ` — the customer or ${estimate.jobCard.insuranceCompany}` : ""}. Each side
             gets its own bill and its own GST invoice.
-            {locked ? ` Fixed now that GST invoice ${locked} is made.` : ""}
+            {closed
+              ? " The bill rate can differ from the estimate (e.g. the rate the insurance company approved) — it's what the bill and GST invoice use."
+              : " Bill rates can be changed once the job card is closed."}
+            {locked ? ` Who pays is fixed now that GST invoice ${locked} is made.` : ""}
           </p>
         </div>
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -1005,10 +1057,13 @@ function ClaimScope({
           </div>
         )}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
+          <table className="w-full min-w-[600px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500">
                 <th className="py-1 pr-2">Line</th>
+                <th className="py-1 pr-2 text-right">Qty</th>
+                <th className="py-1 pr-2 text-right">Estimate rate</th>
+                {closed && <th className="py-1 pr-2 text-right">Bill rate</th>}
                 <th className="py-1 pr-2 text-right">Amount</th>
                 <th className="py-1 pl-4">Customer</th>
                 <th className="py-1">Insurance</th>
@@ -1020,8 +1075,28 @@ function ClaimScope({
                   <td className="py-1.5 pr-2">
                     {l.description}
                     <span className="ml-1 text-xs text-gray-500">{l.lineType === "LABOUR" ? "(labour)" : ""}</span>
+                    {l.billOnly && <span className="ml-1 rounded bg-blue-50 px-1 text-[11px] font-medium text-blue-700">Added on bill</span>}
                   </td>
-                  <td className="py-1.5 pr-2 text-right">{money(l.amount)}</td>
+                  <td className="py-1.5 pr-2 text-right">{fmtQty(l.quantity)}</td>
+                  <td className="py-1.5 pr-2 text-right">{l.billOnly ? "—" : money(l.rate)}</td>
+                  {closed && (
+                    <td className="py-1.5 pr-2 text-right">
+                      {rateEditable(l) ? (
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          aria-label={`${l.description}: bill rate`}
+                          value={billRates[l.id] ?? ""}
+                          onChange={(e) => setBillRates((prev) => ({ ...prev, [l.id]: e.target.value }))}
+                          className={`ml-auto w-28 py-1 text-right ${rateChanged(l) || l.billRate != null ? "border-amber-400" : ""}`}
+                        />
+                      ) : (
+                        money(billRateOf(l))
+                      )}
+                    </td>
+                  )}
+                  <td className="py-1.5 pr-2 text-right">{money(lineAmount(l))}</td>
                   {(["CUSTOMER", "INSURANCE"] as Payer[]).map((p) => (
                     <td key={p} className={p === "CUSTOMER" ? "py-1.5 pl-4" : "py-1.5"}>
                       <input
@@ -1039,17 +1114,21 @@ function ClaimScope({
               <tr className="border-t border-gray-300 font-semibold">
                 <td className="py-1.5 pr-2">Totals</td>
                 <td />
+                <td />
+                {closed && <td />}
+                <td />
                 <td className="py-1.5 pl-4">{money(sumFor("CUSTOMER"))}</td>
                 <td className="py-1.5">{money(sumFor("INSURANCE"))}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        {!locked && (
-          <Button type="button" size="sm" onClick={save} disabled={saving || !dirty}>
+        {(!locked || estimate.lines.some(rateEditable)) && (
+          <Button type="button" size="sm" onClick={save} disabled={saving || !dirty || badRate}>
             {saving ? "Saving..." : dirty ? "Save" : "Saved"}
           </Button>
         )}
+        {badRate && <p className="text-sm text-red-600">Enter a bill rate for every line (0 or more).</p>}
         {closed && <p className="text-xs text-gray-500">The customer&apos;s discount stays on the customer&apos;s bill.</p>}
       </CardBody>
     </Card>

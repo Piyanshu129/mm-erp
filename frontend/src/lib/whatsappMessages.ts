@@ -15,11 +15,13 @@ export function paymentReminder(d: {
   paid: number;
   due: number;
 }): string {
-  // Kept short on purpose: greeting, the vehicle, and just the three amounts.
+  // Kept short on purpose: greeting, the vehicle, and just the three amounts
+  // — in English, then the same in Hindi.
+  const vehicle = `${d.registrationNumber}${d.vehicle ? ` (${d.vehicle})` : ""}`;
   return [
     `Dear ${d.customerName} Ji,`,
     "",
-    `Greetings from Motors Mitra. This is a gentle reminder about the payment pending for the service of your vehicle ${d.registrationNumber}${d.vehicle ? ` (${d.vehicle})` : ""}.`,
+    `Greetings from Motors Mitra. This is a gentle reminder about the payment pending for the service of your vehicle ${vehicle}.`,
     "",
     `Total Amount: ${rupees(d.total)}`,
     `Paid Amount: ${rupees(d.paid)}`,
@@ -28,6 +30,21 @@ export function paymentReminder(d: {
     "We'd be grateful if you could clear the balance at your earliest convenience.",
     "",
     "Thank you,",
+    "Motors Mitra",
+    "",
+    "------------------------------",
+    "",
+    `आदरणीय ${d.customerName} जी,`,
+    "",
+    `Motors Mitra की ओर से नमस्कार। आपके वाहन ${vehicle} की सर्विस का भुगतान अभी बाकी है। यह एक विनम्र अनुस्मारक है।`,
+    "",
+    `कुल राशि: ${rupees(d.total)}`,
+    `जमा राशि: ${rupees(d.paid)}`,
+    `बकाया राशि: ${rupees(d.due)}`,
+    "",
+    "कृपया अपनी सुविधा अनुसार जल्द से जल्द बकाया राशि का भुगतान करें।",
+    "",
+    "धन्यवाद,",
     "Motors Mitra",
   ].join("\n");
 }

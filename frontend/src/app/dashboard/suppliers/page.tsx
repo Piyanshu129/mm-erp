@@ -4,7 +4,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, Truck, IndianRupee, History, X } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { compressImage } from "@/lib/compressImage";
 import { formatINR, todayISO } from "@/lib/format";
@@ -501,8 +501,7 @@ function SuppliersPageContent() {
 
   async function load() {
     setLoading(true);
-    const body = await apiFetch("/suppliers?pageSize=100");
-    setSuppliers(body.suppliers);
+    setSuppliers(await apiFetchAll("/suppliers", "suppliers"));
     setLoading(false);
   }
 
