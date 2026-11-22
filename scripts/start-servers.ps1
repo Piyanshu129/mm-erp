@@ -1,11 +1,11 @@
 # Puts MM ERP live on a PC set up with setup.bat: starts PostgreSQL, the
 # backend (production mode, needed for the website's login cookie), and the
-# ngrok tunnel on the fixed public address the Vercel website talks to.
+# tunnel on the fixed public address the Vercel website talks to: the
+# Cloudflare Tunnel (api.motorsmitra.com) when setup.bat saved its token,
+# otherwise ngrok.
 # Run it through start-servers.bat (double-click).
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "database.ps1")
-
-$PublicUrl = "https://les-unhesitative-blandishingly.ngrok-free.dev"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Tools = Join-Path $Root "tools"
@@ -14,6 +14,11 @@ $NodeDir = Join-Path $Tools "node"
 $PgDir = Join-Path $Tools "pgsql"
 $Ngrok = Join-Path $Tools "ngrok\ngrok.exe"
 $NgrokConfig = Join-Path $Tools "ngrok\ngrok.yml"
+$Cloudflared = Join-Path $Tools "cloudflared\cloudflared.exe"
+$CfToken = Join-Path $Tools "cloudflared\token.txt"
+$UseCloudflare = (Test-Path $CfToken) -and (Test-Path $Cloudflared)
+
+$PublicUrl = if ($UseCloudflare) { "https://api.motorsmitra.com" } else { "https://les-unhesitative-blandishingly.ngrok-free.dev" }
 
 if (-not (Test-Path "$NodeDir\node.exe") -or -not (Test-Path "$Backend\dist\server.js")) {
   throw "MM ERP isn't set up on this PC yet - run setup.bat first."
@@ -49,7 +54,15 @@ if (Get-NetTCPConnection -LocalPort $AppPort -State Listen -ErrorAction Silently
 }
 
 # 3. Public tunnel, in its own window — also minimized
-if (Get-Process ngrok -ErrorAction SilentlyContinue) {
+if ($UseCloudflare) {
+  if (Get-Process cloudflared -ErrorAction SilentlyContinue) {
+    Write-Host "Tunnel already running."
+  } else {
+    # The token goes in through TUNNEL_TOKEN rather than on the command line.
+    Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command",
+      "`$host.UI.RawUI.WindowTitle = 'MM ERP tunnel - keep open'; `$env:TUNNEL_TOKEN = (Get-Content '$CfToken' -Raw).Trim(); & '$Cloudflared' tunnel --no-autoupdate run"
+  }
+} elseif (Get-Process ngrok -ErrorAction SilentlyContinue) {
   Write-Host "Tunnel already running."
 } else {
   Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command",
@@ -58,6 +71,10 @@ if (Get-Process ngrok -ErrorAction SilentlyContinue) {
 
 Write-Host ""
 Write-Host "MM ERP is running. The backend and tunnel windows are minimized in the taskbar." -ForegroundColor Green
-Write-Host "If the tunnel window says the endpoint 'is already online', another PC is still using the address - close its tunnel first."
+if ($UseCloudflare) {
+  Write-Host "Only ONE PC may run this tunnel - Cloudflare would split the visitors between two PCs (and two databases)." -ForegroundColor Yellow
+} else {
+  Write-Host "If the tunnel window says the endpoint 'is already online', another PC is still using the address - close its tunnel first."
+}
 Write-Host "Public backend address: $PublicUrl"
 Write-Host "Leave them running (minimized is fine) - closing them takes the site offline. Use stop-servers.bat to stop."

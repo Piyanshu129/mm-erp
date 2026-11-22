@@ -17,7 +17,7 @@ This is the "how it actually runs" reference. For the click-by-click production 
                                           └────────────────────────────────────┘
 ```
 
-**Deliberate choice, by explicit client request**: Postgres and the backend stay fully local on the workshop's own PC — nothing about the database moved to a cloud host. Only the Next.js frontend is deployed to Vercel; it reaches the local backend through a free ngrok tunnel on a **reserved static domain** (so the URL doesn't change when the tunnel restarts).
+**Deliberate choice, by explicit client request**: Postgres and the backend stay fully local on the workshop's own PC — nothing about the database moved to a cloud host. Only the Next.js frontend is deployed to Vercel; it reaches the local backend through a tunnel on a fixed address (so the URL doesn't change when the tunnel restarts): a free ngrok tunnel on a reserved static domain, being replaced by a free Cloudflare Tunnel on `api.motorsmitra.com` (see "The tunnel: Cloudflare instead of ngrok" below).
 
 **The tradeoff this implies**: the site is only reachable while this PC is on, Postgres is running, and the backend + tunnel processes are running. If the machine sleeps or shuts down, the site goes down for everyone, including anyone the link was shared with.
 
@@ -70,7 +70,23 @@ Three double-click files in the repo root do the whole move. Nothing needs to be
 
 **Starting fresh instead** (no data carried over): unzip the code from GitHub to `Desktop\MM` and run `setup.bat`. With no `backend/.env` it writes one with new random database and token secrets, asks for the admin email and password, creates the roles and that admin, and asks for the ngrok authtoken.
 
-Only one PC can hold the ngrok domain at a time: close the old PC's backend and tunnel windows before starting the new one.
+Only one PC can hold the ngrok domain at a time: close the old PC's backend and tunnel windows before starting the new one. With the Cloudflare Tunnel this matters even more: a second PC running the same tunnel isn't refused, Cloudflare splits the visitors between the two PCs (and their two databases).
+
+## The tunnel: Cloudflare instead of ngrok
+
+ngrok's free plan stops at 1 GB of data and 20,000 requests a month, which job card photos and videos use up. A **Cloudflare Tunnel** is free without that cap, on the workshop's own domain: `https://api.motorsmitra.com`. The scripts use it as soon as a tunnel token is saved in `tools/cloudflared/token.txt`, and ngrok until then:
+
+- `setup.bat` asks for the token (Enter skips it and keeps ngrok), takes it from `transfer/cloudflared-token.txt` when moving PCs, and downloads `cloudflared.exe` into `tools/cloudflared/`.
+- `start-servers.bat` runs `cloudflared tunnel --no-autoupdate run` with the token in `TUNNEL_TOKEN`, in the same minimized "MM ERP tunnel" window. `stop-servers.bat` stops it.
+- `prepare-transfer.bat` copies the token to `transfer/cloudflared-token.txt`.
+
+One-time switch:
+1. **Cloudflare account and DNS.** Add `motorsmitra.com` to a free Cloudflare account. Before changing anything at Hostinger, check that Cloudflare's imported DNS records match Hostinger's DNS zone *exactly*, because the website and the email depend on them: the `@` A records and the `www` CNAME (set these to **DNS only**, grey cloud, since Hostinger's own CDN is in front of the site), the MX records, the SPF TXT record, and every DKIM/DMARC record (`hostingermail-*._domainkey`, `_dmarc`). Then, in Hostinger, change the domain's nameservers to the two Cloudflare gives. Wait for Cloudflare to show the domain as **Active**.
+2. **Tunnel.** In Cloudflare **Zero Trust → Networks → Tunnels**, create a tunnel (type *Cloudflared*), named e.g. `mm-erp`. Copy the token from the Windows install command it shows (the long text starting `eyJ`). Don't run that command. Under **Public hostname**, add `api` . `motorsmitra.com`, service `HTTP` → `localhost:4000`.
+3. **Workshop PC.** Run `stop-servers.bat`, then `setup.bat` (paste the token when asked), then `start-servers.bat`. Check that https://api.motorsmitra.com/api/health shows `{"status":"ok"}`.
+4. **Vercel.** Set `NEXT_PUBLIC_API_URL` to `https://api.motorsmitra.com/api` and redeploy. The value is built into the frontend, so the change does nothing until it's redeployed.
+
+`CORS_ORIGIN` doesn't change: it lists the Vercel addresses, not the backend's. The `ngrok-skip-browser-warning` header the frontend sends is harmless against Cloudflare. Cloudflare's free plan accepts uploads up to 100 MB per request, above the app's own 50 MB video limit.
 
 ## Environment variables
 
@@ -93,7 +109,7 @@ All of this is validated with Zod at startup ([`config/env.ts`](../backend/src/c
 
 ### Frontend (`frontend/.env.local`)
 
-Just `NEXT_PUBLIC_API_URL` — defaults to `http://localhost:4000/api` if unset. Set to the ngrok tunnel URL + `/api` in the Vercel project's environment variables for production.
+Just `NEXT_PUBLIC_API_URL` — defaults to `http://localhost:4000/api` if unset. Set to the tunnel URL + `/api` in the Vercel project's environment variables for production: `https://api.motorsmitra.com/api` with the Cloudflare Tunnel, `https://les-unhesitative-blandishingly.ngrok-free.dev/api` with ngrok. Redeploy after changing it.
 
 ## Backup, restore, and the Excel mirror
 

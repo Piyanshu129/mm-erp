@@ -3,7 +3,8 @@
 # skips itself if it's already done.
 #
 # Everything is installed inside this folder (tools\), with no admin rights
-# needed: Node.js, PostgreSQL, and ngrok. Then it creates the database,
+# needed: Node.js, PostgreSQL, and the tunnel (Cloudflare Tunnel, or ngrok
+# until a Cloudflare token is given). Then it creates the database,
 # loads the data brought over by prepare-transfer.bat, and builds the backend.
 # Without that data (e.g. a copy of the code from GitHub) it starts a fresh,
 # empty system instead: it writes backend\.env with new passwords and asks
@@ -21,6 +22,7 @@ $Tools = Join-Path $Root "tools"
 $Backend = Join-Path $Root "backend"
 $PostgresPackage = "https://registry.npmjs.org/@embedded-postgres/windows-x64/-/windows-x64-18.4.0-beta.17.tgz"
 $NgrokZip = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
+$CloudflaredExe = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Download($url, $file) {
@@ -165,7 +167,33 @@ try {
   Pop-Location
 }
 
-# ---- 5. ngrok (the public address the live website talks to) --------------
+# ---- 5. The tunnel (the public address the live website talks to) ---------
+# A Cloudflare Tunnel on api.motorsmitra.com once its token is saved here;
+# until then ngrok, as before. The token comes from the Cloudflare dashboard
+# (Zero Trust > Networks > Tunnels); pasting the whole install command shown
+# there works too - the token is picked out of it.
+$CfDir = Join-Path $Tools "cloudflared"
+$CfToken = Join-Path $CfDir "token.txt"
+New-Item -ItemType Directory -Force $CfDir | Out-Null
+if (-not (Test-Path $CfToken)) {
+  $carried = Join-Path $Root "transfer\cloudflared-token.txt"
+  if (Test-Path $carried) {
+    Copy-Item $carried $CfToken -ErrorAction Stop
+  } else {
+    $pasted = (Read-Host "Paste the Cloudflare tunnel token (or press Enter to keep using ngrok)").Trim()
+    if ($pasted) {
+      if ($pasted -match '(eyJ[A-Za-z0-9+/=_-]+)') { $pasted = $Matches[1] }
+      [IO.File]::WriteAllText($CfToken, $pasted, (New-Object Text.UTF8Encoding $false))
+      Write-Host "    saved the tunnel token"
+    }
+  }
+}
+if (Test-Path $CfToken) {
+  if (-not (Test-Path "$CfDir\cloudflared.exe")) {
+    Step "Installing Cloudflare Tunnel"
+    Download $CloudflaredExe "$CfDir\cloudflared.exe"
+  }
+} else {
 $NgrokDir = Join-Path $Tools "ngrok"
 if (-not (Test-Path "$NgrokDir\ngrok.exe")) {
   Step "Installing ngrok"
@@ -181,6 +209,7 @@ if (-not (Test-Path $NgrokConfig)) {
     $token = Read-Host "Paste your ngrok authtoken (from dashboard.ngrok.com)"
     & "$NgrokDir\ngrok.exe" config add-authtoken $token --config $NgrokConfig; Check "ngrok setup"
   }
+}
 }
 
 Remove-Item $Temp -Recurse -Force -ErrorAction SilentlyContinue

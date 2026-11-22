@@ -4,7 +4,8 @@
 #   - backend\.env (database login, secrets, admin login)
 #   - backend\uploads (every uploaded photo: items, bills, RC, job cards, ...)
 #   - backend\backups\transfer-data.json (all business data, taken right now)
-#   - transfer\ngrok.yml (the tunnel login, so the public address stays the same)
+#   - transfer\ngrok.yml and transfer\cloudflared-token.txt (the tunnel logins,
+#     so the public address stays the same)
 # Copy that MM folder to the new PC, then run setup.bat there.
 #
 # Anything entered after this runs is NOT in the copy, so run it right
@@ -42,6 +43,13 @@ if (Test-Path $ngrokYml) {
   Copy-Item $ngrokYml "$Out\transfer\ngrok.yml"
 } else {
   Write-Host "No ngrok login found on this PC - setup.bat will ask for the ngrok authtoken." -ForegroundColor Yellow
+}
+# The Cloudflare Tunnel token (tools\ is skipped above), so the new PC
+# serves api.motorsmitra.com without asking for it again.
+$cfToken = Join-Path $Root "tools\cloudflared\token.txt"
+if (Test-Path $cfToken) {
+  New-Item -ItemType Directory -Force "$Out\transfer" | Out-Null
+  Copy-Item $cfToken "$Out\transfer\cloudflared-token.txt"
 }
 
 $size = "{0:N0} MB" -f ((Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)

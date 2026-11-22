@@ -2,7 +2,9 @@
 
 **Live URLs:**
 - App (share this one): https://mm-erp-nine.vercel.app
-- Backend tunnel: https://les-unhesitative-blandishingly.ngrok-free.dev
+- Backend tunnel: https://les-unhesitative-blandishingly.ngrok-free.dev — moving to a Cloudflare
+  Tunnel on https://api.motorsmitra.com, because ngrok's free plan runs out each month. The one-time
+  switch is in [docs/06-deployment-and-ops.md](docs/06-deployment-and-ops.md#the-tunnel-cloudflare-instead-of-ngrok).
 - Admin login: `admin@mm.com` / `admin123`
 
 Vercel also generates a git-branch URL (`mm-erp-git-master-...vercel.app`) and a unique URL per
