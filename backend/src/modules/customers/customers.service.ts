@@ -1,5 +1,5 @@
 import { prisma } from "../../lib/prisma";
-import { ConflictError, NotFoundError } from "../../lib/errors";
+import { ConflictError, NotFoundError, plural } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { accountsBy, accountDetail } from "../invoices/invoices.service";
 
@@ -85,4 +85,26 @@ export async function setCustomerActive(id: number, isActive: boolean) {
   const customer = await prisma.customer.findUnique({ where: { id } });
   if (!customer) throw new NotFoundError("Customer not found");
   return prisma.customer.update({ where: { id }, data: { isActive } });
+}
+
+// Admin-only. A customer can be deleted only while none of their vehicles has
+// a job card (then there are no estimates, bills or payments either). Their
+// vehicles and odometer readings are deleted with them.
+export async function deleteCustomer(id: number) {
+  const customer = await prisma.customer.findUnique({
+    where: { id },
+    include: { vehicles: { select: { id: true, _count: { select: { jobCards: true } } } } },
+  });
+  if (!customer) throw new NotFoundError("Customer not found");
+  const jobCards = customer.vehicles.reduce((t, v) => t + v._count.jobCards, 0);
+  if (jobCards > 0) {
+    throw new ConflictError(`${customer.name} has ${plural(jobCards, "job card")}, so this customer can't be deleted — their history has to stay`);
+  }
+  const vehicleIds = customer.vehicles.map((v) => v.id);
+  await prisma.$transaction([
+    prisma.odometerReading.deleteMany({ where: { vehicleId: { in: vehicleIds } } }),
+    prisma.vehicle.deleteMany({ where: { id: { in: vehicleIds } } }),
+    prisma.customer.delete({ where: { id } }),
+  ]);
+  return { vehiclesDeleted: vehicleIds.length };
 }

@@ -125,7 +125,7 @@ Three genuinely different things — don't conflate them:
 
 Since this npm-sourced Postgres binary distribution ships no `pg_dump`/`psql` client tools, backup/restore is implemented as a logical dump/restore straight through Prisma rather than shelling out — arguably more portable anyway, since it doesn't depend on client-tool binaries being present on whatever machine runs it.
 
-The Excel export ([`lib/excelExport.ts`](../backend/src/lib/excelExport.ts), scheduled by [`lib/excelExportScheduler.ts`](../backend/src/lib/excelExportScheduler.ts)) writes `backend/exports/mm-erp-data.xlsx` — one worksheet per business table — and is purely a read-only side artifact; it's never consulted by restore.
+The Excel export ([`lib/excelExport.ts`](../backend/src/lib/excelExport.ts), scheduled by [`lib/excelExportScheduler.ts`](../backend/src/lib/excelExportScheduler.ts)) writes `backend/exports/mm-erp-data.xlsx` — a Summary tab, a Dashboard tab with a monthly bar chart, then one worksheet per business table — and is purely a read-only side artifact; it's never consulted by restore.
 
 ## File storage
 

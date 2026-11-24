@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { paymentSnapshot, recordPaymentAudit } from "../../lib/paymentAudit";
 import { prisma } from "../../lib/prisma";
-import { ConflictError, NotFoundError } from "../../lib/errors";
+import { ConflictError, NotFoundError, plural } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 
 export interface SupplierInput {
@@ -246,4 +246,25 @@ export async function recordSupplierPaymentTx(
     },
     include: { createdBy: { select: { id: true, name: true } } },
   });
+}
+
+// Admin-only. A supplier can be deleted only with no purchases, no payments
+// and no payment-change history — otherwise balances and records would lose
+// who they belong to.
+export async function deleteSupplier(id: number) {
+  const supplier = await prisma.supplier.findUnique({
+    where: { id },
+    include: { _count: { select: { purchases: true, payments: true } } },
+  });
+  if (!supplier) throw new NotFoundError("Supplier not found");
+  const audits = await prisma.paymentAudit.count({ where: { paymentKind: "SUPPLIER", supplierId: id } });
+  const used = [
+    supplier._count.purchases && plural(supplier._count.purchases, "purchase"),
+    supplier._count.payments && plural(supplier._count.payments, "payment"),
+    audits && plural(audits, "payment change"),
+  ].filter(Boolean);
+  if (used.length) {
+    throw new ConflictError(`${supplier.name} has ${used.join(" and ")}, so this supplier can't be deleted — the records have to stay`);
+  }
+  await prisma.supplier.delete({ where: { id } });
 }

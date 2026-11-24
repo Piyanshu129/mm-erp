@@ -132,7 +132,9 @@ The tab also shows a tax summary by rate, a rounded total and the amount in word
 
 On an accidental claim there are **two GST invoices**. The GST tab shows both side by side, each with its number or *not generated yet*, and a **Generate both GST invoices** button. That button first saves the GST details shown for any line that doesn't have them yet (18%, and SAC 998714 for labour), then generates each invoice in turn:
 - **The customer's**, covering the customer's lines (`gstInvoiceNumber`, `customerGstin`).
-- **The insurance company's**, covering its lines (`insuranceGstInvoiceNumber`, `insuranceGstin`). It's billed to the insurer, with the claim number and the insured customer.
+- **The insurance company's**, covering its lines (`insuranceGstInvoiceNumber`, `insuranceGstin`). It's billed to the insurer, with its address (`insuranceAddress`), the claim number, its GSTIN, its state code (`insuranceStateCode`, or the GSTIN's first two digits when left blank) and the insured customer. The address and state code are optional fields on the insurance company's GST details (migration `20261124090000_insurance_bill_to`) and are fixed once its invoice is generated.
+
+**The printed GST invoice** shows *Invoice No.* before the number, the vehicle's registration, model and KM (the insurance company and claim number appear only under *Bill to*), the terms and conditions (Panipat jurisdiction, payment before delivery, no warranty on electrical parts and consumables unless specified, warranty as per company policy, E. & O.E.) and *Thank you for your business!* Printing sets the page margin to zero (`@page { margin: 0 }`, only while the GST tab is open), which leaves the browser no room for its own header and footer (date, page title, web address); the invoice keeps a 12 mm margin of its own.
 
 **Locks once an invoice is generated:**
 - A payer's GST invoice fixes that payer's HSN/GST % and GSTIN.
@@ -260,4 +262,4 @@ Deactivating a user (`PATCH /users/:id/status {isActive: false}`) also immediate
 Three completely different artifacts, covered fully in [06-deployment-and-ops.md](06-deployment-and-ops.md):
 - **JSON backup** (`GET /backup`, Admin-only) — a full logical dump of every business table via Prisma, on demand.
 - **CLI restore** (`backend/scripts/restore.ts`, not an HTTP route) — deliberately not a one-click web action; refuses to run against a database that already has any data in any of the backed-up tables, specifically so it can't be used to accidentally clobber a live system.
-- **Excel export** (`GET /backup/excel`) — a read-only, auto-regenerating (~60s) human-readable mirror, one tab per table. Never used for restore; purely a reference artifact that happens to also satisfy the original spec's "Excel/Google Sheets mirror" requirement.
+- **Excel export** (`GET /backup/excel`) — a read-only, auto-regenerating (~60s) human-readable mirror, one tab per table, after a **Summary** tab and a **Dashboard** tab (month by month, with a bar chart). Never used for restore; purely a reference artifact that happens to also satisfy the original spec's "Excel/Google Sheets mirror" requirement.

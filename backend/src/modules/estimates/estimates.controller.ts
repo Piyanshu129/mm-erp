@@ -87,6 +87,13 @@ export const gstDetailsSchema = z.object({
   pricesIncludeGst: z.boolean().optional(),
   customerGstin: gstin("Customer"),
   insuranceGstin: gstin("Insurance company"),
+  insuranceAddress: z.string().trim().max(300, "The address is at most 300 characters").nullable().optional(),
+  insuranceStateCode: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^[0-9]{2}$/.test(v), "State code is 2 digits, e.g. 06 for Haryana")
+    .nullable()
+    .optional(),
   lines: z
     .array(
       z.object({

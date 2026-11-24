@@ -6,7 +6,7 @@ import { Download, FileCheck2, Pencil, Printer, Trash2 } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/Button";
-import { Input, Select, Label } from "@/components/ui/Input";
+import { Input, Select, Label, Textarea } from "@/components/ui/Input";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SharePdfButton } from "@/components/SharePdfButton";
 import { downloadElementAsPdf, invoiceFileName } from "@/lib/invoicePdf";
@@ -43,6 +43,8 @@ export interface GstEstimate {
   pricesIncludeGst?: boolean;
   customerGstin?: string | null;
   insuranceGstin?: string | null;
+  insuranceAddress?: string | null;
+  insuranceStateCode?: string | null;
   lines: {
     id: number;
     lineType: "PART" | "LABOUR";
@@ -85,6 +87,15 @@ interface Business {
   stateCode: string;
 }
 
+// Printed on every GST invoice.
+const GST_INVOICE_TERMS = [
+  "All disputes shall be subject to Panipat jurisdiction only.",
+  "Payment must be cleared before vehicle delivery.",
+  "No warranty on electrical parts and consumables unless specified.",
+  "Warranty on parts and labour shall be as per applicable company policy.",
+  "E. & O.E. (Errors & Omissions Excepted).",
+];
+
 const money = (n: number) => `₹${n.toFixed(2)}`;
 const amt = (n: number) => n.toFixed(2);
 
@@ -126,6 +137,9 @@ export function GstInvoice({
   const [supplyType, setSupplyType] = useState<"INTRA" | "INTER">(estimate.supplyType ?? "INTRA");
   const [inclusive, setInclusive] = useState(!!estimate.pricesIncludeGst);
   const [gstin, setGstin] = useState(savedGstin);
+  // The insurance company's address and state code (its invoice only).
+  const [insAddress, setInsAddress] = useState(estimate.insuranceAddress ?? "");
+  const [insStateCode, setInsStateCode] = useState(estimate.insuranceStateCode ?? "");
   // Per line: HSN/SAC and GST %. Labour without a code gets the motor
   // vehicle repair SAC; a line without a rate gets 18%.
   const initialLines = () =>
@@ -151,6 +165,8 @@ export function GstInvoice({
     setSupplyType(estimate.supplyType ?? "INTRA");
     setInclusive(!!estimate.pricesIncludeGst);
     setGstin(savedGstin);
+    setInsAddress(estimate.insuranceAddress ?? "");
+    setInsStateCode(estimate.insuranceStateCode ?? "");
     setLines(initialLines());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimate, payer]);
@@ -195,6 +211,8 @@ export function GstInvoice({
     supplyType !== (estimate.supplyType ?? "INTRA") ||
     inclusive !== !!estimate.pricesIncludeGst ||
     gstin.trim().toUpperCase() !== savedGstin ||
+    (insurer && insAddress.trim() !== (estimate.insuranceAddress ?? "")) ||
+    (insurer && insStateCode.trim() !== (estimate.insuranceStateCode ?? "")) ||
     shownLines.some(
       (l) =>
         (lines[l.id]?.hsn.trim() || null) !== (l.hsnCode ?? null) ||
@@ -212,6 +230,7 @@ export function GstInvoice({
           supplyType,
           pricesIncludeGst: inclusive,
           [insurer ? "insuranceGstin" : "customerGstin"]: gstin.trim(),
+          ...(insurer ? { insuranceAddress: insAddress.trim(), insuranceStateCode: insStateCode.trim() } : {}),
           lines: shownLines.map((l) => ({
             id: l.id,
             hsnCode: lines[l.id]?.hsn.trim() || null,
@@ -414,6 +433,32 @@ export function GstInvoice({
                 className="uppercase"
               />
             </div>
+            {insurer && (
+              <>
+                <div className="sm:col-span-2">
+                  <Label>Insurance company address (optional)</Label>
+                  <Textarea
+                    value={insAddress}
+                    disabled={generated}
+                    rows={2}
+                    maxLength={300}
+                    onChange={(e) => setInsAddress(e.target.value)}
+                    placeholder="Branch / office address printed under Bill to"
+                  />
+                </div>
+                <div>
+                  <Label>State code (optional)</Label>
+                  <Input
+                    value={insStateCode}
+                    disabled={generated}
+                    inputMode="numeric"
+                    maxLength={2}
+                    onChange={(e) => setInsStateCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder={gstin.length >= 2 ? `${gstin.slice(0, 2)} (from GSTIN)` : "e.g. 06"}
+                  />
+                </div>
+              </>
+            )}
             <label className="flex items-center gap-2 self-end pb-2 text-sm text-gray-700">
               <input type="checkbox" checked={inclusive} disabled={sharedLocked} onChange={(e) => setInclusive(e.target.checked)} />
               Estimate prices already include GST
@@ -518,8 +563,11 @@ export function GstInvoice({
         </CardBody>
       </Card>
 
-      {/* The printable GST invoice */}
-      <div ref={printRef} className="rounded-md border border-gray-200 bg-white p-5 text-gray-900 print:border-0 print:p-0">
+      {/* The printable GST invoice. No page margin when printing, so the
+          browser doesn't print its own header/footer (date, page title,
+          web address); the invoice keeps its own margin instead. */}
+      <style>{"@media print { @page { margin: 0; } }"}</style>
+      <div ref={printRef} className="rounded-md border border-gray-200 bg-white p-5 text-gray-900 print:border-0 print:p-[12mm]">
         <div className="mb-3 flex items-start justify-between gap-4 border-b border-gray-300 pb-3">
           <div className="text-sm">
             <h1 className="text-xl font-bold">{business?.businessName || "Motors Mitra"}</h1>
@@ -537,7 +585,9 @@ export function GstInvoice({
           </div>
           <div className="text-right text-sm">
             <p className="text-base font-bold tracking-wide">TAX INVOICE</p>
-            <p className="font-mono font-semibold">{invoiceNumber ?? "PREVIEW — not generated"}</p>
+            <p className="font-semibold">
+              Invoice No.: <span className="font-mono">{invoiceNumber ?? "PREVIEW — not generated"}</span>
+            </p>
             <p className="text-gray-600">Date: {new Date(invoiceDate ?? estimate.estimateDate).toLocaleDateString()}</p>
             <p className="text-gray-600">Estimate: {estimate.estimateNumber}</p>
             <p className="text-gray-600">Job Card: {jobCard.jobCardNumber}</p>
@@ -550,8 +600,12 @@ export function GstInvoice({
             {insurer ? (
               <>
                 <p>{jobCard.insuranceCompany || "Insurance company"}</p>
+                {insAddress.trim() && <p className="whitespace-pre-line">{insAddress.trim()}</p>}
                 {jobCard.claimNumber && <p>Claim No.: {jobCard.claimNumber}</p>}
-                {estimate.insuranceGstin && <p className="font-semibold">GSTIN: {estimate.insuranceGstin}</p>}
+                {gstin.trim() && <p className="font-semibold">GSTIN: {gstin.trim()}</p>}
+                {(insStateCode.trim() || gstin.trim().length >= 2) && (
+                  <p>State code: {insStateCode.trim() || gstin.trim().slice(0, 2)}</p>
+                )}
                 <p className="text-gray-600">Insured: {customer.name}</p>
               </>
             ) : (
@@ -572,8 +626,6 @@ export function GstInvoice({
               {jobCard.vehicle.variant ? ` ${jobCard.vehicle.variant}` : ""}
             </p>
             <p>KM reading: {jobCard.kmAtService ?? "—"}</p>
-            {jobCard.insuranceCompany && <p>Insurance: {jobCard.insuranceCompany}</p>}
-            {jobCard.claimNumber && <p>Claim No.: {jobCard.claimNumber}</p>}
           </div>
         </div>
 
@@ -698,7 +750,16 @@ export function GstInvoice({
           </div>
         </div>
 
-        <div className="mt-12 grid grid-cols-2 gap-10 text-sm">
+        <div className="mt-4 text-xs text-gray-700">
+          <p className="mb-0.5 font-semibold text-gray-900">TERMS &amp; CONDITIONS</p>
+          <ol className="list-decimal space-y-0.5 pl-4">
+            {GST_INVOICE_TERMS.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="mt-10 grid grid-cols-2 gap-10 text-sm">
           <div>
             <div className="h-12 border-b border-gray-400" />
             <p className="mt-1 font-semibold">{insurer ? "Received by (insurance company)" : "Customer Signature"}</p>
@@ -709,6 +770,8 @@ export function GstInvoice({
             <p className="text-xs text-gray-500">Authorised signatory</p>
           </div>
         </div>
+
+        <p className="mt-6 text-center text-sm font-bold tracking-wide">THANK YOU FOR YOUR BUSINESS!</p>
       </div>
     </div>
   );

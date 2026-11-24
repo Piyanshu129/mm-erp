@@ -19,6 +19,8 @@ itemsRouter.get("/:id/stock-history", asyncHandler(itemsController.stockHistory)
 itemsRouter.post("/", uploadItemPhoto, asyncHandler(itemsController.create));
 // Editing an item's details is admin-only.
 itemsRouter.patch("/:id", authorize("ADMIN"), uploadItemPhoto, asyncHandler(itemsController.update));
+// Deleting is admin-only, and only for an item that was never used.
+itemsRouter.delete("/:id", authorize("ADMIN"), asyncHandler(itemsController.remove));
 itemsRouter.patch(
   "/:id/status",
   validateBody(itemsController.setActiveSchema),

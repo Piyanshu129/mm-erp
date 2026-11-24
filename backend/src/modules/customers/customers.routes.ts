@@ -27,6 +27,8 @@ customersRouter.patch(
   validateBody(customersController.updateCustomerSchema),
   asyncHandler(customersController.update)
 );
+// Deleting is admin-only, and only for a customer with no job cards.
+customersRouter.delete("/:id", authorize("ADMIN"), asyncHandler(customersController.remove));
 customersRouter.patch(
   "/:id/status",
   validateBody(customersController.setActiveSchema),

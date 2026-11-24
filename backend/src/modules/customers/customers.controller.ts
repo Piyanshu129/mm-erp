@@ -60,6 +60,11 @@ export async function setActive(req: Request, res: Response) {
   res.json({ customer });
 }
 
+export async function remove(req: Request, res: Response) {
+  const result = await customersService.deleteCustomer(Number(req.params.id));
+  res.json(result);
+}
+
 export async function account(req: Request, res: Response) {
   const result = await customersService.getCustomerAccount(Number(req.params.id));
   res.json(result);

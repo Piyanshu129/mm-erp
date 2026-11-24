@@ -8,6 +8,7 @@ import { Pencil, Plus, Search, Users } from "lucide-react";
 import { apiFetch, apiFetchAll, ApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { CustomerEditForm } from "@/components/CustomerEditForm";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -40,6 +41,7 @@ function CustomersPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const [editing, setEditing] = useState<CustomerRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -137,6 +139,15 @@ function CustomersPageContent() {
         </Button>
       </form>
 
+{deleteError && (
+        <p className="flex items-start justify-between gap-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>{deleteError}</span>
+          <button type="button" onClick={() => setDeleteError(null)} className="text-xs underline">
+            Close
+          </button>
+        </p>
+      )}
+
       {editing && (
         <div>
           <p className="text-sm font-semibold text-gray-900">Edit customer — {editing.name}</p>
@@ -219,6 +230,17 @@ function CustomersPageContent() {
                       >
                         <Pencil className="h-3 w-3" /> Edit
                       </button>
+                    )}
+                    {isAdmin && (
+                      <AdminDeleteButton
+                        url={`/customers/${c.id}`}
+                        confirmText={`Delete customer ${c.name} (${c.mobile})? Their vehicles are deleted too. This can't be undone.\n\nA customer with job cards can't be deleted.`}
+                        onError={setDeleteError}
+                        onDeleted={async () => {
+                          if (editing?.id === c.id) setEditing(null);
+                          await loadCustomers(q, true);
+                        }}
+                      />
                     )}
                   </div>
                 </Td>

@@ -53,6 +53,11 @@ export async function update(req: Request, res: Response) {
   res.json({ supplier });
 }
 
+export async function remove(req: Request, res: Response) {
+  await suppliersService.deleteSupplier(Number(req.params.id));
+  res.status(204).send();
+}
+
 export async function setActive(req: Request, res: Response) {
   const { isActive } = req.body as z.infer<typeof setActiveSchema>;
   const supplier = await suppliersService.setSupplierActive(Number(req.params.id), isActive);

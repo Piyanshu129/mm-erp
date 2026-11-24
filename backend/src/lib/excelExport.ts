@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "./prisma";
 import { stickerLabel } from "./itemCode";
+import { addDashboardChart, addSummarySheets } from "./excelSummary";
 
 export const EXCEL_EXPORT_PATH = path.join(__dirname, "..", "..", "exports", "mm-erp-data.xlsx");
 
@@ -617,6 +618,15 @@ export async function regenerateExcelExport(): Promise<void> {
   workbook.creator = "Motors Mitra ERP";
   workbook.created = new Date();
 
+  // "Summary" and "Dashboard" (with its bar chart) come first. If they can't
+  // be made, the data tabs are still written.
+  let months = 0;
+  try {
+    months = (await addSummarySheets(workbook)).months;
+  } catch (err) {
+    console.error("[excel-export] summary sheets skipped:", err);
+  }
+
   const sheets = await Promise.all([
     customersSheet(),
     vehiclesSheet(),
@@ -645,5 +655,11 @@ export async function regenerateExcelExport(): Promise<void> {
   }
 
   fs.mkdirSync(path.dirname(EXCEL_EXPORT_PATH), { recursive: true });
-  await workbook.xlsx.writeFile(EXCEL_EXPORT_PATH);
+  let buffer: Buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  try {
+    buffer = await addDashboardChart(buffer, workbook, months);
+  } catch (err) {
+    console.error("[excel-export] dashboard chart skipped:", err);
+  }
+  await fs.promises.writeFile(EXCEL_EXPORT_PATH, buffer);
 }

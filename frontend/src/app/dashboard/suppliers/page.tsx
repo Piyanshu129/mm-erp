@@ -10,6 +10,7 @@ import { compressImage } from "@/lib/compressImage";
 import { formatINR, todayISO } from "@/lib/format";
 import { AuthedImage } from "@/components/AuthedMedia";
 import { PaymentChangeLog } from "@/components/PaymentChangeLog";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { MobileInput } from "@/components/ui/MobileInput";
@@ -487,6 +488,9 @@ function PaymentHistoryCard({
 }
 
 function SuppliersPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -590,6 +594,15 @@ function SuppliersPageContent() {
         <PaymentHistoryCard key={panel.supplierId} supplierId={panel.supplierId} onClose={() => setPanel(null)} onChanged={load} />
       )}
 
+{deleteError && (
+        <p className="flex items-start justify-between gap-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>{deleteError}</span>
+          <button type="button" onClick={() => setDeleteError(null)} className="text-xs underline">
+            Close
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <TableSkeleton cols={7} />
       ) : suppliers.length === 0 ? (
@@ -641,6 +654,17 @@ function SuppliersPageContent() {
                       >
                         <History className="h-3 w-3" /> Payment history
                       </button>
+                      {isAdmin && (
+                        <AdminDeleteButton
+                          url={`/suppliers/${s.id}`}
+                          confirmText={`Delete supplier ${s.name}? This can't be undone.\n\nA supplier with purchases or payments can't be deleted.`}
+                          onError={setDeleteError}
+                          onDeleted={async () => {
+                            if (panel?.supplierId === s.id) setPanel(null);
+                            await load();
+                          }}
+                        />
+                      )}
                     </div>
                   </Td>
                 </Tr>

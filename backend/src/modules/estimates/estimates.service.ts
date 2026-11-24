@@ -535,6 +535,8 @@ export interface GstDetailsInput {
   pricesIncludeGst?: boolean;
   customerGstin?: string | null;
   insuranceGstin?: string | null;
+  insuranceAddress?: string | null;
+  insuranceStateCode?: string | null;
   // billRate: the rate billed on an accidental claim's closed job card (null
   // = the estimate rate).
   lines?: { id: number; hsnCode?: string | null; gstRate?: number | null; scope?: Payer; billRate?: number | null }[];
@@ -570,6 +572,12 @@ export async function updateGstDetails(estimateId: number, input: GstDetailsInpu
     if (locked.INSURANCE && input.insuranceGstin !== undefined && (input.insuranceGstin || null) !== estimate.insuranceGstin) {
       refuse("the insurance company's GSTIN", locked.INSURANCE);
     }
+    if (locked.INSURANCE && input.insuranceAddress !== undefined && (input.insuranceAddress || null) !== estimate.insuranceAddress) {
+      refuse("the insurance company's address", locked.INSURANCE);
+    }
+    if (locked.INSURANCE && input.insuranceStateCode !== undefined && (input.insuranceStateCode || null) !== estimate.insuranceStateCode) {
+      refuse("the insurance company's state code", locked.INSURANCE);
+    }
     await tx.estimate.update({
       where: { id: estimateId },
       data: {
@@ -577,6 +585,8 @@ export async function updateGstDetails(estimateId: number, input: GstDetailsInpu
         ...(input.pricesIncludeGst !== undefined ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
         ...(input.customerGstin !== undefined ? { customerGstin: input.customerGstin || null } : {}),
         ...(input.insuranceGstin !== undefined ? { insuranceGstin: input.insuranceGstin || null } : {}),
+        ...(input.insuranceAddress !== undefined ? { insuranceAddress: input.insuranceAddress || null } : {}),
+        ...(input.insuranceStateCode !== undefined ? { insuranceStateCode: input.insuranceStateCode || null } : {}),
       },
     });
 

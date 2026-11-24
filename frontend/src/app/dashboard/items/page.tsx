@@ -20,6 +20,7 @@ import { TableSkeleton } from "@/components/ui/Skeleton";
 import { UOM_OPTIONS } from "@/lib/uom";
 import { compressImage } from "@/lib/compressImage";
 import { fmtQty } from "@/lib/format";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 
 interface ItemRow {
   id: number;
@@ -44,6 +45,7 @@ function ItemsPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
@@ -238,6 +240,15 @@ function ItemsPageContent() {
         </p>
       )}
 
+{deleteError && (
+        <p className="flex items-start justify-between gap-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>{deleteError}</span>
+          <button type="button" onClick={() => setDeleteError(null)} className="text-xs underline">
+            Close
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <TableSkeleton cols={6} />
       ) : items.length === 0 ? (
@@ -292,12 +303,20 @@ function ItemsPageContent() {
                 </Td>
                 {isAdmin && (
                   <Td>
-                    <Link
-                      href={`/dashboard/items/${item.id}?edit=1`}
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-                    >
-                      <Pencil className="h-3 w-3" /> Edit
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <Link
+                        href={`/dashboard/items/${item.id}?edit=1`}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </Link>
+                      <AdminDeleteButton
+                        url={`/items/${item.id}`}
+                        confirmText={`Delete item ${item.itemCode} — ${item.name}? This can't be undone.\n\nAn item that was purchased, used on a job card or put on an estimate can't be deleted.`}
+                        onError={setDeleteError}
+                        onDeleted={() => load(q, category)}
+                      />
+                    </div>
                   </Td>
                 )}
               </Tr>

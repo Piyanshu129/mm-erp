@@ -75,6 +75,11 @@ export async function update(req: Request, res: Response) {
   res.json({ item });
 }
 
+export async function remove(req: Request, res: Response) {
+  await itemsService.deleteItem(Number(req.params.id));
+  res.status(204).send();
+}
+
 export async function setActive(req: Request, res: Response) {
   const { isActive } = req.body as z.infer<typeof setActiveSchema>;
   const item = await itemsService.setItemActive(Number(req.params.id), isActive);

@@ -1,5 +1,5 @@
 import { prisma } from "../../lib/prisma";
-import { NotFoundError, ConflictError } from "../../lib/errors";
+import { NotFoundError, ConflictError, plural } from "../../lib/errors";
 import { PageParams, toSkipTake } from "../../lib/pagination";
 import { formatItemCode, normalizeItemCode } from "../../lib/itemCode";
 
@@ -166,4 +166,23 @@ export async function getItemStockHistory(id: number) {
   ]);
 
   return { purchases, issues };
+}
+
+// Admin-only. An item can be deleted only if it was never purchased, used on
+// a job card or put on an estimate — stock, bills and reports refer to it.
+export async function deleteItem(id: number) {
+  const item = await prisma.item.findUnique({
+    where: { id },
+    include: { _count: { select: { purchases: true, jobCardParts: true, estimateLines: true } } },
+  });
+  if (!item) throw new NotFoundError("Item not found");
+  const used = [
+    item._count.purchases && plural(item._count.purchases, "purchase"),
+    item._count.jobCardParts && `use on ${plural(item._count.jobCardParts, "job card line")}`,
+    item._count.estimateLines && plural(item._count.estimateLines, "estimate line"),
+  ].filter(Boolean);
+  if (used.length) {
+    throw new ConflictError(`${item.name} (${item.itemCode}) has ${used.join(", ")}, so it can't be deleted — the records have to stay`);
+  }
+  await prisma.item.delete({ where: { id } });
 }

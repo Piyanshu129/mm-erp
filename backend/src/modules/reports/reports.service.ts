@@ -29,7 +29,7 @@ export function periodStart(period: DashboardPeriod, now = new Date()): Date {
   return new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
 }
 
-const localDay = (d: Date) => d.toLocaleDateString("en-CA");
+export const localDay = (d: Date) => d.toLocaleDateString("en-CA");
 // Purchase dates are calendar dates stored at midnight UTC.
 const purchaseDay = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -72,7 +72,21 @@ async function dashboardSeries(period: DashboardPeriod, now = new Date()) {
       buckets.push({ key: localDay(d), label: period === "month" ? String(d.getDate()) : d.toLocaleDateString("en-IN", { weekday: "short" }) });
     }
   }
-  const bucketOf = (day: string) => (period === "fy" ? day.slice(0, 7) : day);
+  return seriesFor(buckets, start, tomorrow, period === "fy" ? "month" : "day");
+}
+
+export type SeriesRow = { key: string; label: string; purchases: number; estimates: number; sales: number; profit: number };
+
+// Purchases, estimates, sales (bill totals) and profit = sales − purchases
+// per bucket: a day ("YYYY-MM-DD") or a month ("YYYY-MM") from start up to
+// (not including) end.
+async function seriesFor(
+  buckets: { key: string; label: string }[],
+  start: Date,
+  tomorrow: Date,
+  by: "day" | "month"
+): Promise<SeriesRow[]> {
+  const bucketOf = (day: string) => (by === "month" ? day.slice(0, 7) : day);
   const purchaseStart = new Date(`${localDay(start)}T00:00:00Z`);
   const purchaseEnd = new Date(`${localDay(tomorrow)}T00:00:00Z`);
 
@@ -109,6 +123,62 @@ async function dashboardSeries(period: DashboardPeriod, now = new Date()) {
     sales: r2(r.sales),
     profit: r2(r.sales - r.purchases),
   }));
+}
+
+// Every month from the first purchase, estimate or bill up to this month —
+// for the Excel export's Dashboard sheet.
+export async function monthlySeriesSinceStart(now = new Date()): Promise<SeriesRow[]> {
+  const [p, e, i] = await Promise.all([
+    prisma.purchase.aggregate({ _min: { purchaseDate: true } }),
+    prisma.estimate.aggregate({ _min: { estimateDate: true } }),
+    prisma.invoice.aggregate({ _min: { invoiceDate: true } }),
+  ]);
+  const firsts = [p._min.purchaseDate, e._min.estimateDate, i._min.invoiceDate].filter((d): d is Date => d != null);
+  const first = firsts.length ? new Date(Math.min(...firsts.map((d) => d.getTime()))) : now;
+  const start = new Date(first.getFullYear(), first.getMonth(), 1);
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const buckets: { key: string; label: string }[] = [];
+  for (let d = new Date(start); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+    buckets.push({
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: d.toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
+    });
+  }
+  return seriesFor(buckets, start, tomorrow, "month");
+}
+
+// Each day of the current month, for the Excel export's Summary sheet.
+export async function dailySeriesThisMonth(now = new Date()): Promise<SeriesRow[]> {
+  return dashboardSeries("month", now);
+}
+
+// The dashboard's figures for one period (today, this month or this
+// financial year), for the Excel export's Summary sheet.
+export async function periodFigures(period: DashboardPeriod, now = new Date()) {
+  const summary = await getDashboardSummary({ role: "ADMIN", permissions: [] }, period);
+  const start = periodStart(period, now);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const bills = await prisma.invoice.aggregate({
+    where: { invoiceDate: { gte: start, lt: end }, jobCard: { status: "INVOICED" } },
+    _sum: { totalAmount: true },
+  });
+  const sales = Math.round(Number(bills._sum.totalAmount ?? 0) * 100) / 100;
+  const purchases = summary.purchaseValue ?? 0;
+  return {
+    vehicles: summary.vehicles,
+    openJobCards: summary.openJobCards,
+    cancelled: summary.cancelled,
+    estimatesCount: summary.estimatesCount,
+    estimatesApproved: summary.estimatesApproved,
+    estimatesValue: summary.estimatesValue ?? 0,
+    purchases,
+    inventoryPurchases: summary.inventoryPurchaseValue ?? 0,
+    expenses: summary.expenseValue ?? 0,
+    sales,
+    profit: Math.round((sales - purchases) * 100) / 100,
+    lowStock: summary.lowStockCount,
+    outOfStock: summary.outOfStockCount,
+  };
 }
 
 // Backs the Dashboard's widget row for the chosen period (today, this month

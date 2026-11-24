@@ -85,7 +85,7 @@ Phase 1 (auth), Phase 2 (Customer/Vehicle/Item masters), Phase 3 (Purchase/Seria
 
 ## Deployment
 
-Shipped as a hybrid: PostgreSQL and the Node backend stay fully local on the workshop's own PC (not migrated to a cloud DB, by explicit client request), exposed to the internet via an ngrok free static-domain tunnel. Only the Next.js frontend is deployed to Vercel. An Excel export mirroring the database (one tab per table, described below) regenerates automatically about once a minute alongside the database — it's a parallel read-only copy, not a replacement for the database or the JSON backup.
+Shipped as a hybrid: PostgreSQL and the Node backend stay fully local on the workshop's own PC (not migrated to a cloud DB, by explicit client request), exposed to the internet via an ngrok free static-domain tunnel. Only the Next.js frontend is deployed to Vercel. An Excel export mirroring the database (a Summary tab, a Dashboard tab with a monthly bar chart, then one tab per table, described below) regenerates automatically about once a minute alongside the database — it's a parallel read-only copy, not a replacement for the database or the JSON backup.
 
 ## What's in the September 2026 rework
 

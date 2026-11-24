@@ -36,6 +36,9 @@ suppliersRouter.patch(
   asyncHandler(suppliersController.setActive)
 );
 
+// Deleting is admin-only, and only for a supplier with no purchases or payments.
+suppliersRouter.delete("/:id", authorize("ADMIN"), asyncHandler(suppliersController.remove));
+
 // Supplier payments live on the Suppliers page, so they follow that page's
 // permission.
 suppliersRouter.get("/:id/payments", requirePermission("SUPPLIERS"), asyncHandler(suppliersController.payments));

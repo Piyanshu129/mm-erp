@@ -1,3 +1,8 @@
+// "1 purchase", "3 purchases" — for messages.
+export function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
 export class AppError extends Error {
   statusCode: number;
 

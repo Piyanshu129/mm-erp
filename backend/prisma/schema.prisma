@@ -416,6 +416,9 @@ model Estimate {
   pricesIncludeGst          Boolean   @default(false) @map("prices_include_gst")
   customerGstin             String?   @map("customer_gstin")
   insuranceGstin            String?   @map("insurance_gstin")
+  // Printed under "Bill to" on the insurance company's GST invoice.
+  insuranceAddress          String?   @map("insurance_address")
+  insuranceStateCode        String?   @map("insurance_state_code")
   createdById      Int       @map("created_by_id")
   createdBy        User      @relation(fields: [createdById], references: [id])
   createdAt        DateTime  @default(now()) @map("created_at")
